@@ -1,0 +1,717 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<script>document.documentElement.classList.add('js');</script>
+<title>tomb-fido2 — Brainstorming Keepsake</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root{
+    --void:#0a0906;
+    --panel:#15120d;
+    --panel-2:#1d1811;
+    --panel-3:#241d14;
+    --seam:#332a1c;
+    --steel:#454a52;
+    --steel-light:#7d8590;
+    --brass:#c9a227;
+    --brass-light:#f0cf6b;
+    --brass-dark:#7a5f16;
+    --ink:#ece4d0;
+    --ink-dim:#a89f8a;
+    --red-wax:#9c2f3a;
+    --green-term:#6fd88f;
+    --teal:#4fb3a9;
+    --font-display: Georgia, 'Iowan Old Style', 'Palatino Linotype', Palatino, serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+    --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  }
+
+  *{box-sizing:border-box;}
+  html{background:var(--void);}
+  body{
+    margin:0;
+    color:var(--ink);
+    font-family:var(--font-sans);
+    background:
+      radial-gradient(ellipse 900px 500px at 50% -10%, rgba(201,162,39,0.07), transparent 60%),
+      repeating-linear-gradient(115deg, rgba(255,255,255,0.012) 0 2px, transparent 2px 5px),
+      linear-gradient(180deg, var(--void), #0d0b08 40%, var(--void));
+    min-height:100vh;
+    line-height:1.55;
+    overflow-x:hidden;
+  }
+
+  a{color:var(--brass-light);}
+
+  ::selection{ background:var(--brass-dark); color:var(--ink); }
+
+  .icon{ width:1em; height:1em; display:inline-block; vertical-align:-0.15em; }
+
+  /* ---------- sticky nameplate nav ---------- */
+  .nameplate-nav{
+    position:sticky; top:0; z-index:50;
+    display:flex; align-items:center; gap:1.25rem;
+    padding:.6rem 1.25rem;
+    background: linear-gradient(180deg, #241e14, #17130d 90%);
+    border-bottom:1px solid var(--seam);
+    box-shadow:0 6px 18px rgba(0,0,0,.45);
+    overflow-x:auto;
+    white-space:nowrap;
+    font-family:var(--font-mono);
+    font-size:.72rem;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+  }
+  .nameplate-nav .brand{ color:var(--brass-light); font-weight:600; flex:none; }
+  .nameplate-nav a{ color:var(--ink-dim); text-decoration:none; flex:none; padding:.15rem .1rem; border-bottom:1px solid transparent; }
+  .nameplate-nav a:hover{ color:var(--brass-light); border-color:var(--brass-dark); }
+
+  .page{ max-width:1080px; margin:0 auto; padding:0 1.5rem 6rem; }
+
+  /* ---------- header ---------- */
+  header.vault-header{
+    position:relative;
+    text-align:center;
+    padding:5rem 1rem 3rem;
+  }
+  .dial-wrap{
+    width:132px; height:132px; margin:0 auto 1.75rem;
+    position:relative;
+  }
+  .dial-wrap svg{ animation: spin 90s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  .vault-title{
+    font-family:var(--font-display);
+    font-weight:700;
+    font-size:clamp(2.3rem, 7vw, 4.6rem);
+    letter-spacing:.05em;
+    margin:0;
+    background:linear-gradient(180deg, var(--brass-light), var(--brass) 55%, var(--brass-dark));
+    -webkit-background-clip:text; background-clip:text; color:transparent;
+    text-shadow:0 2px 0 rgba(0,0,0,.4);
+  }
+  .vault-subtitle{
+    font-family:var(--font-mono);
+    color:var(--ink-dim);
+    letter-spacing:.28em;
+    text-transform:uppercase;
+    font-size:.72rem;
+    margin-top:.9rem;
+  }
+  .vault-tagline{
+    max-width:44ch; margin:1.6rem auto 0;
+    color:var(--ink-dim);
+    font-style:italic;
+    font-family:var(--font-display);
+    font-size:1.05rem;
+  }
+
+  .dossier-card{
+    margin:2.5rem auto 0;
+    max-width:640px;
+    background:var(--panel-2);
+    border:1px solid var(--seam);
+    border-left:3px solid var(--brass-dark);
+    padding:1rem 1.4rem;
+    text-align:left;
+    font-family:var(--font-mono);
+    font-size:.78rem;
+    color:var(--ink-dim);
+    display:grid; grid-template-columns:auto 1fr; gap:.35rem 1rem;
+    box-shadow:0 10px 30px rgba(0,0,0,.35);
+  }
+  .dossier-card dt{ color:var(--brass); text-transform:uppercase; letter-spacing:.08em; }
+  .dossier-card dd{ margin:0; }
+  .status-complete{ color:var(--green-term); }
+
+  /* ---------- shared technique scaffolding ---------- */
+  .technique{ margin:6rem 0; position:relative; }
+  .technique-head{ text-align:center; margin-bottom:2.6rem; }
+  .technique-kicker{
+    font-family:var(--font-mono); font-size:.72rem; letter-spacing:.3em;
+    text-transform:uppercase; color:var(--brass-dark);
+  }
+  .technique-title{
+    font-family:var(--font-display); font-size:clamp(1.5rem,4vw,2.3rem);
+    color:var(--ink); margin:.3rem 0 0;
+  }
+  .technique-rule{
+    width:70px; height:2px; margin:1.1rem auto 0;
+    background:linear-gradient(90deg, transparent, var(--brass), transparent);
+  }
+
+  .js .reveal{ opacity:0; transform:translateY(22px); transition:opacity .8s ease, transform .8s ease; }
+  .reveal.in-view{ opacity:1; transform:none; }
+
+  /* entry cards + tags, reused across sections */
+  .entries{ display:grid; gap:1rem; }
+  .entry{
+    background:var(--panel);
+    border:1px solid var(--seam);
+    border-radius:4px;
+    padding:1rem 1.2rem;
+    position:relative;
+  }
+  .tag{
+    display:inline-block; font-family:var(--font-mono); font-size:.62rem;
+    letter-spacing:.14em; text-transform:uppercase; padding:.15rem .5rem;
+    border-radius:2px; margin-bottom:.5rem;
+  }
+  .tag.idea{ background:rgba(79,179,169,.15); color:var(--teal); border:1px solid rgba(79,179,169,.4); }
+  .tag.insight{ background:rgba(201,162,39,.15); color:var(--brass-light); border:1px solid rgba(201,162,39,.4); }
+  .tag.decision{ background:rgba(156,47,58,.18); color:#e79aa2; border:1px solid rgba(156,47,58,.5); }
+  .entry p{ margin:0; color:var(--ink); font-size:.95rem; }
+  .entry .accent{ color:var(--brass-light); }
+
+  /* ---------- 1. one feature only : deposit wall ---------- */
+  .deposit-wall{
+    display:grid; grid-template-columns:repeat(6,1fr); gap:.6rem;
+    max-width:520px; margin:0 auto 3rem;
+  }
+  .deposit-box{
+    aspect-ratio:1; border-radius:3px;
+    background:linear-gradient(160deg,#2b2519,#181410);
+    border:1px solid var(--seam);
+    display:flex; align-items:center; justify-content:center;
+    color:var(--steel-light); opacity:.4; filter:grayscale(.6);
+  }
+  .deposit-box.kept{
+    grid-column:span 2; grid-row:span 2;
+    opacity:1; filter:none;
+    background:radial-gradient(circle at 35% 30%, #3a2f14, #171208);
+    border:2px solid var(--brass);
+    box-shadow:0 0 0 3px rgba(201,162,39,.15), 0 0 30px rgba(201,162,39,.25);
+    color:var(--brass-light);
+  }
+  .deposit-box.kept .icon{ width:2.1rem; height:2.1rem; }
+  .deposit-caption{
+    text-align:center; font-family:var(--font-mono); font-size:.72rem;
+    color:var(--ink-dim); letter-spacing:.05em; margin-bottom:2.5rem;
+  }
+  .deposit-caption .accent{ color:var(--brass-light); }
+
+  /* ---------- 2. job to be done ---------- */
+  .clipping{
+    max-width:560px; margin:0 auto 2rem;
+    background:#efe6d2; color:#231d13;
+    padding:1.4rem 1.6rem 1.6rem;
+    transform:rotate(-1deg);
+    box-shadow:0 14px 34px rgba(0,0,0,.45);
+    font-family:Georgia, serif;
+    position:relative;
+  }
+  .clipping::before{
+    content:''; position:absolute; inset:0;
+    background:repeating-linear-gradient(0deg, rgba(0,0,0,.03) 0 1px, transparent 1px 3px);
+    pointer-events:none;
+  }
+  .clipping .eyebrow{ font-family:var(--font-mono); font-size:.65rem; letter-spacing:.2em; text-transform:uppercase; color:#6b5a2f; }
+  .clipping h3{ margin:.2rem 0 .5rem; font-size:1.5rem; line-height:1.2; }
+  .clipping p{ margin:0; font-size:.92rem; color:#3a3226; }
+
+  .contract{
+    max-width:560px; margin:0 auto 2rem;
+    border:1px dashed var(--brass-dark);
+    padding:1.2rem 1.4rem;
+    font-family:var(--font-mono); font-size:.85rem; color:var(--ink);
+    background:var(--panel-2);
+  }
+  .contract .label{ color:var(--brass); letter-spacing:.1em; text-transform:uppercase; font-size:.65rem; display:block; margin-bottom:.4rem; }
+
+  .break-glass{
+    max-width:560px; margin:2.5rem auto 0;
+    border:3px solid var(--red-wax);
+    background:repeating-linear-gradient(45deg, rgba(156,47,58,.08) 0 10px, rgba(156,47,58,.03) 10px 20px), var(--panel);
+    padding:1.3rem 1.4rem; position:relative;
+  }
+  .break-glass .label{
+    position:absolute; top:-.65rem; left:1rem; background:var(--void);
+    padding:0 .5rem; color:var(--red-wax); font-family:var(--font-mono);
+    font-size:.68rem; letter-spacing:.16em; text-transform:uppercase;
+  }
+  .break-glass p{ margin:.3rem 0 0; }
+
+  /* ---------- 3. assumption reversal ---------- */
+  .dossier-grid{ display:grid; gap:1rem; grid-template-columns:repeat(3,1fr); margin-bottom:1.6rem; }
+  .assume-card{
+    background:var(--panel); border:1px solid var(--seam); padding:1rem 1rem 1.3rem;
+    position:relative; border-radius:3px;
+  }
+  .assume-card .stamp{
+    position:absolute; right:.6rem; bottom:.5rem;
+    font-family:var(--font-mono); font-weight:700; font-size:.62rem;
+    letter-spacing:.1em; padding:.15rem .4rem; border:2px solid var(--green-term);
+    color:var(--green-term); transform:rotate(-8deg); border-radius:2px;
+    opacity:.85;
+  }
+  .assume-card p{ margin:0; font-size:.88rem; }
+  .rejected-card{
+    max-width:640px; margin:1.6rem auto 0;
+    background:var(--panel); border:1px solid var(--seam); padding:1.1rem 1.3rem;
+    position:relative;
+  }
+  .rejected-card .stamp{
+    position:absolute; right:1rem; top:1rem;
+    font-family:var(--font-mono); font-weight:700; font-size:.7rem;
+    letter-spacing:.12em; padding:.2rem .5rem; border:2px solid var(--red-wax);
+    color:var(--red-wax); transform:rotate(6deg); border-radius:2px;
+  }
+  .terminal{
+    max-width:640px; margin:1.4rem auto; background:#0c0f0c; border:1px solid #1c2b1c;
+    border-radius:5px; padding:1rem 1.2rem; font-family:var(--font-mono);
+    font-size:.82rem; color:var(--green-term); box-shadow:inset 0 0 20px rgba(0,0,0,.5);
+  }
+  .terminal .prompt{ color:var(--steel-light); }
+  .terminal .comment{ color:var(--ink-dim); }
+
+  /* ---------- 4. emerging tech collision : radar ---------- */
+  .radar-wrap{ display:flex; justify-content:center; margin-bottom:2rem; }
+  .radar{
+    width:230px; height:230px; border-radius:50%; position:relative;
+    border:2px solid var(--brass-dark);
+    background:
+      repeating-radial-gradient(circle, rgba(201,162,39,.09) 0 1px, transparent 1px 38px),
+      radial-gradient(circle, #14170f, #0a0c08 75%);
+    overflow:hidden;
+  }
+  .radar::before{
+    content:''; position:absolute; inset:0; border-radius:50%;
+    background:conic-gradient(from 0deg, rgba(111,216,143,.4), transparent 25%);
+    animation:sweep 4.5s linear infinite;
+  }
+  @keyframes sweep{ to{ transform:rotate(360deg); } }
+  .radar .crosshair{ position:absolute; inset:0; }
+  .radar .crosshair::before, .radar .crosshair::after{
+    content:''; position:absolute; background:rgba(201,162,39,.25);
+  }
+  .radar .crosshair::before{ left:0; right:0; top:50%; height:1px; }
+  .radar .crosshair::after{ top:0; bottom:0; left:50%; width:1px; }
+  .radar .blip{
+    position:absolute; left:50%; top:18%; transform:translate(-50%,-50%);
+    text-align:center; z-index:2;
+  }
+  .radar .blip .dot{
+    width:10px; height:10px; margin:0 auto; border-radius:50%;
+    background:var(--red-wax); box-shadow:0 0 10px var(--red-wax);
+    position:relative;
+  }
+  .radar .blip .dot::before, .radar .blip .dot::after{
+    content:''; position:absolute; background:var(--red-wax); top:50%; left:50%;
+    width:16px; height:2px; transform-origin:center;
+  }
+  .radar .blip .dot::before{ transform:translate(-50%,-50%) rotate(45deg); }
+  .radar .blip .dot::after{ transform:translate(-50%,-50%) rotate(-45deg); }
+  .radar .blip .blip-label{
+    font-family:var(--font-mono); font-size:.58rem; letter-spacing:.06em;
+    color:#e79aa2; margin-top:.35rem; white-space:nowrap;
+  }
+
+  /* ---------- 5. MoSCoW drawers ---------- */
+  .drawers{
+    display:grid; grid-template-columns:repeat(3,1fr); gap:1.3rem;
+    align-items:start;
+  }
+  .drawer{
+    border-radius:6px; padding:1.2rem 1.1rem 1.4rem;
+    background:linear-gradient(160deg, var(--panel-2), var(--panel));
+    border:1px solid var(--seam);
+    position:relative; overflow:hidden;
+  }
+  .drawer::before{ content:''; position:absolute; top:0; left:0; right:0; height:4px; }
+  .drawer.must::before{ background:var(--brass); }
+  .drawer.should::before{ background:var(--teal); }
+  .drawer.wont::before{ background:var(--red-wax); }
+  .drawer h4{
+    font-family:var(--font-mono); letter-spacing:.14em; text-transform:uppercase;
+    font-size:.78rem; margin:.4rem 0 .2rem;
+  }
+  .drawer.must h4{ color:var(--brass-light); }
+  .drawer.should h4{ color:var(--teal); }
+  .drawer.wont h4{ color:#e79aa2; }
+  .drawer .handle{
+    width:46px; height:8px; border-radius:4px; margin-bottom:.6rem;
+    background:linear-gradient(180deg,var(--brass-light),var(--brass-dark));
+    box-shadow:0 2px 4px rgba(0,0,0,.5);
+  }
+  .drawer.should .handle{ background:linear-gradient(180deg,#9be0d8,var(--teal)); }
+  .drawer.wont .handle{ background:repeating-linear-gradient(45deg,#e79aa2 0 6px,var(--red-wax) 6px 12px); }
+  .drawer ul{ margin:.6rem 0 0; padding-left:1.1rem; font-size:.86rem; color:var(--ink); }
+  .drawer li{ margin-bottom:.55rem; }
+  .drawer li.late-add{ color:var(--brass-light); }
+  .drawer li.late-add::after{
+    content:' — added later'; font-family:var(--font-mono); font-size:.62rem;
+    color:var(--ink-dim); text-transform:uppercase; letter-spacing:.05em;
+  }
+  .drawer li.corrected::after{
+    content:' — clarified'; font-family:var(--font-mono); font-size:.62rem;
+    color:var(--ink-dim); text-transform:uppercase; letter-spacing:.05em;
+  }
+  .wont .sealed-tape{
+    margin-top:.9rem; height:18px;
+    background:repeating-linear-gradient(45deg,#3a1418 0 8px,#241014 8px 16px);
+    border-radius:2px; opacity:.8;
+  }
+
+  /* ---------- synthesis climax ---------- */
+  .synthesis-section{
+    margin-top:7rem; padding:5rem 1rem 4rem; position:relative; text-align:center;
+    border-radius:10px;
+    background:
+      radial-gradient(circle at 50% 30%, rgba(201,162,39,.14), transparent 60%),
+      linear-gradient(180deg, #100d09, var(--void));
+    overflow:hidden;
+  }
+  .synthesis-section::before{
+    content:''; position:absolute; inset:0;
+    background:repeating-conic-gradient(from 0deg, rgba(201,162,39,.05) 0deg 2deg, transparent 2deg 12deg);
+    opacity:.5; mix-blend-mode:screen;
+  }
+  .bolt-ring{ width:236px; height:236px; margin:0 auto 2.4rem; position:relative; }
+  .vault-door{
+    width:100%; height:100%; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, #3d3423, #14110a 72%);
+    border:7px solid var(--brass-dark);
+    box-shadow:inset 0 0 40px rgba(0,0,0,.8), 0 0 70px rgba(201,162,39,.18);
+    position:relative; z-index:1;
+  }
+  .vault-door .handle{
+    position:absolute; inset:26%;
+    border:5px solid var(--brass);
+    border-radius:50%;
+    box-shadow:inset 0 0 14px rgba(0,0,0,.6);
+  }
+  .vault-door .handle::before, .vault-door .handle::after{
+    content:''; position:absolute; background:var(--brass); top:50%; left:50%;
+  }
+  .vault-door .handle::before{ width:88%; height:6px; transform:translate(-50%,-50%); border-radius:3px; }
+  .vault-door .handle::after{ width:6px; height:88%; transform:translate(-50%,-50%); border-radius:3px; }
+  .bolt{
+    position:absolute; top:50%; left:50%; width:10px; height:10px; margin:-5px;
+    border-radius:50%; background:radial-gradient(circle at 35% 30%, var(--brass-light), var(--brass-dark));
+    box-shadow:0 1px 2px rgba(0,0,0,.6);
+    z-index:2;
+  }
+  .synthesis-kicker{
+    font-family:var(--font-mono); font-size:.72rem; letter-spacing:.32em;
+    text-transform:uppercase; color:var(--brass-dark); position:relative; z-index:1;
+  }
+  .synthesis-quote{
+    position:relative; z-index:1;
+    max-width:760px; margin:1.3rem auto 0;
+    font-family:var(--font-display); font-size:clamp(1.15rem,2.6vw,1.55rem);
+    line-height:1.6; color:var(--ink);
+  }
+  .synthesis-quote .not-tomb{ color:#e79aa2; font-style:italic; }
+  .synthesis-quote .highlight{ color:var(--brass-light); font-weight:600; }
+  .synthesis-final{
+    position:relative; z-index:1;
+    margin:2rem auto 0; max-width:640px;
+    font-family:var(--font-mono); font-size:.82rem; color:var(--ink-dim);
+    border-top:1px solid var(--seam); padding-top:1.3rem;
+  }
+  .synthesis-final b{ color:var(--brass-light); font-weight:600; }
+
+  footer{
+    text-align:center; margin-top:4rem; padding-top:2rem;
+    border-top:1px solid var(--seam); color:var(--ink-dim);
+    font-family:var(--font-mono); font-size:.7rem; letter-spacing:.08em;
+  }
+
+  @media (max-width:760px){
+    .drawers{ grid-template-columns:1fr; }
+    .dossier-grid{ grid-template-columns:1fr; }
+    .dossier-card{ grid-template-columns:1fr; }
+    .deposit-wall{ grid-template-columns:repeat(4,1fr); }
+    .clipping{ transform:none; }
+  }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="icon-lock" viewBox="0 0 24 24">
+    <path d="M6 10.5V8a6 6 0 0 1 12 0v2.5" fill="none" stroke="currentColor" stroke-width="2"/>
+    <rect x="4" y="10.5" width="16" height="10.5" rx="2" fill="currentColor"/>
+    <circle cx="12" cy="15.5" r="1.6" fill="#14110a"/>
+  </symbol>
+  <symbol id="icon-key" viewBox="0 0 24 24">
+    <circle cx="7.5" cy="7.5" r="4" fill="none" stroke="currentColor" stroke-width="2"/>
+    <path d="M10.3 10.3 L20 20 M15.5 15.5 L18 13 M17.6 17.6 L20 15.2" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>
+  </symbol>
+  <symbol id="icon-shield" viewBox="0 0 24 24">
+    <path d="M12 3l7 3v5c0 5-3.2 8.4-7 10-3.8-1.6-7-5-7-10V6l7-3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+  </symbol>
+</svg>
+
+<nav class="nameplate-nav" aria-label="Section index">
+  <span class="brand">tomb-fido2 ·</span>
+  <a href="#tech-1">One Feature</a>
+  <a href="#tech-2">Job to Be Done</a>
+  <a href="#tech-3">Assumption Reversal</a>
+  <a href="#tech-4">Tech Collision</a>
+  <a href="#moscow">Scope</a>
+  <a href="#synthesis">Synthesis</a>
+</nav>
+
+<div class="page">
+
+  <header class="vault-header">
+    <div class="dial-wrap">
+      <svg viewBox="0 0 100 100" width="132" height="132">
+        <circle cx="50" cy="50" r="46" fill="none" stroke="#3a3f47" stroke-width="2"/>
+        <circle cx="50" cy="50" r="38" fill="none" stroke="#7a5f16" stroke-width="1"/>
+        <g stroke="#c9a227" stroke-width="2">
+          <line x1="50" y1="6" x2="50" y2="16"/>
+          <line x1="50" y1="94" x2="50" y2="84"/>
+          <line x1="6" y1="50" x2="16" y2="50"/>
+          <line x1="94" y1="50" x2="84" y2="50"/>
+          <line x1="18.7" y1="18.7" x2="25.5" y2="25.5"/>
+          <line x1="81.3" y1="81.3" x2="74.5" y2="74.5"/>
+          <line x1="81.3" y1="18.7" x2="74.5" y2="25.5"/>
+          <line x1="18.7" y1="81.3" x2="25.5" y2="74.5"/>
+        </g>
+        <circle cx="50" cy="50" r="6" fill="#c9a227"/>
+        <rect x="48.5" y="18" width="3" height="22" fill="#f0cf6b"/>
+      </svg>
+    </div>
+    <h1 class="vault-title">TOMB&middot;FIDO2</h1>
+    <p class="vault-subtitle">A Brainstorming Session · Keepsake</p>
+    <p class="vault-tagline">A focused, compiled reimagining of dyne/tomb — unlocking LUKS volumes with FIDO2 security keys, and nothing else.</p>
+
+    <dl class="dossier-card">
+      <dt>Topic</dt>
+      <dd>tomb-fido2: a focused, compiled (Go/Rust) reimagining of dyne/tomb using LUKS + FIDO2 hmac-secret exclusively for volume unlock, instead of GPG/symmetric keyfiles</dd>
+      <dt>Goal</dt>
+      <dd>Personal side project — scratch an itch: modernize tomb's key-management story for the FIDO2 era, narrower in scope, no fallback auth paths, a real compiled binary, not a shell script</dd>
+      <dt>Mode</dt>
+      <dd>Facilitator</dd>
+      <dt>Status</dt>
+      <dd class="status-complete">Complete — updated 2026-07-21T23:13</dd>
+    </dl>
+  </header>
+
+  <!-- ===================== TECHNIQUE I — ONE FEATURE ONLY ===================== -->
+  <section class="technique" id="tech-1">
+    <div class="technique-head reveal">
+      <div class="technique-kicker">Technique I</div>
+      <h2 class="technique-title">One Feature Only</h2>
+      <div class="technique-rule"></div>
+    </div>
+
+    <div class="deposit-wall reveal" aria-hidden="true">
+      <div class="deposit-box kept"><svg class="icon"><use href="#icon-key"/></svg></div>
+      <div class="deposit-box"><svg class="icon" width="14" height="14"><use href="#icon-lock"/></svg></div>
+      <div class="deposit-box"><svg class="icon" width="14" height="14"><use href="#icon-lock"/></svg></div>
+      <div class="deposit-box"><svg class="icon" width="14" height="14"><use href="#icon-lock"/></svg></div>
+      <div class="deposit-box"><svg class="icon" width="14" height="14"><use href="#icon-lock"/></svg></div>
+      <div class="deposit-box"><svg class="icon" width="14" height="14"><use href="#icon-lock"/></svg></div>
+      <div class="deposit-box"><svg class="icon" width="14" height="14"><use href="#icon-lock"/></svg></div>
+      <div class="deposit-box"><svg class="icon" width="14" height="14"><use href="#icon-lock"/></svg></div>
+      <div class="deposit-box"><svg class="icon" width="14" height="14"><use href="#icon-lock"/></svg></div>
+      <div class="deposit-box"><svg class="icon" width="14" height="14"><use href="#icon-lock"/></svg></div>
+    </div>
+    <p class="deposit-caption reveal">every other box in the vault wall stays shut — <span class="accent">one box, one key, one job:</span> unlock LUKS volumes with a FIDO2 security key</p>
+
+    <div class="entries reveal">
+      <div class="entry"><span class="tag idea">Idea</span><p>The one feature kept: unlock LUKS-encrypted volumes using FIDO2 security keys.</p></div>
+      <div class="entry"><span class="tag insight">Insight</span><p>The design goal isn't a wow-effect unlock experience — it's dead-simple, boring reliability: <span class="accent">&ldquo;I can trust it with my life.&rdquo;</span></p></div>
+      <div class="entry"><span class="tag idea">Idea</span><p>Core use case: cold storage for rarely-accessed, highly sensitive material (master GPG key, password manager backup) — like a bank safe, opened once a year in a crisis, that must unlock without hesitation.</p></div>
+      <div class="entry"><span class="tag decision">Decision</span><p>Scope boundary: key/volume backup strategy (3-2-1, spare FIDO2 keys) is the user's responsibility, not the tool's concern — the tool stays unaware of it.</p></div>
+      <div class="entry"><span class="tag decision">Decision</span><p>Multi-key enrollment is in scope: supporting multiple FIDO2 keys as alternate unlock methods on the same volume via LUKS2's native multi-keyslot support (up to 32 slots) — still counts as "the one feature."</p></div>
+      <div class="entry"><span class="tag insight">Insight</span><p>Tool philosophy: a thin, user-friendly abstraction layer over LUKS2 + FIDO2 hmac-secret — not reinventing crypto, just enough sugar to make native LUKS2 features (multi-keyslot enroll/revoke) simple to use.</p></div>
+      <div class="entry"><span class="tag idea">Idea</span><p>Core friction the tool solves: replacing a multi-tool memorization burden — cryptsetup + fido2-token + systemd-cryptenroll, each with their own flags — with one tool, simple commands, simple args. No hunting through notes or searching the web during a crisis.</p></div>
+    </div>
+  </section>
+
+  <!-- ===================== TECHNIQUE II — JOB TO BE DONE ===================== -->
+  <section class="technique" id="tech-2">
+    <div class="technique-head reveal">
+      <div class="technique-kicker">Technique II</div>
+      <h2 class="technique-title">Job to Be Done</h2>
+      <div class="technique-rule"></div>
+    </div>
+
+    <div class="contract reveal">
+      <span class="label">Job posting</span>
+      The job being hired: <em>store sensitive information securely, without relying on any third party or external service/tool.</em>
+    </div>
+
+    <div class="clipping reveal">
+      <span class="eyebrow">Cautionary reference &middot; May 2014</span>
+      <h3>TrueCrypt shuts down, without warning</h3>
+      <p>For critical use cases, the lesson is to rely on the simplest, lowest-level, most standard, well-tested tools — LUKS/dm-crypt — rather than proprietary or single-vendor-maintained solutions. A tool can vanish overnight; the primitives underneath it shouldn't.</p>
+    </div>
+
+    <div class="break-glass reveal">
+      <span class="label">In case of emergency</span>
+      <p><strong>Break-glass requirement:</strong> the README must document how to manually unlock the volume using only standard <code>cryptsetup</code> + <code>fido2-token</code> commands — with zero dependency on the tomb-fido2 binary itself surviving.</p>
+    </div>
+  </section>
+
+  <!-- ===================== TECHNIQUE III — ASSUMPTION REVERSAL ===================== -->
+  <section class="technique" id="tech-3">
+    <div class="technique-head reveal">
+      <div class="technique-kicker">Technique III</div>
+      <h2 class="technique-title">Assumption Reversal</h2>
+      <div class="technique-rule"></div>
+    </div>
+
+    <div class="dossier-grid reveal">
+      <div class="assume-card">
+        <p>FIDO2 key must be physically plugged in at the exact moment of unlock.</p>
+        <span class="stamp">Confirmed</span>
+      </div>
+      <div class="assume-card">
+        <p>User must already be somewhat familiar with FIDO2.</p>
+        <span class="stamp">Confirmed</span>
+      </div>
+      <div class="assume-card">
+        <p>System must ship a modern enough LUKS version with native FIDO2/hmac-secret support.</p>
+        <span class="stamp">Confirmed</span>
+      </div>
+    </div>
+
+    <div class="terminal reveal">
+      <div><span class="comment">$ tomb-fido2 unlock vault.img</span></div>
+      <div>&gt; Please touch your security key button&hellip;</div>
+      <div class="comment">// clear-language UX: no FIDO2 jargon assumed, ever</div>
+    </div>
+
+    <div class="terminal reveal">
+      <div><span class="comment">$ tomb-fido2 unlock vault.img</span></div>
+      <div>&gt; Checking dependencies&hellip; LUKS2 FIDO2 token support: <span style="color:#e79aa2">missing</span></div>
+      <div>&gt; Exiting. See README §Requirements for the package to install.</div>
+      <div class="comment">// pre-flight dependency check, clean exit, detailed error</div>
+    </div>
+
+    <div class="rejected-card reveal">
+      <span class="stamp">Rejected</span>
+      <p><strong>Rejected reversal:</strong> physical key presence at unlock time is not up for challenge. The tool should support exactly whatever unlocking methods cryptsetup's token/FIDO2 mode natively offers — no more, no less.</p>
+    </div>
+  </section>
+
+  <!-- ===================== TECHNIQUE IV — EMERGING TECH COLLISION ===================== -->
+  <section class="technique" id="tech-4">
+    <div class="technique-head reveal">
+      <div class="technique-kicker">Technique IV</div>
+      <h2 class="technique-title">Emerging Tech Collision</h2>
+      <div class="technique-rule"></div>
+    </div>
+
+    <div class="radar-wrap reveal">
+      <div class="radar">
+        <div class="crosshair"></div>
+        <div class="blip">
+          <div class="dot"></div>
+          <div class="blip-label">Post-quantum crypto</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="entries reveal" style="max-width:640px;margin:0 auto;">
+      <div class="entry"><span class="tag decision">Decision</span><p>Post-quantum threat explicitly deprioritized: if classical asymmetric crypto breaks, the world has bigger problems than encrypted volumes. Being able to still open volumes and extract data via standard tools is future-proof enough.</p></div>
+    </div>
+  </section>
+
+  <!-- ===================== MOSCOW CONVERGENCE ===================== -->
+  <section class="technique" id="moscow">
+    <div class="technique-head reveal">
+      <div class="technique-kicker">Convergence</div>
+      <h2 class="technique-title">MoSCoW Scope — Final State</h2>
+      <div class="technique-rule"></div>
+    </div>
+    <p class="deposit-caption reveal" style="margin-bottom:2rem;">two rounds of scoping decisions, merged into one drawer set — the corrected backup wording and the later-added block-device requirement both reflected below</p>
+
+    <div class="drawers reveal">
+      <div class="drawer must">
+        <div class="handle"></div>
+        <h4>Must</h4>
+        <ul>
+          <li>Unlock LUKS volumes with a FIDO2 key</li>
+          <li>Multi-key enrollment (add keyslot)</li>
+          <li>Key revocation (remove single keyslot)</li>
+          <li>One unified CLI replacing cryptsetup + fido2-token + systemd-cryptenroll</li>
+          <li>Plain-language terminal guidance, assuming zero FIDO2 knowledge</li>
+          <li>Pre-flight dependency check with clear error exit</li>
+          <li class="late-add">Support LUKS2 on raw physical block devices/partitions, in addition to file-backed loop devices</li>
+        </ul>
+      </div>
+      <div class="drawer should">
+        <div class="handle"></div>
+        <h4>Should</h4>
+        <ul>
+          <li>README-documented break-glass manual recovery procedure</li>
+          <li class="corrected">README recommends a 3-2-1 backup strategy as a disclaimer only — the tool itself remains entirely unaware of backups; no code or feature touches this</li>
+        </ul>
+      </div>
+      <div class="drawer wont">
+        <div class="handle"></div>
+        <h4>Won't this time</h4>
+        <ul>
+          <li>Remote/delegated unlock beyond cryptsetup's native token mode</li>
+          <li>Post-quantum-readiness features</li>
+        </ul>
+        <div class="sealed-tape" title="sealed for this round"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== SYNTHESIS — CLIMAX ===================== -->
+  <section class="synthesis-section reveal" id="synthesis">
+    <div class="bolt-ring" data-radius="112">
+      <div class="vault-door">
+        <div class="handle"></div>
+      </div>
+    </div>
+    <div class="synthesis-kicker">The Vault Opens</div>
+    <p class="synthesis-quote">
+      This is <span class="not-tomb">not</span> &ldquo;Tomb but modernized.&rdquo; It's proof that Tomb's real innovation — a
+      <span class="highlight">thin wrapper over standard, boring primitives that survives the tool's own death</span> —
+      was primitive-agnostic all along, now re-applied to FIDO2 instead of GPG and keyfiles.
+    </p>
+    <div class="synthesis-final">
+      <b>Chosen direction:</b> a FIDO2-only LUKS2 unlock tool, in Go or Rust, scoped exactly per the Must / Should / Won't list above —
+      with crisis-reliability and zero-FIDO2-knowledge UX as the driving design constraints.
+    </div>
+  </section>
+
+  <footer>
+    tomb-fido2 brainstorming session &middot; facilitator mode &middot; status: complete &middot; last updated 2026-07-21T23:13
+  </footer>
+
+</div>
+
+<script>
+(function(){
+  document.querySelectorAll('.bolt-ring').forEach(function(ring){
+    var n = 14;
+    var r = parseInt(ring.getAttribute('data-radius'), 10) || 112;
+    for(var i=0;i<n;i++){
+      var angle = i * (360/n);
+      var b = document.createElement('span');
+      b.className = 'bolt';
+      b.style.transform = 'rotate(' + angle + 'deg) translate(' + r + 'px) rotate(-' + angle + 'deg)';
+      ring.appendChild(b);
+    }
+  });
+
+  if('IntersectionObserver' in window){
+    var obs = new IntersectionObserver(function(entries){
+      entries.forEach(function(entry){
+        if(entry.isIntersecting){
+          entry.target.classList.add('in-view');
+          obs.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.12 });
+    document.querySelectorAll('.reveal').forEach(function(el){ obs.observe(el); });
+  } else {
+    document.querySelectorAll('.reveal').forEach(function(el){ el.classList.add('in-view'); });
+  }
+})();
+</script>
+
+</body>
+</html>
