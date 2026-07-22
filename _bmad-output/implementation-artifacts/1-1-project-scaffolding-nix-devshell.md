@@ -4,7 +4,7 @@ baseline_commit: 2e295e57c98351b90ed268a2221612907ba9be3c
 
 # Story 1.1: Project Scaffolding & Nix DevShell
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -25,11 +25,11 @@ so that I can build and test the tool without installing cryptsetup/systemd/libf
 - [x] Task 1: Verify the existing Nix devShell satisfies AC #1 and AC #2 (AC: #1, #2)
   - [x] `flake.nix` and `flake.lock` already exist at repo root — do not recreate them, only amend if a gap is found
   - [x] Confirm `devShells.default` packages include `rustc`, `cargo`, `cryptsetup`, `systemd`, `libfido2` (already present) — [Source: flake.nix]
-  - [x] Confirm `flake.lock`'s `nixpkgs` input is a locked `nixos-unstable` revision (already present, locked 2025-11 timestamp) — this is what makes the environment reproducible across machines (AC #2)
+  - [x] Confirm `flake.lock`'s `nixpkgs` input is a locked `nixos-unstable` revision (already present, locked to rev `241313f`, 2026-07-19 timestamp — corrected during review, was previously mis-stated as "2025-11") — this is what makes the environment reproducible across machines (AC #2)
   - [x] After Task 2/3 create `Cargo.toml`/`src/`, run `nix develop -c cargo build` and confirm it succeeds with zero system-wide installs
 - [x] Task 2: Create `Cargo.toml` for a binary crate named after the placeholder product (AC: #1, #3)
   - [x] `name = "tomb-fido2"`, `edition = "2021"` — this name is the **single source** the CLI binary/user-facing name must read from later (AD-13); never hardcode `"tomb-fido2"` as a separate string literal elsewhere in `src/`
-  - [x] Declare dependencies pinned to the exact versions the architecture already resolved — they may be unused by the stub bodies in this story, that is expected and not a build error: `clap = "4.6.4"`, `serde = "1.0.229"` (with `derive` feature), `serde_json = "1.0.229"`, `thiserror = "2.0.19"`, `anyhow = "1.0.104"`, `zeroize = "1.9.0"` [Source: ARCHITECTURE-SPINE.md#Stack]
+  - [x] Declare dependencies pinned to the exact versions the architecture already resolved — they may be unused by the stub bodies in this story, that is expected and not a build error: `clap = "4.6.4"`, `serde = "1.0.229"` (with `derive` feature), `serde_json = "1.0.151"` (corrected during review — `1.0.229` does not exist on crates.io; see deviation note below), `thiserror = "2.0.19"`, `anyhow = "1.0.104"`, `zeroize = "1.9.0"` [Source: ARCHITECTURE-SPINE.md#Stack]
   - [x] Do not add a `[[bin]]` section — a crate-root `src/main.rs` makes the binary name default to the package name, which is what AD-13 requires
 - [x] Task 3: Create the structural seed with stub bodies only, no logic (AC: #3)
   - [x] `src/main.rs` — thin entry point only: wires `mod` declarations and delegates to `cli` (Cargo requires this file at crate root even though the architecture's own module map lists the CLI entry as `src/cli/main.rs`; keep this file to a couple of lines, all real CLI wiring belongs in `src/cli/main.rs`)
@@ -68,6 +68,21 @@ so that I can build and test the tool without installing cryptsetup/systemd/libf
 - [Source: _bmad-output/specs/spec-tomb-fido2/SPEC.md#Constraints] (placeholder-name constraint, Rust-or-Go → Rust per architecture)
 - [Source: flake.nix], [Source: flake.lock] (already-existing devShell definition)
 
+### Review Findings
+
+- [x] [Review][Patch] Add `rust-toolchain.toml` pinning `channel = "1.90.0"` so non-Nix builds fail/drift loudly instead of silently matching by coincidence — decided: yes, add it [rust-toolchain.toml (new file)]
+- [x] [Review][Patch] Task 1 checklist claims `flake.lock`'s nixpkgs revision is locked to a "2025-11 timestamp" but it actually decodes to 2026-07-19 [_bmad-output/implementation-artifacts/1-1-project-scaffolding-nix-devshell.md:28]
+- [x] [Review][Patch] Task 2 checklist bullet still shows `serde_json = "1.0.229"` as checked off even though `Cargo.toml` correctly uses `1.0.151` per the disclosed deviation [_bmad-output/implementation-artifacts/1-1-project-scaffolding-nix-devshell.md:32]
+- [x] [Review][Patch] `src/adapters/exec/mod.rs` and `src/cli/ux.rs` fail `cargo fmt --check` [src/adapters/exec/mod.rs:1, src/cli/ux.rs:1]
+- [x] [Review][Patch] `make test`/`make test-hardware` gate only via `#[ignore]`, not scoped to test binary — fragile against AD-7's hard hardware/unit separation goal [Makefile:6-10]
+- [x] [Review][Patch] `Cargo.toml` has no explicit `version` field (implicit `0.0.0`) [Cargo.toml:1-3]
+- [x] [Review][Patch] `Cargo.toml` has no `publish = false` guard despite being a GitHub-Releases-only CLI tool [Cargo.toml:1-3]
+- [x] [Review][Patch] Story's own File List omits `Cargo.lock`, a new tracked file in this diff [_bmad-output/implementation-artifacts/1-1-project-scaffolding-nix-devshell.md:89]
+- [x] [Review][Defer] `ARCHITECTURE-SPINE.md`'s Stack table has a stale combined `serde`+`serde_json` version figure (`1.0.229`) that caused this story's deviation and will mislead future stories reading the table [ARCHITECTURE-SPINE.md#Stack] — deferred, pre-existing
+- [x] [Review][Defer] Dev Agent Record's claim that `nix develop -c cargo build` (not a bare system `cargo build`) was used for Task 1 verification isn't independently verifiable from repo state, since a matching system toolchain is present [1-1-project-scaffolding-nix-devshell.md:82] — deferred, pre-existing
+- [x] [Review][Defer] `Makefile` targets don't pass `--locked` to cargo, so a `Cargo.lock`/`Cargo.toml` drift would silently re-resolve rather than fail fast [Makefile:3-10] — deferred, pre-existing
+- [x] [Review][Defer] No `LICENSE` file despite README referencing GitHub Releases distribution [repo root] — deferred, pre-existing
+
 ## Dev Agent Record
 
 ### Agent Model Used
@@ -87,8 +102,10 @@ Claude Sonnet 5 (claude-sonnet-5)
 ### File List
 
 - Cargo.toml
+- Cargo.lock
 - Makefile
 - .gitignore
+- rust-toolchain.toml
 - src/main.rs
 - src/domain/mod.rs
 - src/domain/errors.rs
