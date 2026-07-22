@@ -4,7 +4,7 @@ baseline_commit: d7db5f8144a2af0851fa942a8417029c3a58d17d
 
 # Story 1.2: CI Runs the Mocked Unit Test Suite
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -48,8 +48,8 @@ so that I get fast feedback without needing physical FIDO2 hardware.
 - [x] Task 2: Verify AC #1's failure path locally before pushing (AC: #1)
   - [x] Confirm `nix develop -c make test` currently exits 0 (both `tests/unit/main.rs`'s placeholder passes and the workflow would go green)
   - [x] Temporarily break a test (e.g. `assert!(false)` in `tests/unit/main.rs`) and confirm `make test` exits non-zero; a non-zero exit from the `run:` step is what fails a GitHub Actions job — revert the temporary breakage before committing
-- [ ] Task 3: Confirm scope fence against AC #2 (AC: #2)
-  - [ ] Grep the finished workflow file for `test-hardware`/`--ignored` and confirm zero matches
+- [x] Task 3: Confirm scope fence against AC #2 (AC: #2)
+  - [x] Grep the finished workflow file for `test-hardware`/`--ignored` and confirm zero matches
 
 ## Dev Notes
 
@@ -88,12 +88,19 @@ so that I get fast feedback without needing physical FIDO2 hardware.
 
 ### Agent Model Used
 
+Claude Sonnet 5 (claude-sonnet-5)
+
 ### Debug Log References
 
 ### Completion Notes List
 
 - Task 2: Verified `nix develop -c make test` exits 0 with the current placeholder test; temporarily set `assert!(false)` in `tests/unit/main.rs` and confirmed `make` reports `Error 101` (non-zero exit), then reverted — no net diff in `tests/unit/main.rs`.
+- Task 3: `grep -n -E "test-hardware|--ignored" .github/workflows/ci.yml` returns zero matches (exit 1).
 
 ### File List
 
 - `.github/workflows/ci.yml` (new)
+
+## Change Log
+
+- 2026-07-22: Implemented Story 1.2 — added `.github/workflows/ci.yml` running `nix develop -c make test` on push/PR; verified the failure path locally; confirmed no `test-hardware`/`--ignored` references in the workflow.
