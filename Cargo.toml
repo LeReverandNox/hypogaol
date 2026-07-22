@@ -3,6 +3,12 @@ name = "tomb-fido2"
 version = "0.0.0"
 edition = "2021"
 publish = false
+repository = "https://github.com/LeReverandNox/tomb-fido2"
+
+# publish = false hides this crate from cargo-dist by default (it only considers
+# publishable packages); this override tells it to build/dist this binary anyway.
+[package.metadata.dist]
+dist = true
 
 [dependencies]
 clap = "4.6.4"
@@ -11,3 +17,9 @@ serde_json = "1.0.151"
 thiserror = "2.0.19"
 anyhow = "1.0.104"
 zeroize = "1.9.0"
+
+[workspace.metadata.dist]
+cargo-dist-version = "0.32.0"
+ci = ["github"]
+create-release = false
+targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
