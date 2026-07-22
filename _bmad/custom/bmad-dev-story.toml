@@ -1,0 +1,13 @@
+[workflow]
+persistent_facts = [
+  "file:{project-root}/_bmad/custom/github-automation-reference.md",
+  "In Step 4 (Mark story in-progress), right after the sprint-status transition to in-progress (or confirming it's already in-progress): find this story's Issue (`gh issue list -R LeReverandNox/tomb-fido2 --search \"Story <story_id> in:title\" --state open`), move it to 'In Progress' via the automation reference mutation (option id 47fc9ee4), and checkout the branch `story/<story_id>-<slug>` created by bmad-create-story (create it from main if missing).",
+  "During Step 8 (Validate and mark task complete), each time a task/subtask is marked [x] and the story file is saved, commit the code changes for that task on the story branch with a Conventional Commit message scoped to the story id (e.g. `feat(<story_id>): <what this task did>`) — atomically per task, never batched into one commit at the end.",
+]
+
+on_complete = """
+1. Push the story branch: `git push -u origin story/<story_id>-<slug>`.
+2. Check for an existing PR: `gh pr list -R LeReverandNox/tomb-fido2 --head story/<story_id>-<slug> --state all --json number`. Reuse it if found — never open a duplicate.
+3. If none exists, look up this story's Issue number and open one: `gh pr create -R LeReverandNox/tomb-fido2 --title "<Conventional Commit style title>" --body "Closes #<issue_number>\\n\\n<summary of what was implemented>" --base main --head story/<story_id>-<slug>`.
+4. Report the PR URL to the user.
+"""

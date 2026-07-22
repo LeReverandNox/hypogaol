@@ -1,0 +1,12 @@
+[workflow]
+persistent_facts = [
+  "file:{project-root}/_bmad/custom/github-automation-reference.md",
+  "In Step 1 (Gather Context), as soon as {{story_key}} is identified, move that story's Issue to 'In Review' via the automation reference mutation (option id 07ee5c6d) — before presenting the diff summary checkpoint.",
+  "In step-04-present.md section 5, whenever patch findings are applied to files, commit those fixes atomically afterward on the current story branch with detailed Conventional Commit messages (e.g. `fix(<story_id>): <finding description>`), rather than leaving them uncommitted.",
+]
+
+on_complete = """
+1. Find the open PR for branch `story/<story_id>-<slug>`: `gh pr list -R LeReverandNox/tomb-fido2 --head story/<story_id>-<slug> --state open --json number`.
+2. Post a comment on that PR summarizing the review: `gh pr comment <number> -R LeReverandNox/tomb-fido2 --body "<decision-needed/patch/defer/dismissed counts, what was fixed vs deferred, resulting story status>"`.
+3. Do NOT move the Issue to Done and do NOT merge or approve the PR — that stays a manual, human-only step.
+"""
