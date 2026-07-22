@@ -21,11 +21,11 @@ so that I get fast feedback without needing physical FIDO2 hardware.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Author `.github/workflows/ci.yml` (AC: #1, #2)
-  - [ ] Trigger on `push` and `pull_request` (no branch filter needed — AR-Dev2 says "every push/PR")
-  - [ ] `actions/checkout@v4` first, then install Nix with `cachix/install-nix-action@v31` (flakes aren't enabled by default on this action's installed Nix — pass `extra_nix_config: | \n experimental-features = nix-command flakes`)
-  - [ ] Run the test step as `nix develop -c make test` — do not call `cargo test` directly in CI; the devShell is what provides the pinned toolchain (Story 1.1, AC #1/#2)
-  - [ ] Do not reference `make test-hardware`, `--test hardware`, or `--ignored` anywhere in the workflow file (AC #2)
+- [x] Task 1: Author `.github/workflows/ci.yml` (AC: #1, #2)
+  - [x] Trigger on `push` and `pull_request` (no branch filter needed — AR-Dev2 says "every push/PR")
+  - [x] `actions/checkout@v4` first, then install Nix with `cachix/install-nix-action@v31` (flakes aren't enabled by default on this action's installed Nix — pass `extra_nix_config: | \n experimental-features = nix-command flakes`)
+  - [x] Run the test step as `nix develop -c make test` — do not call `cargo test` directly in CI; the devShell is what provides the pinned toolchain (Story 1.1, AC #1/#2)
+  - [x] Do not reference `make test-hardware`, `--test hardware`, or `--ignored` anywhere in the workflow file (AC #2)
   - [ ] Suggested full file:
     ```yaml
     name: CI
@@ -93,3 +93,5 @@ so that I get fast feedback without needing physical FIDO2 hardware.
 ### Completion Notes List
 
 ### File List
+
+- `.github/workflows/ci.yml` (new)
