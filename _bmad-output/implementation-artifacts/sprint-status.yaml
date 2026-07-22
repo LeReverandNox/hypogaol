@@ -1,0 +1,71 @@
+# generated: 2026-07-22
+# last_updated: 2026-07-22
+# project: tomb-fido2
+# project_key: NOKEY
+# tracking_system: file-system
+# story_location: {project-root}/_bmad-output/implementation-artifacts
+
+# STATUS DEFINITIONS:
+# ==================
+# Epic Status:
+#   - backlog: Epic not yet started
+#   - in-progress: Epic actively being worked on
+#   - done: All stories in epic completed
+#
+# Epic Status Transitions:
+#   - backlog → in-progress: Automatically when first story is created (via create-story)
+#   - in-progress → done: Manually when all stories reach 'done' status
+#
+# Story Status:
+#   - backlog: Story only exists in epic file
+#   - ready-for-dev: Story file created in stories folder
+#   - in-progress: Developer actively working on implementation
+#   - review: Ready for code review (via Dev's code-review workflow)
+#   - done: Story completed
+#
+# Retrospective Status:
+#   - optional: Can be completed but not required
+#   - done: Retrospective has been completed
+#
+# Action Item Status:
+#   - open: Committed during a retrospective, not yet addressed
+#   - in-progress: Actively being worked on
+#   - done: Completed
+#
+# WORKFLOW NOTES:
+# ===============
+# - Epic transitions to 'in-progress' automatically when first story is created
+# - Stories can be worked in parallel if team capacity allows
+# - Developer typically creates next story after previous one is 'done' to incorporate learnings
+# - Dev moves story to 'review', then runs code-review (fresh context, different LLM recommended)
+# - Retrospective appends its action items to action_items; sprint-status surfaces open ones
+
+generated: 2026-07-22
+last_updated: 2026-07-22
+project: tomb-fido2
+project_key: NOKEY
+tracking_system: file-system
+story_location: "{project-root}/_bmad-output/implementation-artifacts"
+
+development_status:
+  epic-1: backlog
+  1-1-project-scaffolding-nix-devshell: backlog
+  1-2-ci-runs-the-mocked-unit-test-suite: backlog
+  1-3-release-automation: backlog
+  1-4-dependency-preflight-check: backlog
+  1-5-create-a-file-backed-tomb: backlog
+  1-6-create-a-device-backed-tomb: backlog
+  1-7-unlock-and-mount-a-tomb: backlog
+  1-8-unified-cli-dispatch-plain-language-errors: backlog
+  epic-1-retrospective: optional
+
+  epic-2: backlog
+  2-1-enroll-an-additional-fido2-key: backlog
+  2-2-revoke-a-fido2-key-guarded-against-last-keyslot-lockout: backlog
+  epic-2-retrospective: optional
+
+  epic-3: backlog
+  3-1-close-an-unlocked-tomb: backlog
+  3-2-grow-an-existing-tombs-capacity: backlog
+  3-3-unlock-a-tomb-read-only: backlog
+  epic-3-retrospective: optional
