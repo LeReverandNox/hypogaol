@@ -51,7 +51,7 @@ development_status:
   epic-1: in-progress
   1-1-project-scaffolding-nix-devshell: done
   1-2-ci-runs-the-mocked-unit-test-suite: done
-  1-3-release-automation: backlog
+  1-3-release-automation: ready-for-dev
   1-4-dependency-preflight-check: backlog
   1-5-create-a-file-backed-tomb: backlog
   1-6-create-a-device-backed-tomb: backlog
