@@ -30,10 +30,10 @@ so that I get a clear, actionable error before anything is touched, never a mid-
   - [x] Call `check_prerequisites()` on all three — do not short-circuit on the first failure; collect every missing dependency from all three so the user sees the full list in one pass, not one-at-a-time across repeated runs
   - [x] Aggregate any failures into one new `DomainError` variant, e.g. `DomainError::PreflightFailed(Vec<String>)`, added to the currently-empty `enum DomainError` in `src/domain/errors.rs` — the Display/message must name every missing dependency so the CLI can surface a single detailed, actionable error (AC #2)
   - [x] Return `Ok(())` only if all three ports report no missing prerequisites
-- [ ] Task 3: Wire `preflight::check` as the first statement in every current workflow stub (AC: #1, #3)
-  - [ ] Update `src/domain/workflows/{create,unlock,close,resize}.rs` — each currently has a zero-argument stub `pub fn run() -> Result<(), DomainError> { todo!() }`; change the signature to accept the three port trait objects (matching Task 2's `check` signature) and make the first line of the body `preflight::check(luks, fido2, fs)?;`, followed by the existing `todo!()` for the rest of the workflow's not-yet-implemented logic
-  - [ ] Do **not** touch `src/domain/workflows/{enroll,revoke}.rs` — those are Epic 2 stories (2.1, 2.2) and will wire their own `preflight::check` call when implemented; AC #3 only scopes create/unlock/close/resize
-  - [ ] Confirm all four updated functions call `preflight::check` identically (same argument order, same immediate-first-line placement) — no workflow gets a lighter or differently-shaped gate than another
+- [x] Task 3: Wire `preflight::check` as the first statement in every current workflow stub (AC: #1, #3)
+  - [x] Update `src/domain/workflows/{create,unlock,close,resize}.rs` — each currently has a zero-argument stub `pub fn run() -> Result<(), DomainError> { todo!() }`; change the signature to accept the three port trait objects (matching Task 2's `check` signature) and make the first line of the body `preflight::check(luks, fido2, fs)?;`, followed by the existing `todo!()` for the rest of the workflow's not-yet-implemented logic
+  - [x] Do **not** touch `src/domain/workflows/{enroll,revoke}.rs` — those are Epic 2 stories (2.1, 2.2) and will wire their own `preflight::check` call when implemented; AC #3 only scopes create/unlock/close/resize
+  - [x] Confirm all four updated functions call `preflight::check` identically (same argument order, same immediate-first-line placement) — no workflow gets a lighter or differently-shaped gate than another
 - [ ] Task 4: Real `adapters::exec` prerequisite checks, scoped to what's checkable without hardware (AC: #1, #2)
   - [ ] `LuksBackend::check_prerequisites`: verify the `cryptsetup` binary is on `PATH`; verify `systemd-cryptenroll` is on `PATH` (owns the `systemd-fido2` token plugin per AD-1); verify LUKS2 FIDO2/hmac-secret support is actually present — during implementation, confirm the concrete detection mechanism empirically in the Nix devShell (candidates: the `libcryptsetup-token-systemd-fido2.so` plugin file existing on the loader's search path, or `cryptsetup --help`/`cryptsetup --version` reporting token-plugin support) and document whichever one is used and why in Dev Notes/Completion Notes
   - [ ] `Fido2Backend::check_prerequisites`: verify `fido2-token` is on `PATH`; verify kernel `hidraw` support is present (e.g. `/sys/class/hidraw` exists, or equivalent — confirm the concrete check empirically, same as above)
@@ -85,6 +85,7 @@ so that I get a clear, actionable error before anything is touched, never a mid-
 
 - Task 1: added `check_prerequisites(&self) -> Result<(), Vec<String>>` to all three ports. No test-worthy behavior yet (pure trait-signature addition, no implementors); validated with `cargo build`.
 - Task 2: `domain::preflight::check` now takes the three port trait objects, calls `check_prerequisites()` on each without short-circuiting, and aggregates all failures into the new `DomainError::PreflightFailed(Vec<String>)`. Behavioral unit tests land in Task 5 alongside the fake ports needed to exercise it in isolation.
+- Task 3: `create`, `unlock`, `close`, `resize` workflow stubs now take the same three port trait objects and call `preflight::check(luks, fido2, fs)?;` as their first line, identically across all four, before the existing `todo!()`. `enroll`/`revoke` intentionally untouched (Epic 2 scope).
 
 ### File List
 
@@ -93,3 +94,7 @@ so that I get a clear, actionable error before anything is touched, never a mid-
 - src/ports/filesystem_backend.rs
 - src/domain/errors.rs
 - src/domain/preflight.rs
+- src/domain/workflows/create.rs
+- src/domain/workflows/unlock.rs
+- src/domain/workflows/close.rs
+- src/domain/workflows/resize.rs
