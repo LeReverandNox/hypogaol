@@ -25,11 +25,11 @@ so that I get a clear, actionable error before anything is touched, never a mid-
 - [x] Task 1: Give the three ports a `check_prerequisites` method each (AC: #1, #3)
   - [x] Add `fn check_prerequisites(&self) -> Result<(), Vec<String>>` to `LuksBackend`, `Fido2Backend`, `FilesystemBackend` (`src/ports/{luks_backend,fido2_backend,filesystem_backend}.rs`) — `Err` carries one human-readable string per missing/unsupported dependency that *this* port's real adapter would need, `Ok(())` means all of this port's prerequisites are satisfied
   - [x] This keeps preflight itself free of any direct binary/kernel probing (AD-1: domain never shells out or touches the OS directly) — each port owns knowing what its own real adapter requires
-- [ ] Task 2: Implement `domain::preflight::check` (AC: #1, #2, #3)
-  - [ ] Change `pub fn check() -> Result<(), DomainError>` to accept the three port trait objects: `pub fn check(luks: &dyn LuksBackend, fido2: &dyn Fido2Backend, fs: &dyn FilesystemBackend) -> Result<(), DomainError>`
-  - [ ] Call `check_prerequisites()` on all three — do not short-circuit on the first failure; collect every missing dependency from all three so the user sees the full list in one pass, not one-at-a-time across repeated runs
-  - [ ] Aggregate any failures into one new `DomainError` variant, e.g. `DomainError::PreflightFailed(Vec<String>)`, added to the currently-empty `enum DomainError` in `src/domain/errors.rs` — the Display/message must name every missing dependency so the CLI can surface a single detailed, actionable error (AC #2)
-  - [ ] Return `Ok(())` only if all three ports report no missing prerequisites
+- [x] Task 2: Implement `domain::preflight::check` (AC: #1, #2, #3)
+  - [x] Change `pub fn check() -> Result<(), DomainError>` to accept the three port trait objects: `pub fn check(luks: &dyn LuksBackend, fido2: &dyn Fido2Backend, fs: &dyn FilesystemBackend) -> Result<(), DomainError>`
+  - [x] Call `check_prerequisites()` on all three — do not short-circuit on the first failure; collect every missing dependency from all three so the user sees the full list in one pass, not one-at-a-time across repeated runs
+  - [x] Aggregate any failures into one new `DomainError` variant, e.g. `DomainError::PreflightFailed(Vec<String>)`, added to the currently-empty `enum DomainError` in `src/domain/errors.rs` — the Display/message must name every missing dependency so the CLI can surface a single detailed, actionable error (AC #2)
+  - [x] Return `Ok(())` only if all three ports report no missing prerequisites
 - [ ] Task 3: Wire `preflight::check` as the first statement in every current workflow stub (AC: #1, #3)
   - [ ] Update `src/domain/workflows/{create,unlock,close,resize}.rs` — each currently has a zero-argument stub `pub fn run() -> Result<(), DomainError> { todo!() }`; change the signature to accept the three port trait objects (matching Task 2's `check` signature) and make the first line of the body `preflight::check(luks, fido2, fs)?;`, followed by the existing `todo!()` for the rest of the workflow's not-yet-implemented logic
   - [ ] Do **not** touch `src/domain/workflows/{enroll,revoke}.rs` — those are Epic 2 stories (2.1, 2.2) and will wire their own `preflight::check` call when implemented; AC #3 only scopes create/unlock/close/resize
@@ -84,9 +84,12 @@ so that I get a clear, actionable error before anything is touched, never a mid-
 ### Completion Notes List
 
 - Task 1: added `check_prerequisites(&self) -> Result<(), Vec<String>>` to all three ports. No test-worthy behavior yet (pure trait-signature addition, no implementors); validated with `cargo build`.
+- Task 2: `domain::preflight::check` now takes the three port trait objects, calls `check_prerequisites()` on each without short-circuiting, and aggregates all failures into the new `DomainError::PreflightFailed(Vec<String>)`. Behavioral unit tests land in Task 5 alongside the fake ports needed to exercise it in isolation.
 
 ### File List
 
 - src/ports/luks_backend.rs
 - src/ports/fido2_backend.rs
 - src/ports/filesystem_backend.rs
+- src/domain/errors.rs
+- src/domain/preflight.rs
