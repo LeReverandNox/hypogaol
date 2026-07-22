@@ -4,7 +4,7 @@ baseline_commit: d7db5f8144a2af0851fa942a8417029c3a58d17d
 
 # Story 1.2: CI Runs the Mocked Unit Test Suite
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
