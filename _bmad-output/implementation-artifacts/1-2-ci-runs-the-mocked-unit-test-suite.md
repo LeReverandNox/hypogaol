@@ -26,7 +26,7 @@ so that I get fast feedback without needing physical FIDO2 hardware.
   - [x] `actions/checkout@v4` first, then install Nix with `cachix/install-nix-action@v31` (flakes aren't enabled by default on this action's installed Nix — pass `extra_nix_config: | \n experimental-features = nix-command flakes`)
   - [x] Run the test step as `nix develop -c make test` — do not call `cargo test` directly in CI; the devShell is what provides the pinned toolchain (Story 1.1, AC #1/#2)
   - [x] Do not reference `make test-hardware`, `--test hardware`, or `--ignored` anywhere in the workflow file (AC #2)
-  - [ ] Suggested full file:
+  - [x] Suggested full file:
     ```yaml
     name: CI
 
@@ -50,6 +50,15 @@ so that I get fast feedback without needing physical FIDO2 hardware.
   - [x] Temporarily break a test (e.g. `assert!(false)` in `tests/unit/main.rs`) and confirm `make test` exits non-zero; a non-zero exit from the `run:` step is what fails a GitHub Actions job — revert the temporary breakage before committing
 - [x] Task 3: Confirm scope fence against AC #2 (AC: #2)
   - [x] Grep the finished workflow file for `test-hardware`/`--ignored` and confirm zero matches
+
+### Review Findings
+
+- [x] [Review][Patch] Duplicate CI runs on the same commit — `push` and `pull_request` both fire with no dedup [.github/workflows/ci.yml:3-5] — fixed via `concurrency` group
+- [x] [Review][Patch] No `timeout-minutes` on the job — a hang (e.g. Nix fetch stall) runs until GitHub's default timeout [.github/workflows/ci.yml:8] — fixed, `timeout-minutes: 15`
+- [x] [Review][Patch] No `permissions:` block — job inherits default `GITHUB_TOKEN` scope though it only needs read access [.github/workflows/ci.yml:7] — fixed, `permissions: contents: read`
+- [x] [Review][Patch] Task 1's "Suggested full file" subtask left unchecked while its siblings and the actual shipped file are done [1-2-ci-runs-the-mocked-unit-test-suite.md:29] — fixed, checkbox checked
+- [x] [Review][Defer] Nix binary version isn't pinned by `cachix/install-nix-action@v31`, only nixpkgs is pinned via `flake.lock` [.github/workflows/ci.yml:10] — deferred, pre-existing tooling choice not required by this story's ACs
+- [x] [Review][Defer] No branch protection rule requires this check to pass before merge, so a red run doesn't yet block merges — deferred, repo-setting change outside this diff's scope
 
 ## Dev Notes
 
