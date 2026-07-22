@@ -4,7 +4,7 @@ baseline_commit: 2e295e57c98351b90ed268a2221612907ba9be3c
 
 # Story 1.1: Project Scaffolding & Nix DevShell
 
-Status: in-progress
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
