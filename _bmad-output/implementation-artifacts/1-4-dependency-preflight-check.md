@@ -22,9 +22,9 @@ so that I get a clear, actionable error before anything is touched, never a mid-
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Give the three ports a `check_prerequisites` method each (AC: #1, #3)
-  - [ ] Add `fn check_prerequisites(&self) -> Result<(), Vec<String>>` to `LuksBackend`, `Fido2Backend`, `FilesystemBackend` (`src/ports/{luks_backend,fido2_backend,filesystem_backend}.rs`) — `Err` carries one human-readable string per missing/unsupported dependency that *this* port's real adapter would need, `Ok(())` means all of this port's prerequisites are satisfied
-  - [ ] This keeps preflight itself free of any direct binary/kernel probing (AD-1: domain never shells out or touches the OS directly) — each port owns knowing what its own real adapter requires
+- [x] Task 1: Give the three ports a `check_prerequisites` method each (AC: #1, #3)
+  - [x] Add `fn check_prerequisites(&self) -> Result<(), Vec<String>>` to `LuksBackend`, `Fido2Backend`, `FilesystemBackend` (`src/ports/{luks_backend,fido2_backend,filesystem_backend}.rs`) — `Err` carries one human-readable string per missing/unsupported dependency that *this* port's real adapter would need, `Ok(())` means all of this port's prerequisites are satisfied
+  - [x] This keeps preflight itself free of any direct binary/kernel probing (AD-1: domain never shells out or touches the OS directly) — each port owns knowing what its own real adapter requires
 - [ ] Task 2: Implement `domain::preflight::check` (AC: #1, #2, #3)
   - [ ] Change `pub fn check() -> Result<(), DomainError>` to accept the three port trait objects: `pub fn check(luks: &dyn LuksBackend, fido2: &dyn Fido2Backend, fs: &dyn FilesystemBackend) -> Result<(), DomainError>`
   - [ ] Call `check_prerequisites()` on all three — do not short-circuit on the first failure; collect every missing dependency from all three so the user sees the full list in one pass, not one-at-a-time across repeated runs
@@ -83,4 +83,10 @@ so that I get a clear, actionable error before anything is touched, never a mid-
 
 ### Completion Notes List
 
+- Task 1: added `check_prerequisites(&self) -> Result<(), Vec<String>>` to all three ports. No test-worthy behavior yet (pure trait-signature addition, no implementors); validated with `cargo build`.
+
 ### File List
+
+- src/ports/luks_backend.rs
+- src/ports/fido2_backend.rs
+- src/ports/filesystem_backend.rs
