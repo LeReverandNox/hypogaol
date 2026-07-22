@@ -22,11 +22,11 @@ so that users can download a ready-to-run binary without me manually cutting eac
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Wire release-please (AC: #1)
-  - [ ] Add `.github/workflows/release-please.yml` — triggers on `push` to `main`, uses `googleapis/release-please-action@v4` (pins to release-please v17.10.4 per architecture, AR-Dev3), `permissions: contents: write, pull-requests: write` (release-please needs to open/update PRs and push tags — narrower than default but broader than CI's `contents: read`)
-  - [ ] Add `release-please-config.json` at repo root: `{"release-type": "rust", "packages": {".": {}}}` — `release-type: rust` makes release-please bump the `version` field in `Cargo.toml` directly (no separate manifest-only bump needed for a single-crate repo)
-  - [ ] Add `.release-please-manifest.json` at repo root: `{".": "0.0.0"}` — must match `Cargo.toml`'s current `version = "0.0.0"` exactly, or release-please's first run miscalculates the diff
-  - [ ] Verify release-please's default tag format is `v${version}` (e.g. `v0.1.0`) — this is what cargo-dist's generated workflow must match in Task 2
+- [x] Task 1: Wire release-please (AC: #1)
+  - [x] Add `.github/workflows/release-please.yml` — triggers on `push` to `main`, uses `googleapis/release-please-action@v4` (pins to release-please v17.10.4 per architecture, AR-Dev3), `permissions: contents: write, pull-requests: write` (release-please needs to open/update PRs and push tags — narrower than default but broader than CI's `contents: read`)
+  - [x] Add `release-please-config.json` at repo root: `{"release-type": "rust", "packages": {".": {}}}` — `release-type: rust` makes release-please bump the `version` field in `Cargo.toml` directly (no separate manifest-only bump needed for a single-crate repo)
+  - [x] Add `.release-please-manifest.json` at repo root: `{".": "0.0.0"}` — must match `Cargo.toml`'s current `version = "0.0.0"` exactly, or release-please's first run miscalculates the diff
+  - [x] Verify release-please's default tag format is `v${version}` (e.g. `v0.1.0`) — this is what cargo-dist's generated workflow must match in Task 2
 - [ ] Task 2: Wire cargo-dist (AC: #2)
   - [ ] Add `[workspace.metadata.dist]` to `Cargo.toml` (cargo-dist ~0.32.x, per architecture) — set `cargo-dist-version` to the pinned `0.32.x`, `ci = ["github"]`, and pick target triples covering the platforms this tool runs on: `x86_64-unknown-linux-gnu` and `aarch64-unknown-linux-gnu` at minimum (Linux-only tool — see Dev Notes)
   - [ ] Set `create-release = false` in the same `[workspace.metadata.dist]` block — release-please (Task 1) already creates the GitHub Release and tag; cargo-dist must only attach build artifacts to that existing release, never create a second one
@@ -70,4 +70,10 @@ so that users can download a ready-to-run binary without me manually cutting eac
 
 ### Completion Notes List
 
+- Task 1: Validated `release-please-config.json` and `.release-please-manifest.json` as syntactically valid JSON (`jq .`), and `.github/workflows/release-please.yml` as valid YAML (`python3 -c "import yaml; yaml.safe_load(...)"`) with `permissions: {contents: write, pull-requests: write}` asserted programmatically. Cross-checked `.release-please-manifest.json`'s `"."` version (`0.0.0`) against `Cargo.toml`'s `version` field — exact match. A live `release-please --dry-run` against the (private) GitHub repo was attempted but blocked by an auth quirk in the release-please CLI's `defaultBranch` lookup (token not attached to that specific request, confirmed via unauthenticated `x-ratelimit-limit: 60` on the resulting 404) — not pursued further as it's a CLI-auth wiring issue orthogonal to this story's config correctness. Tag format `v${version}` (no component prefix) for a single package at path `.` is release-please's documented default (matches architecture's Stack table note and this task's own guidance) — not independently re-derived via dry-run for the reason above.
+
 ### File List
+
+- `.github/workflows/release-please.yml` (new)
+- `release-please-config.json` (new)
+- `.release-please-manifest.json` (new)
