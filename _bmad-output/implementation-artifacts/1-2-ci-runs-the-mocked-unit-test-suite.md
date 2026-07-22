@@ -45,9 +45,9 @@ so that I get fast feedback without needing physical FIDO2 hardware.
                 experimental-features = nix-command flakes
           - run: nix develop -c make test
     ```
-- [ ] Task 2: Verify AC #1's failure path locally before pushing (AC: #1)
-  - [ ] Confirm `nix develop -c make test` currently exits 0 (both `tests/unit/main.rs`'s placeholder passes and the workflow would go green)
-  - [ ] Temporarily break a test (e.g. `assert!(false)` in `tests/unit/main.rs`) and confirm `make test` exits non-zero; a non-zero exit from the `run:` step is what fails a GitHub Actions job — revert the temporary breakage before committing
+- [x] Task 2: Verify AC #1's failure path locally before pushing (AC: #1)
+  - [x] Confirm `nix develop -c make test` currently exits 0 (both `tests/unit/main.rs`'s placeholder passes and the workflow would go green)
+  - [x] Temporarily break a test (e.g. `assert!(false)` in `tests/unit/main.rs`) and confirm `make test` exits non-zero; a non-zero exit from the `run:` step is what fails a GitHub Actions job — revert the temporary breakage before committing
 - [ ] Task 3: Confirm scope fence against AC #2 (AC: #2)
   - [ ] Grep the finished workflow file for `test-hardware`/`--ignored` and confirm zero matches
 
@@ -91,6 +91,8 @@ so that I get fast feedback without needing physical FIDO2 hardware.
 ### Debug Log References
 
 ### Completion Notes List
+
+- Task 2: Verified `nix develop -c make test` exits 0 with the current placeholder test; temporarily set `assert!(false)` in `tests/unit/main.rs` and confirmed `make` reports `Error 101` (non-zero exit), then reverted — no net diff in `tests/unit/main.rs`.
 
 ### File List
 
