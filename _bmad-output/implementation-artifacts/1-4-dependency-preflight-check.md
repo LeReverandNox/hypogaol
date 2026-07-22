@@ -4,7 +4,7 @@ baseline_commit: 852bd91
 
 # Story 1.4: Dependency Preflight Check
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -39,13 +39,13 @@ so that I get a clear, actionable error before anything is touched, never a mid-
   - [x] `Fido2Backend::check_prerequisites`: verify `fido2-token` is on `PATH`; verify kernel `hidraw` support is present (e.g. `/sys/class/hidraw` exists, or equivalent — confirm the concrete check empirically, same as above)
   - [x] `FilesystemBackend::check_prerequisites`: verify `mkfs.ext4`, `resize2fs` (e2fsprogs, AD-8 v1 ext4-only), and `blockdev` (util-linux, AD-9's `device_capacity`) are all on `PATH`
   - [x] Binary-presence checks should share one small internal helper (e.g. `which`-style PATH lookup) inside `adapters::exec` rather than three copies of the same logic
-- [ ] Task 5: Fake test-support ports + preflight unit tests (AC: #1, #2, #3)
-  - [ ] Create the dedicated test-support module referenced by AD-7 (not yet created by any prior story) — e.g. `src/domain/workflows/mod.rs`-adjacent or a `tests/unit/`-local fakes module — providing one fake `LuksBackend`/`Fido2Backend`/`FilesystemBackend` whose `check_prerequisites` is controllable per-test (all-pass, or fail with specific named-missing-dependency lists)
-  - [ ] Unit test: all three fakes pass → `preflight::check` returns `Ok(())`
-  - [ ] Unit test: one fake reports one missing dependency → `preflight::check` returns `Err` naming exactly that dependency
-  - [ ] Unit test: multiple fakes each report failures → the resulting error names dependencies from *all* of them, not just the first encountered (validates the no-short-circuit aggregation from Task 2)
-  - [ ] Unit test (per workflow): calling `create::run`/`unlock::run`/`close::run`/`resize::run` with a failing fake immediately returns the preflight error without reaching the workflow's own `todo!()` — proves preflight truly gates as the first statement, not merely running before some but not all logic
-  - [ ] Register/confirm these land under `make test` (`cargo test --test unit`) per AD-7 — no hardware-gated test needed for this story since nothing here touches a real FIDO2 device
+- [x] Task 5: Fake test-support ports + preflight unit tests (AC: #1, #2, #3)
+  - [x] Create the dedicated test-support module referenced by AD-7 (not yet created by any prior story) — e.g. `src/domain/workflows/mod.rs`-adjacent or a `tests/unit/`-local fakes module — providing one fake `LuksBackend`/`Fido2Backend`/`FilesystemBackend` whose `check_prerequisites` is controllable per-test (all-pass, or fail with specific named-missing-dependency lists)
+  - [x] Unit test: all three fakes pass → `preflight::check` returns `Ok(())`
+  - [x] Unit test: one fake reports one missing dependency → `preflight::check` returns `Err` naming exactly that dependency
+  - [x] Unit test: multiple fakes each report failures → the resulting error names dependencies from *all* of them, not just the first encountered (validates the no-short-circuit aggregation from Task 2)
+  - [x] Unit test (per workflow): calling `create::run`/`unlock::run`/`close::run`/`resize::run` with a failing fake immediately returns the preflight error without reaching the workflow's own `todo!()` — proves preflight truly gates as the first statement, not merely running before some but not all logic
+  - [x] Register/confirm these land under `make test` (`cargo test --test unit`) per AD-7 — no hardware-gated test needed for this story since nothing here touches a real FIDO2 device
 
 ### Project Structure Notes
 
@@ -79,7 +79,11 @@ so that I get a clear, actionable error before anything is touched, never a mid-
 
 ### Agent Model Used
 
+Claude Sonnet 5 (claude-sonnet-5)
+
 ### Debug Log References
+
+- `cargo build`, `cargo test --test unit`, `cargo clippy --all-targets -- -D warnings`, `cargo fmt --check`, `cargo build --release`, and `make test` all green as of the final commit.
 
 ### Completion Notes List
 
@@ -90,9 +94,15 @@ so that I get a clear, actionable error before anything is touched, never a mid-
   - **LUKS2 FIDO2/hmac-secret detection mechanism (empirically verified in the Nix devShell):** neither pure candidate from the story was sufficient on its own. `cryptsetup --help` reports "LUKS2 external token plugin support is enabled." even when its own configured plugin directory is completely empty (verified: `cryptsetup`'s reported `LUKS2 external token plugin path:` pointed at an empty dir in this devShell, while the actual `libcryptsetup-token-systemd-fido2.so` lives in systemd's own package path). So text-only "support is enabled" is a false positive. The check implemented instead parses cryptsetup's own reported plugin-path line from `cryptsetup --help` and verifies `libcryptsetup-token-systemd-fido2.so` actually exists there — asking cryptsetup exactly where *it* will look, then confirming the file is really there, rather than guessing a fixed path or trusting the capability text alone.
   - **Known devShell-only quirk, not a bug:** in this Nix flake's devShell specifically, nixpkgs' `cryptsetup` and `systemd` are two independent store paths, so nix-provided `cryptsetup`'s own plugin directory is empty and this check reports the dependency missing *inside the devShell*. On a normal end-user Linux system (verified against this machine's host-installed cryptsetup/systemd, outside the devShell), the distro's package manager coordinates the two so the plugin lands exactly where cryptsetup expects — confirmed by inspecting `/usr/lib/cryptsetup/` locally, which does contain the plugin. This quirk is harmless for this story: no automated test exercises the real `ExecAdapter` (Task 5's tests use fake ports only, per AD-7), so `make test` is unaffected either way.
   - No new dependencies: binary-presence checks use only `std::env`/`std::path`; the FIDO2 plugin check uses only `std::process::Command` to invoke `cryptsetup --help` (already a hard runtime dependency), no new crate.
+- Task 5: added a lib/bin split (`src/lib.rs` re-exporting `adapters`/`cli`/`domain`/`ports`; `src/main.rs` now just calls `tomb_fido2::cli::main::run()`) — **not itself a story subtask, but required to satisfy AD-7's mandate that `domain` be unit-testable from `tests/unit/*`**: an integration test binary cannot reach modules that only exist inside a binary-only crate. This uses Cargo's automatic target detection (a `src/lib.rs` present is auto-registered as the `tomb_fido2` lib target) so it needed no `Cargo.toml` edit, honoring the Project Structure Notes' "do not touch `Cargo.toml`" constraint.
+  - Added `tests/unit/fakes.rs`: `FakeLuksBackend`/`FakeFido2Backend`/`FakeFilesystemBackend`, each constructible via `::passing()` or `::failing(&["dep", ...])`, independently controllable per test — the AD-7 dedicated test-support module, designed to be extended (not rewritten) by later stories as these ports grow more methods.
+  - Added `tests/unit/preflight.rs` (3 tests) and `tests/unit/workflows.rs` (4 tests, one per `create`/`unlock`/`close`/`resize`) declared via `mod fakes; mod preflight; mod workflows;` in `tests/unit/main.rs`, replacing the now-superseded `placeholder` test.
+  - Verified green: `cargo test --test unit` (7 passed), `make test`, `cargo clippy --all-targets -- -D warnings` (no warnings), `cargo fmt --check`, `cargo build --release`.
 
 ### File List
 
+- src/lib.rs
+- src/main.rs
 - src/ports/luks_backend.rs
 - src/ports/fido2_backend.rs
 - src/ports/filesystem_backend.rs
@@ -103,3 +113,11 @@ so that I get a clear, actionable error before anything is touched, never a mid-
 - src/domain/workflows/close.rs
 - src/domain/workflows/resize.rs
 - src/adapters/exec/mod.rs
+- tests/unit/main.rs
+- tests/unit/fakes.rs
+- tests/unit/preflight.rs
+- tests/unit/workflows.rs
+
+## Change Log
+
+- 2026-07-23: Implemented Story 1.4 end to end — ports gained `check_prerequisites`, `domain::preflight::check` aggregates all three ports' failures into `DomainError::PreflightFailed`, `create`/`unlock`/`close`/`resize` wire it as their first statement, `adapters::exec::ExecAdapter` provides the real checks, and a lib/bin split plus fake ports enable full unit-test coverage (7 new tests, all green).
