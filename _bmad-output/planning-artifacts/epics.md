@@ -69,7 +69,7 @@ NFR11: Read-only unlock must refuse writes at both the LUKS2/dm-crypt mapping le
 
 - AR-Dev1 (Nix devShell): `flake.nix`/`flake.lock` provides a reproducible dev environment (nixpkgs-unstable + flake-utils) bundling the Rust toolchain plus `cryptsetup`/`systemd`/`libfido2`, so contributors never install these system-wide. Epic 1 setup work.
 - AR-Dev2 (CI workflow): A GitHub Actions workflow runs `make test` (mocked unit suite, per AD-7) on every push/PR. `make test-hardware` is explicitly excluded from this workflow — manual/local only.
-- AR-Dev3 (Release automation): Two release-time GitHub Actions workflows — `release-please` (versioning/changelog from conventional commits) and `cargo-dist` (~0.32.x, builds and publishes release binaries to GitHub Releases across target platforms).
+- AR-Dev3 (Release automation): Two release-time GitHub Actions workflows — `release-please` (versioning/changelog from conventional commits) and `cargo-dist` (~0.32.x, builds and publishes release binaries to GitHub Releases across target platforms). Epic 1 setup work, alongside AR-Dev1/AR-Dev2, since it has no functional dependency on any capability story.
 - AR-Dev4 (Packaging scope fence): Distro packaging (AUR, deb, etc.) beyond GitHub Releases prebuilt binaries + `cargo build --release` is explicitly deferred/out of scope for v1.
 
 **Non-goals (for reference, not build scope):**
@@ -103,7 +103,7 @@ FR11: Epic 3 - Unlock and mount an existing tomb read-only
 ## Epic List
 
 ### Epic 1: Create & Open a Tomb (Foundation)
-Users can create a brand-new tomb from scratch — file-backed (the tool allocates the backing file itself) or device-backed (an existing raw device/partition, with mandatory wipe confirmation) — formatting it as LUKS2, creating the chosen filesystem inside it, and bootstrap-enrolling the first FIDO2 key — then unlock it with the filesystem mounted and ready to use, all through the tool's own CLI with zero FIDO2 knowledge required. This epic also stands up the project foundation (Nix devShell, CI) and the shared infrastructure every later epic depends on: the `LuksBackend`/`Fido2Backend`/`FilesystemBackend` ports, the `domain::preflight` gate, deterministic mapping-name/mountpoint discovery (AD-12), and the CLI/UX translation boundary.
+Users can create a brand-new tomb from scratch — file-backed (the tool allocates the backing file itself) or device-backed (an existing raw device/partition, with mandatory wipe confirmation) — formatting it as LUKS2, creating the chosen filesystem inside it, and bootstrap-enrolling the first FIDO2 key — then unlock it with the filesystem mounted and ready to use, all through the tool's own CLI with zero FIDO2 knowledge required. This epic also stands up the project foundation (Nix devShell, CI, release automation) and the shared infrastructure every later epic depends on: the `LuksBackend`/`Fido2Backend`/`FilesystemBackend` ports, the `domain::preflight` gate, deterministic mapping-name/mountpoint discovery (AD-12), and the CLI/UX translation boundary. Each capability story (Create file-backed, Create device-backed, Unlock) wires and exposes its own CLI subcommand incrementally as it's built; the final story in this epic consolidates full `--help` coverage and audits plain-language error translation across all of them.
 **FRs covered:** FR8, FR1, FR4, FR5, FR6, FR7 (established)
 
 ### Epic 2: Manage Tomb Access (Key Lifecycle)
@@ -111,12 +111,12 @@ Users can enroll an additional FIDO2 key as a backup unlock method on an already
 **FRs covered:** FR2, FR3
 
 ### Epic 3: Tomb Lifecycle & Advanced Access
-Users can close an unlocked tomb (unmount + re-lock) as the clean counterpart to Epic 1's unlock, grow an existing tomb's capacity without recreating it or re-enrolling keys, and unlock a tomb read-only when they only need to inspect its contents safely. This epic also finalizes release packaging (`cargo-dist`/`release-please`) as the last capability epic before v1 ships.
+Users can close an unlocked tomb (unmount + re-lock) as the clean counterpart to Epic 1's unlock, grow an existing tomb's capacity without recreating it or re-enrolling keys, and unlock a tomb read-only when they only need to inspect its contents safely.
 **FRs covered:** FR9, FR10, FR11
 
 ## Epic 1: Create & Open a Tomb (Foundation)
 
-Users can create a brand-new tomb from scratch — file-backed (the tool allocates the backing file itself) or device-backed (an existing raw device/partition, with mandatory wipe confirmation) — formatting it as LUKS2, creating the chosen filesystem inside it, and bootstrap-enrolling the first FIDO2 key — then unlock it with the filesystem mounted and ready to use, all through the tool's own CLI with zero FIDO2 knowledge required. This epic also stands up the project foundation (Nix devShell, CI) and the shared infrastructure every later epic depends on: the `LuksBackend`/`Fido2Backend`/`FilesystemBackend` ports, the `domain::preflight` gate, deterministic mapping-name/mountpoint discovery (AD-12), and the CLI/UX translation boundary.
+Users can create a brand-new tomb from scratch — file-backed (the tool allocates the backing file itself) or device-backed (an existing raw device/partition, with mandatory wipe confirmation) — formatting it as LUKS2, creating the chosen filesystem inside it, and bootstrap-enrolling the first FIDO2 key — then unlock it with the filesystem mounted and ready to use, all through the tool's own CLI with zero FIDO2 knowledge required. This epic also stands up the project foundation (Nix devShell, CI, release automation) and the shared infrastructure every later epic depends on: the `LuksBackend`/`Fido2Backend`/`FilesystemBackend` ports, the `domain::preflight` gate, deterministic mapping-name/mountpoint discovery (AD-12), and the CLI/UX translation boundary. Each capability story (Create file-backed, Create device-backed, Unlock) wires and exposes its own CLI subcommand incrementally as it's built; the final story in this epic consolidates full `--help` coverage and audits plain-language error translation across all of them.
 
 ### Story 1.1: Project Scaffolding & Nix DevShell
 
@@ -156,7 +156,27 @@ So that I get fast feedback without needing physical FIDO2 hardware.
 **When** it runs
 **Then** `make test-hardware` is explicitly excluded — never runs in CI, hardware-gated and manual-only
 
-### Story 1.3: Dependency Preflight Check
+### Story 1.3: Release Automation
+
+As a maintainer,
+I want versioned changelog generation and cross-platform release binaries published automatically,
+So that users can download a ready-to-run binary without me manually cutting each release.
+
+**Acceptance Criteria:**
+
+**Given** commits in conventional-commit format merged to main
+**When** release-please runs
+**Then** it proposes/maintains a release PR with version bump and changelog derived from those commits
+
+**Given** a release-please release is merged/tagged
+**When** cargo-dist's workflow runs
+**Then** it builds and publishes release binaries to GitHub Releases across the target platforms
+
+**Given** this release tooling
+**When** checking scope
+**Then** distro packaging (AUR, deb, etc.) beyond GitHub Releases prebuilt binaries and `cargo build --release` is explicitly out of scope for v1
+
+### Story 1.4: Dependency Preflight Check
 
 As a user,
 I want the tool to verify all hard dependencies before starting any operation,
@@ -178,7 +198,7 @@ So that I get a clear, actionable error before anything is touched, never a mid-
 **Then** it is defined once in `domain::preflight` and called identically inside `create`, `unlock` (including read-only), `close`, and `resize`
 **And** none of these workflows get a lighter gate than the others
 
-### Story 1.4: Create a File-Backed Tomb
+### Story 1.5: Create a File-Backed Tomb
 
 As a user with no prior FIDO2 experience,
 I want to create a new tomb by giving a destination path and a size,
@@ -200,7 +220,7 @@ So that I don't need to manually pre-allocate a backing file before creating my 
 **Then** it generates a transient random passphrase in a `zeroize::Zeroizing` buffer to seed `luksFormat`/`luksOpen`, wipes it immediately after use and before `mkfs` runs, and removes the transient bootstrap keyslot via the guarded last-keyslot-safe removal primitive once the real FIDO2 key is enrolled
 **And** the enrolled FIDO2 key's metadata is written as generic token fields `key_label`/`filesystem` — never prefixed with the product's placeholder name
 
-### Story 1.5: Create a Device-Backed Tomb
+### Story 1.6: Create a Device-Backed Tomb
 
 As a user,
 I want to create a new tomb on an existing raw device or partition, optionally reserving free space,
@@ -228,7 +248,7 @@ So that I can use the tool directly against physical storage without an intermed
 **When** I run the create command in device mode without confirming the wipe/data-loss warning
 **Then** the tool refuses to proceed — confirmation is mandatory for every device-backed create, not just when a header is detected
 
-### Story 1.6: Unlock and Mount a Tomb
+### Story 1.7: Unlock and Mount a Tomb
 
 As a user with no FIDO2 experience,
 I want to unlock an existing tomb with my FIDO2 key and have it mounted automatically,
@@ -248,11 +268,13 @@ So that I can access its contents in one guided step.
 **When** unlock runs
 **Then** it derives the dm-crypt mapping name deterministically from the canonicalized device/file path via the single shared helper — never user-supplied, random, or stored
 
-### Story 1.7: Unified CLI Dispatch & Plain-Language Errors
+### Story 1.8: Unified CLI Dispatch & Plain-Language Errors
 
 As a user,
 I want to drive create and unlock through one CLI with prompts/errors in plain language,
 So that I never need to fall back to cryptsetup/fido2-token flags directly, even when something goes wrong.
+
+> **Sequencing note:** Stories 1.5–1.7 (Create file-backed, Create device-backed, Unlock) each wire and expose their own CLI subcommand with baseline error handling as they're implemented — none of them are blocked waiting on this story. This story is the consolidation pass: it finalizes complete `--help` coverage across the Epic 1 subcommands and audits every error path accumulated so far for consistent plain-language translation at the `cli::ux` boundary.
 
 **Acceptance Criteria:**
 
@@ -299,6 +321,10 @@ So that I have a backup way to unlock my tomb if I lose my primary key.
 **Then** it runs with inherited/passthrough stdio, never captured by the tool's own process
 **And** it is always a separate subprocess call from any non-secret credential-id lookup (e.g. `fido2-token -L`)
 
+**Given** an existing tomb on a raw device/partition instead of a loop-backed file
+**When** I run the enroll command
+**Then** the identical command works unmodified — enroll makes no branching decision based on target type, consistent with the deterministic mapping-name/mountpoint discovery (AD-12)
+
 ### Story 2.2: Revoke a FIDO2 Key, Guarded Against Last-Keyslot Lockout
 
 As a user,
@@ -326,9 +352,13 @@ So that a lost or compromised key stops being able to unlock my tomb.
 **When** I target a key that isn't enrolled
 **Then** the tool reports a clear error rather than silently succeeding or crashing
 
+**Given** an existing tomb on a raw device/partition instead of a loop-backed file
+**When** I run the revoke command
+**Then** the identical command works unmodified — revoke makes no branching decision based on target type
+
 ## Epic 3: Tomb Lifecycle & Advanced Access
 
-Users can close an unlocked tomb (unmount + re-lock) as the clean counterpart to Epic 1's unlock, grow an existing tomb's capacity without recreating it or re-enrolling keys, and unlock a tomb read-only when they only need to inspect its contents safely. This epic also finalizes release packaging (`cargo-dist`/`release-please`) as the last capability epic before v1 ships.
+Users can close an unlocked tomb (unmount + re-lock) as the clean counterpart to Epic 1's unlock, grow an existing tomb's capacity without recreating it or re-enrolling keys, and unlock a tomb read-only when they only need to inspect its contents safely.
 
 ### Story 3.1: Close an Unlocked Tomb
 
@@ -355,6 +385,10 @@ So that its filesystem is unmounted and the LUKS2 volume is re-locked, as the sy
 **Given** close
 **When** it runs
 **Then** `domain::preflight` runs first, like every other workflow
+
+**Given** an unlocked, mounted tomb backed by a raw device/partition instead of a loop-backed file
+**When** I run the close command
+**Then** the identical command works unmodified — close makes no branching decision based on target type
 
 ### Story 3.2: Grow an Existing Tomb's Capacity
 
@@ -410,22 +444,6 @@ So that I can inspect its contents without risking any writes, at both the block
 **When** I run it
 **Then** it continues to allow writes as before
 
-### Story 3.4: Release Automation
-
-As a maintainer,
-I want versioned changelog generation and cross-platform release binaries published automatically,
-So that users can download a ready-to-run binary without me manually cutting each release.
-
-**Acceptance Criteria:**
-
-**Given** commits in conventional-commit format merged to main
-**When** release-please runs
-**Then** it proposes/maintains a release PR with version bump and changelog derived from those commits
-
-**Given** a release-please release is merged/tagged
-**When** cargo-dist's workflow runs
-**Then** it builds and publishes release binaries to GitHub Releases across the target platforms
-
-**Given** this release tooling
-**When** checking scope
-**Then** distro packaging (AUR, deb, etc.) beyond GitHub Releases prebuilt binaries and `cargo build --release` is explicitly out of scope for v1
+**Given** an existing tomb backed by a raw device/partition instead of a loop-backed file
+**When** I run unlock with the read-only flag
+**Then** the identical command works unmodified — read-only unlock makes no branching decision based on target type
