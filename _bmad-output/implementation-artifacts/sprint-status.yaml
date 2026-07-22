@@ -52,7 +52,7 @@ development_status:
   1-1-project-scaffolding-nix-devshell: done
   1-2-ci-runs-the-mocked-unit-test-suite: done
   1-3-release-automation: done
-  1-4-dependency-preflight-check: backlog
+  1-4-dependency-preflight-check: ready-for-dev
   1-5-create-a-file-backed-tomb: backlog
   1-6-create-a-device-backed-tomb: backlog
   1-7-unlock-and-mount-a-tomb: backlog
