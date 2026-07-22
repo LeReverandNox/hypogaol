@@ -1,6 +1,10 @@
+---
+baseline_commit: 2e295e57c98351b90ed268a2221612907ba9be3c
+---
+
 # Story 1.1: Project Scaffolding & Nix DevShell
 
-Status: ready-for-dev
+Status: in-progress
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -23,10 +27,10 @@ so that I can build and test the tool without installing cryptsetup/systemd/libf
   - [ ] Confirm `devShells.default` packages include `rustc`, `cargo`, `cryptsetup`, `systemd`, `libfido2` (already present) — [Source: flake.nix]
   - [ ] Confirm `flake.lock`'s `nixpkgs` input is a locked `nixos-unstable` revision (already present, locked 2025-11 timestamp) — this is what makes the environment reproducible across machines (AC #2)
   - [ ] After Task 2/3 create `Cargo.toml`/`src/`, run `nix develop -c cargo build` and confirm it succeeds with zero system-wide installs
-- [ ] Task 2: Create `Cargo.toml` for a binary crate named after the placeholder product (AC: #1, #3)
-  - [ ] `name = "tomb-fido2"`, `edition = "2021"` — this name is the **single source** the CLI binary/user-facing name must read from later (AD-13); never hardcode `"tomb-fido2"` as a separate string literal elsewhere in `src/`
-  - [ ] Declare dependencies pinned to the exact versions the architecture already resolved — they may be unused by the stub bodies in this story, that is expected and not a build error: `clap = "4.6.4"`, `serde = "1.0.229"` (with `derive` feature), `serde_json = "1.0.229"`, `thiserror = "2.0.19"`, `anyhow = "1.0.104"`, `zeroize = "1.9.0"` [Source: ARCHITECTURE-SPINE.md#Stack]
-  - [ ] Do not add a `[[bin]]` section — a crate-root `src/main.rs` makes the binary name default to the package name, which is what AD-13 requires
+- [x] Task 2: Create `Cargo.toml` for a binary crate named after the placeholder product (AC: #1, #3)
+  - [x] `name = "tomb-fido2"`, `edition = "2021"` — this name is the **single source** the CLI binary/user-facing name must read from later (AD-13); never hardcode `"tomb-fido2"` as a separate string literal elsewhere in `src/`
+  - [x] Declare dependencies pinned to the exact versions the architecture already resolved — they may be unused by the stub bodies in this story, that is expected and not a build error: `clap = "4.6.4"`, `serde = "1.0.229"` (with `derive` feature), `serde_json = "1.0.229"`, `thiserror = "2.0.19"`, `anyhow = "1.0.104"`, `zeroize = "1.9.0"` [Source: ARCHITECTURE-SPINE.md#Stack]
+  - [x] Do not add a `[[bin]]` section — a crate-root `src/main.rs` makes the binary name default to the package name, which is what AD-13 requires
 - [ ] Task 3: Create the structural seed with stub bodies only, no logic (AC: #3)
   - [ ] `src/main.rs` — thin entry point only: wires `mod` declarations and delegates to `cli` (Cargo requires this file at crate root even though the architecture's own module map lists the CLI entry as `src/cli/main.rs`; keep this file to a couple of lines, all real CLI wiring belongs in `src/cli/main.rs`)
   - [ ] `src/domain/workflows/{create,unlock,enroll,revoke,close,resize}.rs` — one stub function per workflow, e.g. `pub fn run() -> Result<(), crate::domain::errors::DomainError> { todo!() }`
@@ -77,3 +81,5 @@ _To be filled by the dev agent during implementation._
 - Ultimate context engine analysis completed - comprehensive developer guide created.
 
 ### File List
+
+- Cargo.toml

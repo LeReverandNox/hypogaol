@@ -49,7 +49,7 @@ story_location: "{project-root}/_bmad-output/implementation-artifacts"
 
 development_status:
   epic-1: in-progress
-  1-1-project-scaffolding-nix-devshell: ready-for-dev
+  1-1-project-scaffolding-nix-devshell: in-progress
   1-2-ci-runs-the-mocked-unit-test-suite: backlog
   1-3-release-automation: backlog
   1-4-dependency-preflight-check: backlog
