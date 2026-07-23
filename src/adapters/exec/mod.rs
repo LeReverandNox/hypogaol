@@ -536,7 +536,16 @@ impl LuksBackend for ExecAdapter {
         // on input."). Piping the still-in-scope transient passphrase via
         // `--key-file -`, the same non-interactive mechanism already used
         // for `luksFormat`/`luksOpen`, sidesteps the keyring entirely.
-        let raw_size = actual_raw_size(path).map_err(DomainError::AdapterFailure)?;
+        let raw_size = match actual_raw_size(path) {
+            Ok(raw_size) => raw_size,
+            Err(e) => {
+                // `luksOpen` above already succeeded — same leak this
+                // function's `resize` failure branch below already guards
+                // against applies here too.
+                let _ = privileged("cryptsetup").arg("close").arg(name).output();
+                return Err(DomainError::AdapterFailure(e));
+            }
+        };
         if raw_size > size {
             if let Err(e) = run_piping_stdin(
                 privileged("cryptsetup")
