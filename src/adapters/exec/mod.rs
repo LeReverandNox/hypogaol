@@ -715,9 +715,10 @@ impl LuksBackend for ExecAdapter {
                 source_path: path.to_path_buf(),
             })
         } else {
-            Err(DomainError::AdapterFailure(
-                "cryptsetup open --token-only failed".to_string(),
-            ))
+            Err(DomainError::AdapterFailure(format!(
+                "cryptsetup open --token-only failed for {} as {name}",
+                path.display()
+            )))
         }
     }
 }
