@@ -303,6 +303,77 @@ fn unmount_and_close(mountpoint: &std::path::Path, mapping_name: &str) {
     );
 }
 
+/// Guards a hardware unlock scenario's cleanup (unmount, close, optional
+/// loop-device detach) so a panicking assertion mid-test — e.g. in
+/// `assert_actually_mounted`/`assert_readable_and_writable` — doesn't leak
+/// mount/mapping/loop-device state, mirroring `RealFixtureFile`'s Drop-based
+/// cleanup in `tests/unit/unlock.rs`. Call `.run()` explicitly at the normal
+/// end of a test for the full asserted cleanup (via `unmount_and_close`); if
+/// a panic happens first, `Drop` runs a best-effort fallback instead —
+/// asserting again while already unwinding would abort the process rather
+/// than report the original test failure.
+struct UnlockCleanup {
+    mountpoint: PathBuf,
+    mapping_name: String,
+    loop_device_path: Option<PathBuf>,
+    done: bool,
+}
+
+impl UnlockCleanup {
+    fn new(mountpoint: PathBuf, mapping_name: String) -> Self {
+        Self {
+            mountpoint,
+            mapping_name,
+            loop_device_path: None,
+            done: false,
+        }
+    }
+
+    fn with_loop_device(mut self, loop_device_path: PathBuf) -> Self {
+        self.loop_device_path = Some(loop_device_path);
+        self
+    }
+
+    fn run(mut self) {
+        unmount_and_close(&self.mountpoint, &self.mapping_name);
+        if let Some(loop_path) = &self.loop_device_path {
+            let detach = Command::new("sudo")
+                .args(["losetup", "-d"])
+                .arg(loop_path)
+                .output()
+                .expect("failed to run losetup -d");
+            assert!(
+                detach.status.success(),
+                "losetup -d failed: {}",
+                String::from_utf8_lossy(&detach.stderr)
+            );
+        }
+        self.done = true;
+    }
+}
+
+impl Drop for UnlockCleanup {
+    fn drop(&mut self) {
+        if self.done {
+            return;
+        }
+        let _ = Command::new("sudo")
+            .arg("umount")
+            .arg(&self.mountpoint)
+            .output();
+        let _ = std::fs::remove_dir(&self.mountpoint);
+        let _ = Command::new("sudo")
+            .args(["cryptsetup", "close", &self.mapping_name])
+            .output();
+        if let Some(loop_path) = &self.loop_device_path {
+            let _ = Command::new("sudo")
+                .args(["losetup", "-d"])
+                .arg(loop_path)
+                .output();
+        }
+    }
+}
+
 /// End-to-end unlock verification (Story 1.7, AC #1): create a real
 /// file-backed tomb via this tool's own `create::run`, then unlock and mount
 /// it via `unlock::run`, and confirm — independently of this tool's own
@@ -333,11 +404,12 @@ fn unlock_mounts_a_file_backed_tomb_with_a_readable_writable_filesystem() {
 
     let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
     let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
+    let cleanup = UnlockCleanup::new(mountpoint.clone(), name);
 
     assert_actually_mounted(&device_node, &mountpoint);
     assert_readable_and_writable(&mountpoint);
 
-    unmount_and_close(&mountpoint, &name);
+    cleanup.run();
 }
 
 /// Covers AC #2 (identical `unlock::run` call, no branching on target type)
@@ -387,20 +459,10 @@ fn unlock_works_unmodified_against_a_device_backed_tomb() {
     let name =
         mapping_name::mapping_name(&loop_device.path).expect("failed to derive mapping name");
     let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
+    let cleanup = UnlockCleanup::new(mountpoint.clone(), name).with_loop_device(loop_device.path);
 
     assert_actually_mounted(&device_node, &mountpoint);
     assert_readable_and_writable(&mountpoint);
 
-    unmount_and_close(&mountpoint, &name);
-
-    let detach = Command::new("sudo")
-        .args(["losetup", "-d"])
-        .arg(&loop_device.path)
-        .output()
-        .expect("failed to run losetup -d");
-    assert!(
-        detach.status.success(),
-        "losetup -d failed: {}",
-        String::from_utf8_lossy(&detach.stderr)
-    );
+    cleanup.run();
 }
