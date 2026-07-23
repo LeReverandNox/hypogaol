@@ -58,10 +58,10 @@ so that I can access its contents in one guided step.
     - [x] Happy path: passing fakes, a `RealFixtureFile`; assert `unlock::run(...)` returns `Ok(mountpoint)` matching the fake's deterministic mount path; assert the call log is exactly `["open", "mount"]`; assert `luks.last_open()`'s captured name equals `mapping_name::mapping_name(&fixture_path).unwrap()` (calling the same real, pure helper directly for comparison — same pattern already used elsewhere for `mapping_name` assertions).
     - [x] Mount-failure path: `FakeFilesystemBackend::passing().with_failure_at("mount")`; assert the result is `Err`, and the call log is `["open", "mount", "close"]` — proving the just-opened mapping gets closed on a mount failure (mirrors `create.rs`'s existing `enroll_failure_closes_the_mapping_and_removes_the_backing_file`-style failure-path test, minus the file-removal step which doesn't apply here).
   - [x] Confirm `cargo test --test unit` / `make test`, `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check` all stay green.
-- [ ] Task 6: Hardware-gated integration test (manual-only, `make test-hardware`, AD-7) (AC: #1, #2)
-  - [ ] Extend `tests/hardware/main.rs` with a scenario that first creates a real tomb via `create::run` (reuse the existing file-backed pattern), then calls the new `domain::workflows::unlock::run` against it directly, and asserts: the returned mount point exists and is actually mounted (e.g. via `findmnt` against the mapper's device node), and the filesystem is readable/writable at that path (write a marker file, read it back).
-  - [ ] Cover AC #2 by adding a second scenario using the existing `LoopDevice` helper (Story 1.6) as the unlock target instead of a plain file — proving the identical `unlock::run` call works unmodified against a device-backed target too. Detach the loop device as the final manual/automated step, following Story 1.6's established loop-device lifecycle.
-  - [ ] Same hardware-run environment caveat as Stories 1.5/1.6 applies: build with `cargo test --test hardware --no-run` as the normal user, then run the compiled test binary under `sudo` outside the Nix devShell (this sandbox's devShell `cryptsetup`/`systemd` have an empty token-plugin search path) — do not assume `cargo test --test hardware -- --ignored` alone will work here.
+- [x] Task 6: Hardware-gated integration test (manual-only, `make test-hardware`, AD-7) (AC: #1, #2)
+  - [x] Extend `tests/hardware/main.rs` with a scenario that first creates a real tomb via `create::run` (reuse the existing file-backed pattern), then calls the new `domain::workflows::unlock::run` against it directly, and asserts: the returned mount point exists and is actually mounted (e.g. via `findmnt` against the mapper's device node), and the filesystem is readable/writable at that path (write a marker file, read it back).
+  - [x] Cover AC #2 by adding a second scenario using the existing `LoopDevice` helper (Story 1.6) as the unlock target instead of a plain file — proving the identical `unlock::run` call works unmodified against a device-backed target too. Detach the loop device as the final manual/automated step, following Story 1.6's established loop-device lifecycle.
+  - [x] Same hardware-run environment caveat as Stories 1.5/1.6 applies: build with `cargo test --test hardware --no-run` as the normal user, then run the compiled test binary under `sudo` outside the Nix devShell (this sandbox's devShell `cryptsetup`/`systemd` have an empty token-plugin search path) — do not assume `cargo test --test hardware -- --ignored` alone will work here.
 
 ## Dev Notes
 
@@ -103,6 +103,8 @@ so that I can access its contents in one guided step.
 
 ### Agent Model Used
 
+Claude Sonnet 5 (claude-sonnet-5)
+
 ### Debug Log References
 
 ### Completion Notes List
@@ -112,6 +114,7 @@ so that I can access its contents in one guided step.
 - Task 3: Implemented `unlock::run(path, luks, fido2, fs) -> Result<PathBuf, DomainError>` (preflight → `mapping_name` → `luks.open` → `fs.mount`, closing the mapping if `mount` fails). The signature change immediately broke `tests/unit/workflows.rs`'s existing preflight-gate test call site, so that call-site fix (Task 5's listed subtask) was applied here in the same commit to keep the build green, matching Story 1.6's precedent (`d9d35ff`). `cargo test --test unit` green (31 passed).
 - Task 4: Added `Commands::Unlock { path }` to the CLI (`--path` flag, matching `create`'s style), printing a plain-language touch/PIN prompt before calling `unlock::run`, the mount point on success, and `eprintln!`/`exit(1)` on error (identical pattern to `run_create`). Manually verified `cargo run -- unlock --help`. `cargo test --test unit` green (31 passed).
 - Task 5: New `tests/unit/unlock.rs` (happy path + mount-failure-closes-the-mapping path), registered in `tests/unit/main.rs`. `cargo test --test unit` (33 passed), `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check` all green.
+- Task 6: Added two `#[ignore]`d hardware scenarios to `tests/hardware/main.rs` — file-backed and loop-device-backed — each running real `create::run` then real `unlock::run`, asserting via `findmnt` that the returned mount point is actually mounted and via a written-then-read-back marker file that the filesystem is readable/writable, then cleaning up (`umount`/`cryptsetup close`, plus `losetup -d` for the device scenario) since `close` (Story 3.1) doesn't exist yet. Written and compiling (`cargo build --all-targets` clean); not yet run — awaiting a manual `make test-hardware` run (needs `sudo` + a physical FIDO2 key touched twice per scenario, once for `create`'s enrollment and once for `unlock`'s open).
 
 ### File List
 
@@ -124,3 +127,13 @@ so that I can access its contents in one guided step.
 - Modified: `tests/unit/workflows.rs`
 - Modified: `tests/unit/main.rs`
 - New: `tests/unit/unlock.rs`
+- Modified: `tests/hardware/main.rs`
+
+## Change Log
+
+- 2026-07-24: Task 1 — `LuksBackend::open`
+- 2026-07-24: Task 2 — `FilesystemBackend::mount`
+- 2026-07-24: Task 3 — `unlock::run` implemented
+- 2026-07-24: Task 4 — CLI `unlock` subcommand
+- 2026-07-24: Task 5 — unit tests for `unlock`
+- 2026-07-24: Task 6 (partial) — hardware-gated integration tests written and compiling; awaiting user to run them (needs sudo + physical FIDO2 touch)
