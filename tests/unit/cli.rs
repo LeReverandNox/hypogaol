@@ -1,4 +1,5 @@
-use tomb_fido2::cli::main::{parse_size, MIN_TOMB_SIZE_BYTES};
+use tomb_fido2::cli::main::{confirms_wipe, parse_size};
+use tomb_fido2::domain::workflows::create::MIN_TOMB_SIZE_BYTES;
 
 #[test]
 fn rejects_empty_input() {
@@ -38,4 +39,16 @@ fn rejects_a_non_numeric_input() {
 #[test]
 fn rejects_overflowing_sizes() {
     assert!(parse_size("99999999999999999999T").is_err());
+}
+
+#[test]
+fn confirms_wipe_requires_exactly_yes() {
+    assert!(confirms_wipe("yes"));
+    assert!(confirms_wipe("yes\n"));
+    assert!(confirms_wipe("  yes  "));
+    assert!(!confirms_wipe("Yes"));
+    assert!(!confirms_wipe("YES"));
+    assert!(!confirms_wipe("y"));
+    assert!(!confirms_wipe(""));
+    assert!(!confirms_wipe("no"));
 }

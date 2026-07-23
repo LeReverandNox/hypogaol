@@ -111,6 +111,14 @@ impl From<CliFilesystem> for Filesystem {
     }
 }
 
+/// Whether a line the user typed at the wipe-confirmation prompt counts as
+/// consent — exactly `yes`, ignoring surrounding whitespace/newline. Split
+/// out from `confirm_device_wipe` so this comparison is unit-testable
+/// without going through real stdin.
+pub fn confirms_wipe(input: &str) -> bool {
+    input.trim() == "yes"
+}
+
 /// Prints the wipe/data-loss warning naming `path` and reads a line from
 /// stdin, requiring the user to type exactly `yes` to proceed. Deliberately
 /// interactive rather than a scriptable `--confirm`/`--yes` flag: a flag
@@ -127,7 +135,27 @@ fn confirm_device_wipe(path: &Path) -> bool {
     let _ = io::stdout().flush();
 
     let mut input = String::new();
-    io::stdin().read_line(&mut input).is_ok() && input.trim() == "yes"
+    io::stdin().read_line(&mut input).is_ok() && confirms_wipe(&input)
+}
+
+/// Builds the adapter, runs `create::run`, and reports the result — shared by
+/// both `create` subcommands. `announce` gates the "Creating tomb..." message:
+/// the Device arm passes `false` when the user already declined the wipe
+/// confirmation, so the message doesn't imply work started when the call is
+/// about to fail immediately on `domain`'s own confirmation check.
+fn run_create(target: CreateTarget, filesystem: Filesystem, display_path: &str, announce: bool) {
+    let adapter = ExecAdapter::default();
+
+    if announce {
+        println!("Creating tomb at {display_path}...");
+    }
+
+    if let Err(err) = create::run(target, filesystem, &adapter, &adapter, &adapter) {
+        eprintln!("{err}");
+        std::process::exit(1);
+    }
+
+    println!("Tomb created at {display_path}.");
 }
 
 pub fn run() {
@@ -140,20 +168,9 @@ pub fn run() {
                 size,
                 filesystem,
             } => {
-                let adapter = ExecAdapter::default();
                 let display_path = path.display().to_string();
                 let target = CreateTarget::File { path, size };
-
-                println!("Creating tomb at {display_path}...");
-
-                if let Err(err) =
-                    create::run(target, filesystem.into(), &adapter, &adapter, &adapter)
-                {
-                    eprintln!("{err}");
-                    std::process::exit(1);
-                }
-
-                println!("Tomb created at {display_path}.");
+                run_create(target, filesystem.into(), &display_path, true);
             }
             CreateMode::Device {
                 path,
@@ -161,25 +178,13 @@ pub fn run() {
                 filesystem,
             } => {
                 let confirmed = confirm_device_wipe(&path);
-
-                let adapter = ExecAdapter::default();
                 let display_path = path.display().to_string();
                 let target = CreateTarget::Device {
                     path,
                     size,
                     confirmed,
                 };
-
-                println!("Creating tomb at {display_path}...");
-
-                if let Err(err) =
-                    create::run(target, filesystem.into(), &adapter, &adapter, &adapter)
-                {
-                    eprintln!("{err}");
-                    std::process::exit(1);
-                }
-
-                println!("Tomb created at {display_path}.");
+                run_create(target, filesystem.into(), &display_path, confirmed);
             }
         },
     }
