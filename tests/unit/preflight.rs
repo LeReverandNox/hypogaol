@@ -19,7 +19,9 @@ fn one_missing_dependency_is_named_in_the_error() {
     let fs = FakeFilesystemBackend::passing();
 
     let err = preflight::check(&luks, &fido2, &fs).unwrap_err();
-    let DomainError::PreflightFailed(missing) = err;
+    let DomainError::PreflightFailed(missing) = err else {
+        panic!("expected DomainError::PreflightFailed, got {err:?}");
+    };
 
     assert_eq!(missing, vec!["cryptsetup".to_string()]);
 }
@@ -31,7 +33,9 @@ fn failures_from_every_port_are_aggregated_not_short_circuited() {
     let fs = FakeFilesystemBackend::failing(&["mkfs.ext4"]);
 
     let err = preflight::check(&luks, &fido2, &fs).unwrap_err();
-    let DomainError::PreflightFailed(missing) = err;
+    let DomainError::PreflightFailed(missing) = err else {
+        panic!("expected DomainError::PreflightFailed, got {err:?}");
+    };
 
     assert_eq!(
         missing,
