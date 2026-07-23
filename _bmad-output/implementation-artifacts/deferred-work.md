@@ -32,3 +32,11 @@
 
 - `has_luks2_header`/`device_capacity`/`luksFormat` shell out unprivileged against real block devices that are typically `root:disk` mode `660`, making `create device` effectively require the whole CLI run under `sudo` — undocumented in `--help`/output. [src/adapters/exec/mod.rs:395-732]
 - `has_luks2_header` only detects an existing LUKS2 header, not other filesystem/partition signatures (ext4, xfs, LVM PV, etc.) a device might already carry — matches AC #4's literal scope exactly; broader signature detection is a candidate for a future story. [src/adapters/exec/mod.rs:395-405]
+
+## Deferred from: code review of 1-7-unlock-and-mount-a-tomb (2026-07-24)
+
+- Resize guard (`raw_size > size`) fixes only the exact observed failure mode ("requested size equals full raw capacity"), not the general "not enough headroom for the LUKS2 header" constraint — a size just a few KB under full capacity could plausibly still fail with the same error. [src/adapters/exec/mod.rs:540]
+- No automated (fake-backed unit) regression coverage for the `actual_raw_size`/resize-guard fix — it was only caught and confirmed via a manual hardware run, and a future refactor could silently reintroduce it with CI staying green. [tests/unit]
+- Mount-directory name (`tomb-fido2-<mapper.name>-<suffix>`) embeds the same deterministic mapping-name hash used for the dm-crypt mapping, a minor local fingerprinting/correlation side channel for any user who can list a world-traversable `/tmp`. [src/adapters/exec/mod.rs:888]
+- No plain-language wrapping of unlock failure paths (wrong/missing key, PIN mismatch, path isn't a LUKS2 header at all) — only cryptsetup's own raw stderr plus a generic `AdapterFailure` surfaces today; explicitly Story 1.8's scope per this story's own Dev Notes.
+- No forward story currently closes the mount-exposure window (world-readable mount point, see the decision-needed finding on this story) until Story 3.1's `close` ships — process observation, not itself a code defect.
