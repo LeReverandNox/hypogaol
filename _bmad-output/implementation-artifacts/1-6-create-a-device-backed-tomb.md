@@ -59,7 +59,7 @@ so that I can use the tool directly against physical storage without an intermed
     - [x] Device with a requested size greater than `device_capacity`: refuses with the size-exceeds-capacity error before any mutating call (AC #3)
     - [x] A device-branch failure-path test (mirroring Story 1.5's `enroll_failure_closes_the_mapping_and_removes_the_backing_file`) confirming the mapping is closed on failure but `remove_backing_file` is **never** called for the Device branch
   - [ ] Hardware-gated test (manual-only, `make test-hardware`, AD-7, never CI): a real spare physical device/partition is destructive and unsafe to require — instead, back the "device" target with a **loop device** created from a disposable file (`losetup -f --show <file>` gives a genuine `/dev/loopN` block device path, exercising the real device code path — `cryptsetup`/`blockdev` treat it identically to physical storage) rather than a raw file path. Verify the same break-glass clause pattern as Story 1.5's hardware test (bare `cryptsetup luksDump`/`isLuks` confirms the header and token), plus specifically verify AC #2's headroom claim: create with a size smaller than the loop device's capacity, then confirm via `blockdev --getsize64 /dev/loopN` and `cryptsetup luksDump`'s reported payload size that the LUKS2 payload is smaller than the full loop device, leaving free space. Detach the loop device (`losetup -d`) in a cleanup step regardless of test outcome
-  - [ ] Confirm `cargo test --test unit` / `make test` stay green, `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` pass, matching Story 1.5's completion bar
+  - [x] Confirm `cargo test --test unit` / `make test` stay green, `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` pass, matching Story 1.5's completion bar
 
 ### Project Structure Notes
 
@@ -122,6 +122,7 @@ so that I can use the tool directly against physical storage without an intermed
 - `tests/unit/fakes.rs` — `FakeLuksBackend`/`FakeFilesystemBackend` updated for new methods/signature
 - `tests/unit/create.rs` — 6 new device-mode tests (happy path × 2, header-conflict, confirmation-required, size-exceeds-capacity, failure-path)
 - `src/cli/main.rs` — `create` restructured into `create file`/`create device` subcommands, `confirm_device_wipe` interactive prompt
+- `tests/hardware/main.rs` — new loop-device-backed Device scenario (`create_a_device_backed_tomb_leaves_headroom_for_a_later_resize`), awaiting a manual `make test-hardware` run
 
 ## Change Log
 
@@ -129,3 +130,4 @@ so that I can use the tool directly against physical storage without an intermed
 - 2026-07-23: Task 3 — `Device` arm implementation, shared bootstrap/provision helper, device-mode unit tests
 - 2026-07-23: Task 6 — CLI `create file`/`create device` subcommand split with interactive wipe confirmation
 - 2026-07-23: fix — `luksFormat --size` doesn't work on this cryptsetup version; switched to `resize --device-size` on the open mapping
+- 2026-07-23: Task 7 (partial) — loop-device-backed hardware test written and compiling; awaiting user to run it (needs sudo + physical FIDO2 touch)
