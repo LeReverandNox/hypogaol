@@ -35,7 +35,7 @@ pub fn run(
             // remove it again before returning, or every future `create` at
             // this same destination would permanently hit `DestinationExists`
             // with no way to recover.
-            let result = bootstrap_file_backed(&path, filesystem, luks, fido2, fs);
+            let result = bootstrap_file_backed(&path, size, filesystem, luks, fido2, fs);
             if result.is_err() {
                 let _ = fs.remove_backing_file(&path);
             }
@@ -47,13 +47,14 @@ pub fn run(
 
 fn bootstrap_file_backed(
     path: &Path,
+    size: u64,
     filesystem: Filesystem,
     luks: &dyn LuksBackend,
     fido2: &dyn Fido2Backend,
     fs: &dyn FilesystemBackend,
 ) -> Result<(), DomainError> {
     let name = mapping_name::mapping_name(path)?;
-    let mapper = luks.bootstrap_format_and_open(path, &name, filesystem)?;
+    let mapper = luks.bootstrap_format_and_open(path, &name, size, filesystem)?;
 
     // Whatever happens next, a successfully opened mapping must be closed —
     // otherwise a mid-flow failure leaks an open `/dev/mapper/vault-*`

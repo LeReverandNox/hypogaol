@@ -8,13 +8,20 @@ pub trait LuksBackend {
     /// this port's real adapter needs; `Ok(())` means all are satisfied.
     fn check_prerequisites(&self) -> Result<(), Vec<String>>;
 
+    /// True if `path` already carries a LUKS2 header (AD-9's device-mode
+    /// refusal check) — a pure query, no mutation.
+    fn has_luks2_header(&self, path: &Path) -> Result<bool, DomainError>;
+
     /// Formats a brand-new LUKS2 header at `path` seeded with a transient random
     /// passphrase, then opens it as `name`, returning the resulting mapping
-    /// (AD-9). The transient passphrase never crosses into `domain`.
+    /// (AD-9). `size` constrains the LUKS2 payload to exactly that many bytes
+    /// of the underlying storage, leaving any remainder untouched (AC #2 of
+    /// Story 1.6). The transient passphrase never crosses into `domain`.
     fn bootstrap_format_and_open(
         &self,
         path: &Path,
         name: &str,
+        size: u64,
         filesystem: Filesystem,
     ) -> Result<MapperHandle, DomainError>;
 

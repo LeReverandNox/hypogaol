@@ -392,10 +392,23 @@ impl LuksBackend for ExecAdapter {
         }
     }
 
+    fn has_luks2_header(&self, path: &Path) -> Result<bool, DomainError> {
+        let output = Command::new("cryptsetup")
+            .args(["isLuks", "--type", "luks2"])
+            .arg(path)
+            .output()
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!("failed to run cryptsetup isLuks: {e}"))
+            })?;
+
+        Ok(output.status.success())
+    }
+
     fn bootstrap_format_and_open(
         &self,
         path: &Path,
         name: &str,
+        size: u64,
         filesystem: Filesystem,
     ) -> Result<MapperHandle, DomainError> {
         // v1 has only one Filesystem variant; luksFormat/luksOpen don't need
@@ -404,6 +417,11 @@ impl LuksBackend for ExecAdapter {
 
         let passphrase = generate_transient_passphrase().map_err(DomainError::AdapterFailure)?;
 
+        // `--size` takes 512-byte sectors (cryptsetup-luksFormat(8)); integer
+        // division loses at most 511 bytes of precision on a non-aligned
+        // request, acceptable for a max-size cap.
+        let size_sectors = (size / 512).to_string();
+
         run_piping_stdin(
             Command::new("cryptsetup")
                 .args([
@@ -411,6 +429,8 @@ impl LuksBackend for ExecAdapter {
                     "--type",
                     "luks2",
                     "--batch-mode",
+                    "--size",
+                    &size_sectors,
                     "--key-file",
                     "-",
                 ])
@@ -643,6 +663,32 @@ impl FilesystemBackend for ExecAdapter {
 
     fn path_exists(&self, path: &Path) -> bool {
         path.exists()
+    }
+
+    fn device_capacity(&self, path: &Path) -> Result<u64, DomainError> {
+        let output = Command::new("blockdev")
+            .arg("--getsize64")
+            .arg(path)
+            .output()
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!("failed to run blockdev --getsize64: {e}"))
+            })?;
+
+        if !output.status.success() {
+            return Err(DomainError::AdapterFailure(format!(
+                "blockdev --getsize64 failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+
+        String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<u64>()
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!(
+                    "failed to parse blockdev --getsize64 output: {e}"
+                ))
+            })
     }
 
     fn set_backing_file_size(&self, path: &Path, size: u64) -> Result<(), DomainError> {
