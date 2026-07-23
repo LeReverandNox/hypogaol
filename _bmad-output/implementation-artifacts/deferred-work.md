@@ -27,3 +27,8 @@
 ## Deferred from: code review of 1-5-create-a-file-backed-tomb (2026-07-23)
 
 - `enroll_fido2_key` hardcodes `--fido2-device=auto`, with no way to target a specific device when multiple FIDO2 authenticators are attached — a known v1 scope limitation, not required by this story's ACs. [src/adapters/exec/mod.rs:434]
+
+## Deferred from: code review of 1-6-create-a-device-backed-tomb (2026-07-23)
+
+- `has_luks2_header`/`device_capacity`/`luksFormat` shell out unprivileged against real block devices that are typically `root:disk` mode `660`, making `create device` effectively require the whole CLI run under `sudo` — undocumented in `--help`/output. [src/adapters/exec/mod.rs:395-732]
+- `has_luks2_header` only detects an existing LUKS2 header, not other filesystem/partition signatures (ext4, xfs, LVM PV, etc.) a device might already carry — matches AC #4's literal scope exactly; broader signature detection is a candidate for a future story. [src/adapters/exec/mod.rs:395-405]

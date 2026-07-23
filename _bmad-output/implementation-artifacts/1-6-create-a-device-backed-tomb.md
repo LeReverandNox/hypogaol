@@ -4,7 +4,7 @@ baseline_commit: f985288
 
 # Story 1.6: Create a Device-Backed Tomb
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -60,6 +60,22 @@ so that I can use the tool directly against physical storage without an intermed
     - [x] A device-branch failure-path test (mirroring Story 1.5's `enroll_failure_closes_the_mapping_and_removes_the_backing_file`) confirming the mapping is closed on failure but `remove_backing_file` is **never** called for the Device branch
   - [x] Hardware-gated test (manual-only, `make test-hardware`, AD-7, never CI): a real spare physical device/partition is destructive and unsafe to require — instead, back the "device" target with a **loop device** created from a disposable file (`losetup -f --show <file>` gives a genuine `/dev/loopN` block device path, exercising the real device code path — `cryptsetup`/`blockdev` treat it identically to physical storage) rather than a raw file path. Verify the same break-glass clause pattern as Story 1.5's hardware test (bare `cryptsetup luksDump`/`isLuks` confirms the header and token), plus specifically verify AC #2's headroom claim: create with a size smaller than the loop device's capacity, then confirm via `blockdev --getsize64 /dev/loopN` and `cryptsetup luksDump`'s reported payload size that the LUKS2 payload is smaller than the full loop device, leaving free space. Detach the loop device (`losetup -d`) in a cleanup step regardless of test outcome
   - [x] Confirm `cargo test --test unit` / `make test` stay green, `cargo clippy --all-targets -- -D warnings` and `cargo fmt --check` pass, matching Story 1.5's completion bar
+
+### Review Findings
+
+- [x] [Review][Decision] No guard against a TOCTOU race between `has_luks2_header`'s read and `luksFormat`'s write — resolved: leave as-is. The exposed window is ~10-100ms (two subprocess round-trips: `isLuks`/`blockdev`), not human-timescale — the interactive wipe confirmation already resolves to a bool before this window opens. Exploiting it needs another process able to write to the exact same device within that window, which is already outside this single-operator CLI's threat model. [src/domain/workflows/create.rs:55-57]
+
+- [x] [Review][Patch] `has_luks2_header` collapses every non-zero `cryptsetup isLuks` exit code into "no header" — a transient/unrelated cryptsetup failure (e.g. device busy, permission issue) on a device that already carries a real LUKS2 header would bypass AC #4's refusal and proceed to reformat it [src/adapters/exec/mod.rs:395-405] — fixed: only exit 1 ("not a LUKS device") now means no header; any other exit is an AdapterFailure (commit 46432b5)
+- [x] [Review][Patch] `bootstrap_format_and_open`'s new `resize --device-size` call runs after `luksOpen` has already opened the mapping; if `resize` fails, the function returns `Err` before ever producing a `MapperHandle`, so the caller's close-on-failure logic never runs and the open mapping leaks [src/adapters/exec/mod.rs:477-489, src/domain/workflows/create.rs:92-105] — fixed: closes the mapping itself before propagating the error (commit cc3cff2)
+- [x] [Review][Patch] Device-mode create with no `--size` given has no domain-level minimum-size floor (unlike the CLI's `parse_size`, which enforces `MIN_TOMB_SIZE_BYTES` only for an explicitly-typed size) — a small device defaults straight to its full (sub-minimum) capacity and fails deep inside cryptsetup/mkfs with a cryptic error instead of a clear refusal [src/domain/workflows/create.rs:62-73] — fixed: `MIN_TOMB_SIZE_BYTES` moved to `domain::workflows::create` and enforced on the resolved size regardless of source (commit 77ea551)
+- [x] [Review][Patch] Task 7's device happy-path unit tests don't actually assert the `size` value threaded into `bootstrap_format_and_open` — `FakeLuksBackend` discards it, so AC #2's "exact requested size" behavior has no unit-level regression coverage, only a manual hardware run [tests/unit/fakes.rs, tests/unit/create.rs] — fixed: `FakeLuksBackend` records the size it was called with; both happy-path tests now assert it directly (commit 77ea551)
+- [x] [Review][Patch] `confirm_device_wipe`'s exact-match confirmation logic — the sole automated gate against an accidental destructive wipe — has no unit test coverage [src/cli/main.rs:127-137] — fixed: extracted `confirms_wipe(&str) -> bool` with direct unit coverage (commit d538d79)
+- [x] [Review][Patch] `LoopDevice::attach`'s stale-loop-device cleanup runs `losetup -j` against the backing file only after the test has already deleted and recreated it (fresh inode), so a loop device orphaned by a previous interrupted hardware-test run is never matched or detached [tests/hardware/main.rs:133-147] — fixed: stale-check now runs before the backing file is deleted/recreated (commit ef51446)
+- [x] [Review][Patch] `CreateMode::Device` prints "Creating tomb at {path}..." unconditionally, even when the user just declined the wipe confirmation and the call is about to fail immediately [src/cli/main.rs:169-186] — fixed: gated behind `confirmed` (commit d538d79)
+- [x] [Review][Patch] `CreateMode::File` and `CreateMode::Device` match arms in `cli::main::run()` are near-identical boilerplate differing only in target construction and the confirmation prompt [src/cli/main.rs:143-190] — fixed: unified into a shared `run_create` helper (commit d538d79)
+
+- [x] [Review][Defer] `has_luks2_header`/`device_capacity`/`luksFormat` shell out unprivileged against real block devices that are typically `root:disk` mode `660`, making `create device` effectively require the whole CLI run under `sudo` — undocumented in `--help`/output [src/adapters/exec/mod.rs:395-732] — deferred, pre-existing/inherent constraint of running against real device nodes, already knowingly noted (not fixed) in this story's own Completion Notes
+- [x] [Review][Defer] `has_luks2_header` only detects an existing LUKS2 header, not other filesystem/partition signatures (ext4, xfs, LVM PV, etc.) a device might already carry [src/adapters/exec/mod.rs:395-405] — deferred, matches AC #4's literal scope exactly; broader signature detection is a candidate for a future story, not this one
 
 ### Project Structure Notes
 
