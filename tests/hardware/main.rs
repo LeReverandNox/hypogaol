@@ -8,14 +8,36 @@ use tomb_fido2::domain::workflows::create;
 /// Attaches a genuine `/dev/loopN` block device backed by a disposable file —
 /// `cryptsetup`/`blockdev` treat it identically to physical storage, so this
 /// exercises the real Device code path without requiring (and risking data
-/// loss on) a spare physical disk/partition. Detaches on drop regardless of
-/// how the test exits, including on panic.
+/// loss on) a spare physical disk/partition.
+///
+/// Deliberately does *not* auto-detach on drop: the whole point of this
+/// test's printed instructions is to let a human inspect the still-open
+/// tomb by hand afterward (mount, `dumpe2fs`, etc.), and an unconditional
+/// `Drop`-based `losetup -d` would tear the loop device down the instant the
+/// test function returns — before those instructions are ever followed.
+/// Detaching is the last step of the printed manual sequence instead. Any
+/// loop device left over from an interrupted previous run is cleaned up at
+/// the top of `attach` so repeated runs don't accumulate stale devices.
 struct LoopDevice {
     path: PathBuf,
 }
 
 impl LoopDevice {
     fn attach(backing_file: &std::path::Path) -> Self {
+        if let Ok(existing) = Command::new("sudo")
+            .args(["losetup", "-j"])
+            .arg(backing_file)
+            .output()
+        {
+            for line in String::from_utf8_lossy(&existing.stdout).lines() {
+                if let Some(stale_path) = line.split(':').next() {
+                    let _ = Command::new("sudo")
+                        .args(["losetup", "-d", stale_path])
+                        .output();
+                }
+            }
+        }
+
         let output = privileged_output("losetup", &["-f", "--show"], backing_file);
         assert!(
             output.status.success(),
@@ -24,16 +46,6 @@ impl LoopDevice {
         );
         let path = PathBuf::from(String::from_utf8_lossy(&output.stdout).trim());
         Self { path }
-    }
-}
-
-impl Drop for LoopDevice {
-    fn drop(&mut self) {
-        let _ = Command::new("sudo")
-            .arg("losetup")
-            .arg("-d")
-            .arg(&self.path)
-            .output();
     }
 }
 
@@ -200,9 +212,11 @@ fn create_a_device_backed_tomb_leaves_headroom_for_a_later_resize() {
          sudo cryptsetup open {} tomb-fido2-hardware-test-device\n  \
          sudo dumpe2fs -h /dev/mapper/tomb-fido2-hardware-test-device | grep -E 'Block count|Block size'\n  \
          # confirm block_count * block_size is close to {requested_size} bytes, not {capacity}\n  \
-         sudo cryptsetup close tomb-fido2-hardware-test-device",
+         sudo cryptsetup close tomb-fido2-hardware-test-device\n  \
+         sudo losetup -d {}",
         loop_device.path.display(),
         backing_file.display(),
+        loop_device.path.display(),
         loop_device.path.display(),
     );
 }
