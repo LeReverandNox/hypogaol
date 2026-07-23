@@ -63,6 +63,23 @@ so that I can access its contents in one guided step.
   - [x] Cover AC #2 by adding a second scenario using the existing `LoopDevice` helper (Story 1.6) as the unlock target instead of a plain file — proving the identical `unlock::run` call works unmodified against a device-backed target too. Detach the loop device as the final manual/automated step, following Story 1.6's established loop-device lifecycle.
   - [x] Same hardware-run environment caveat as Stories 1.5/1.6 applies: build with `cargo test --test hardware --no-run` as the normal user, then run the compiled test binary under `sudo` outside the Nix devShell (this sandbox's devShell `cryptsetup`/`systemd` have an empty token-plugin search path) — do not assume `cargo test --test hardware -- --ignored` alone will work here.
 
+### Review Findings
+
+- [x] [Review][Decision] World-readable decrypted tomb once mounted — resolved: patch now, `chmod 0700` the mount point after a successful mount [src/adapters/exec/mod.rs:886-915]
+- [x] [Review][Patch] Restrict the mount point to owner-only (`chmod 0700` after a successful mount) — currently created under world-traversable `/tmp` with default permissions, no restricting mount options; any local user can read the just-unlocked tomb's plaintext, defeating the FIDO2 gate [src/adapters/exec/mod.rs:886-915]
+- [x] [Review][Patch] Open mapping leaks if `actual_raw_size` fails [src/adapters/exec/mod.rs:539]
+- [x] [Review][Patch] `mount`'s spawn-failure path also leaks the mount-point directory [src/adapters/exec/mod.rs:900-904]
+- [x] [Review][Patch] Hardware test's `assert_actually_mounted` never checks the device is mounted at the specific returned mountpoint, only that it's mounted somewhere [tests/hardware/main.rs]
+- [x] [Review][Patch] Redundant, context-free error message on `LuksBackend::open` failure — no path/name/exit-code, unlike sibling adapter methods [src/adapters/exec/mod.rs:686-712]
+- [x] [Review][Patch] CLI prints the "touch your security key" prompt before `preflight::check` runs, so a missing-binary error follows an irrelevant touch prompt [src/cli/main.rs run_unlock]
+- [x] [Review][Patch] New hardware test helpers clean up (unmount/close/detach) via trailing statements, not `Drop` — an assertion failure mid-test leaks mount/mapping/loop-device state [tests/hardware/main.rs]
+- [x] [Review][Patch] Story's own Project Structure Notes don't mention the bundled Story 1.6 `bootstrap_format_and_open` resize fix, though it's disclosed in Completion Notes [_bmad-output/implementation-artifacts/1-7-unlock-and-mount-a-tomb.md Project Structure Notes]
+- [x] [Review][Defer] Resize guard (`raw_size > size`) fixes only the exact observed failure, not the general "not enough headroom" constraint [src/adapters/exec/mod.rs:540] — deferred, pre-existing
+- [x] [Review][Defer] No automated regression coverage for the `actual_raw_size`/resize-guard fix — only caught via manual hardware run [tests/unit] — deferred, pre-existing
+- [x] [Review][Defer] Mount-directory name embeds the deterministic mapping-name hash, a minor local fingerprinting side channel under a world-traversable `/tmp` [src/adapters/exec/mod.rs:888] — deferred, pre-existing
+- [x] [Review][Defer] No plain-language wrapping of unlock failure paths (wrong/missing key, bad PIN, not a LUKS2 header) — explicitly Story 1.8's scope per this story's own Dev Notes — deferred, pre-existing
+- [x] [Review][Defer] No forward story currently closes the mount-exposure window until Story 3.1's `close` ships — process observation, not a code defect — deferred, pre-existing
+
 ## Dev Notes
 
 - **This story adds the first genuinely new port methods since Story 1.6** — `LuksBackend::open` and `FilesystemBackend::mount` don't exist yet. Everything else needed (`mapping_name`, `preflight`, `MapperHandle`, `luks.close`) already exists and is reused unchanged. [Source: src/ports/{luks_backend,filesystem_backend}.rs; src/domain/{mapping_name,preflight}.rs]
@@ -77,7 +94,7 @@ so that I can access its contents in one guided step.
 
 ### Project Structure Notes
 
-- Modified: `src/ports/luks_backend.rs` (new `open`), `src/ports/filesystem_backend.rs` (new `mount`), `src/domain/workflows/unlock.rs` (`run` implemented, new signature/return type), `src/adapters/exec/mod.rs` (real `open`/`mount`, `"mount"` added to `FilesystemBackend::check_prerequisites`), `src/cli/main.rs` (new `Commands::Unlock` variant + match arm), `tests/unit/fakes.rs` (new fake methods), `tests/unit/workflows.rs` (fixed call site only), `tests/hardware/main.rs` (new scenario(s)).
+- Modified: `src/ports/luks_backend.rs` (new `open`), `src/ports/filesystem_backend.rs` (new `mount`), `src/domain/workflows/unlock.rs` (`run` implemented, new signature/return type), `src/adapters/exec/mod.rs` (real `open`/`mount`, `"mount"` added to `FilesystemBackend::check_prerequisites`, plus an unrelated pre-existing Story 1.6 bug fix in `bootstrap_format_and_open`'s `resize` call — see Completion Notes), `src/cli/main.rs` (new `Commands::Unlock` variant + match arm), `tests/unit/fakes.rs` (new fake methods), `tests/unit/workflows.rs` (fixed call site only), `tests/hardware/main.rs` (new scenario(s)).
 - New file: `tests/unit/unlock.rs` (register in `tests/unit/main.rs`'s `mod` list).
 - Do **not** touch `src/domain/workflows/{close,resize,enroll,revoke}.rs` (out of scope — Stories 1.8/2.x/3.x), `src/cli/ux.rs` (stays empty — Story 1.8's plain-language boundary), `src/domain/types.rs` (no new type needed — `MapperHandle`/`PathBuf` already sufficient), or any LUKS2 token metadata reading (that's `resize`'s concern per AD-2, not unlock's).
 - Consistent with `ARCHITECTURE-SPINE.md`'s Structural Seed: `ports/*` gain their next AD-anticipated methods (`open`, `mount` — without their eventual `read_only` param, deferred to Story 3.3 per the Dev Notes above), `adapters/exec/` gains the corresponding real subprocess logic, `cli/main.rs` gains its second real clap subcommand, `tests/hardware/` gains its third scenario.
