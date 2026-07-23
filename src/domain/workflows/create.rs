@@ -35,17 +35,52 @@ pub fn run(
             // remove it again before returning, or every future `create` at
             // this same destination would permanently hit `DestinationExists`
             // with no way to recover.
-            let result = bootstrap_file_backed(&path, size, filesystem, luks, fido2, fs);
+            let result = bootstrap_and_provision(&path, size, filesystem, luks, fido2, fs);
             if result.is_err() {
                 let _ = fs.remove_backing_file(&path);
             }
             result
         }
-        CreateTarget::Device { .. } => todo!(),
+        CreateTarget::Device {
+            path,
+            size,
+            confirmed,
+        } => {
+            // Order is load-bearing (AD-9): the header check must win even
+            // when `confirmed` is true (AC #4), so it runs unconditionally
+            // first. Confirmation is checked second, independent of header
+            // state (AC #5). Size resolution/validation runs last, since it
+            // needs an extra adapter call and has no bearing on whether the
+            // destination should be refused outright.
+            if luks.has_luks2_header(&path)? {
+                return Err(DomainError::DeviceAlreadyFormatted(path));
+            }
+            if !confirmed {
+                return Err(DomainError::DeviceConfirmationRequired);
+            }
+
+            let capacity = fs.device_capacity(&path)?;
+            let resolved_size = match size {
+                Some(requested) if requested > capacity => {
+                    return Err(DomainError::DeviceSizeExceedsCapacity {
+                        path,
+                        requested,
+                        capacity,
+                    });
+                }
+                Some(requested) => requested,
+                None => capacity,
+            };
+
+            // No backing file was ever created for a device/partition target,
+            // so — unlike the File branch — a failure here must not attempt
+            // any file removal.
+            bootstrap_and_provision(&path, resolved_size, filesystem, luks, fido2, fs)
+        }
     }
 }
 
-fn bootstrap_file_backed(
+fn bootstrap_and_provision(
     path: &Path,
     size: u64,
     filesystem: Filesystem,
@@ -60,7 +95,7 @@ fn bootstrap_file_backed(
     // otherwise a mid-flow failure leaks an open `/dev/mapper/vault-*`
     // mapping indefinitely, same as this story's post-review hardware-run fix
     // for the happy path, just extended to the failure paths too.
-    let result = finish_file_backed(&mapper, filesystem, luks, fido2, fs);
+    let result = finish_provisioning(&mapper, filesystem, luks, fido2, fs);
     match result {
         Ok(()) => luks.close(&mapper),
         Err(err) => {
@@ -70,7 +105,7 @@ fn bootstrap_file_backed(
     }
 }
 
-fn finish_file_backed(
+fn finish_provisioning(
     mapper: &MapperHandle,
     filesystem: Filesystem,
     luks: &dyn LuksBackend,
