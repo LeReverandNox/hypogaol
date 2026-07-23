@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::adapters::exec::ExecAdapter;
+use crate::domain::preflight;
 use crate::domain::types::{CreateTarget, Filesystem};
 use crate::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
 use crate::domain::workflows::unlock;
@@ -166,14 +167,23 @@ fn run_create(target: CreateTarget, filesystem: Filesystem, display_path: &str, 
     println!("Tomb created at {display_path}.");
 }
 
-/// Builds the adapter, runs `unlock::run`, and reports the result. Prints a
-/// plain-language line before calling `unlock::run` (FR5/NFR3 — prompts
-/// assume zero FIDO2 knowledge); `cryptsetup`'s own systemd-fido2 prompt text
-/// still appears as-is via inherited stdio, same accepted limitation as
-/// `enroll`'s `systemd-cryptenroll` prompt, and is left untranslated here
-/// (Story 1.8's job, not this one's).
+/// Builds the adapter, runs `unlock::run`, and reports the result. Checks
+/// preflight first so a missing-dependency error surfaces before the
+/// touch-key prompt below, rather than after it — `unlock::run` re-checks
+/// preflight itself regardless (AD-4), so this is a cheap, side-effect-free
+/// re-check, not a bypass. Prints a plain-language line before calling
+/// `unlock::run` (FR5/NFR3 — prompts assume zero FIDO2 knowledge);
+/// `cryptsetup`'s own systemd-fido2 prompt text still appears as-is via
+/// inherited stdio, same accepted limitation as `enroll`'s
+/// `systemd-cryptenroll` prompt, and is left untranslated here (Story 1.8's
+/// job, not this one's).
 fn run_unlock(path: PathBuf) {
     let adapter = ExecAdapter::default();
+
+    if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
+        eprintln!("{err}");
+        std::process::exit(1);
+    }
 
     println!("Touch your security key now (you may also be asked for its PIN).");
 
