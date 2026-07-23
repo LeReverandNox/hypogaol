@@ -46,10 +46,10 @@ so that I can access its contents in one guided step.
     ```
   - [x] This close-on-mount-failure step is not optional: leaving a successfully-opened mapping dangling on a mount error is the exact class of bug Story 1.6's post-review found and fixed for `create` ("if `resize` fails, the caller's close-on-failure logic never runs and the open mapping leaks" — [Source: 1-6-create-a-device-backed-tomb.md Review Findings]). Apply the same discipline here from the start.
   - [x] AC #2 requires zero branching on target type — do not add any `if path.is_file()`-style check anywhere in this function or the adapter calls it makes. `mapping_name`, `LuksBackend::open`, and `FilesystemBackend::mount` already treat file- and device-backed targets identically (confirmed by Story 1.6's Dev Notes re: `mapping_name`), so satisfying AC #2 requires writing nothing target-type-specific, not adding a code path.
-- [ ] Task 4: Wire the CLI's `unlock` subcommand (AC: #1)
-  - [ ] Add `Commands::Unlock { path: PathBuf }` to `src/cli/main.rs`'s `Commands` enum (currently only `Create`), taking a single required `--path` (or positional — match `create`'s existing `--path` flag style for consistency).
-  - [ ] Print a plain-language line before calling `unlock::run` — e.g. `"Touch your security key now (you may also be asked for its PIN)."` — satisfying FR5/NFR3's "prompts use plain language assuming zero FIDO2 knowledge" for the tool's *own* messaging. `cryptsetup`'s own interactive text from the systemd-fido2 plugin still appears as-is via inherited stdio (same accepted limitation as `systemd-cryptenroll`'s prompt in `create`); translating *that* text is explicitly Story 1.8's job, not this one's — do not touch `src/cli/ux.rs` (stays empty, per Story 1.6's Project Structure Notes).
-  - [ ] On success, print the returned mount point, e.g. `"Tomb unlocked and mounted at {mountpoint}."`. On error, `eprintln!("{err}"); std::process::exit(1);` — identical pattern to `run_create`'s existing error handling.
+- [x] Task 4: Wire the CLI's `unlock` subcommand (AC: #1)
+  - [x] Add `Commands::Unlock { path: PathBuf }` to `src/cli/main.rs`'s `Commands` enum (currently only `Create`), taking a single required `--path` (or positional — match `create`'s existing `--path` flag style for consistency).
+  - [x] Print a plain-language line before calling `unlock::run` — e.g. `"Touch your security key now (you may also be asked for its PIN)."` — satisfying FR5/NFR3's "prompts use plain language assuming zero FIDO2 knowledge" for the tool's *own* messaging. `cryptsetup`'s own interactive text from the systemd-fido2 plugin still appears as-is via inherited stdio (same accepted limitation as `systemd-cryptenroll`'s prompt in `create`); translating *that* text is explicitly Story 1.8's job, not this one's — do not touch `src/cli/ux.rs` (stays empty, per Story 1.6's Project Structure Notes).
+  - [x] On success, print the returned mount point, e.g. `"Tomb unlocked and mounted at {mountpoint}."`. On error, `eprintln!("{err}"); std::process::exit(1);` — identical pattern to `run_create`'s existing error handling.
 - [ ] Task 5: Fakes and unit tests (AC: #1, #2, #3)
   - [ ] `FakeLuksBackend::open`: log `"open"`, honor the existing generic `fail_at`/`fail_if` mechanism (no new field needed — it's already call-name-keyed), and record the `(path, name)` it was called with (add `last_open: RefCell<Option<(PathBuf, String)>>` + a `last_open()` accessor, mirroring the existing `last_bootstrap_size()` pattern) so a test can assert AC #3's exact derived name without re-deriving it by hand.
   - [ ] `FakeFilesystemBackend::mount`: log `"mount"`, honor `fail_at`/`fail_if`, return a deterministic `Ok(PathBuf::from(format!("/tmp/fake-mount-{}", mapper.name)))` by default.
@@ -110,6 +110,7 @@ so that I can access its contents in one guided step.
 - Task 1: Added `LuksBackend::open`, real `ExecAdapter` impl using `cryptsetup open --token-only` with inherited stdio (`.status()`), and `FakeLuksBackend::open` (`last_open()` accessor) so the suite keeps compiling. `cargo test --test unit` green (31 passed).
 - Task 2: Added `FilesystemBackend::mount`, real `ExecAdapter` impl (fresh temp-dir mount point via a `random_hex_suffix` helper factored out of `TempKeyFile::create`'s existing random-suffix generation, then `privileged("mount")`, with best-effort mount-point removal on failure), `"mount"` added to `check_prerequisites`'s required binaries, and `FakeFilesystemBackend::mount`. `cargo test --test unit` green (31 passed).
 - Task 3: Implemented `unlock::run(path, luks, fido2, fs) -> Result<PathBuf, DomainError>` (preflight → `mapping_name` → `luks.open` → `fs.mount`, closing the mapping if `mount` fails). The signature change immediately broke `tests/unit/workflows.rs`'s existing preflight-gate test call site, so that call-site fix (Task 5's listed subtask) was applied here in the same commit to keep the build green, matching Story 1.6's precedent (`d9d35ff`). `cargo test --test unit` green (31 passed).
+- Task 4: Added `Commands::Unlock { path }` to the CLI (`--path` flag, matching `create`'s style), printing a plain-language touch/PIN prompt before calling `unlock::run`, the mount point on success, and `eprintln!`/`exit(1)` on error (identical pattern to `run_create`). Manually verified `cargo run -- unlock --help`. `cargo test --test unit` green (31 passed).
 
 ### File List
 
@@ -117,5 +118,6 @@ so that I can access its contents in one guided step.
 - Modified: `src/ports/filesystem_backend.rs`
 - Modified: `src/adapters/exec/mod.rs`
 - Modified: `src/domain/workflows/unlock.rs`
+- Modified: `src/cli/main.rs`
 - Modified: `tests/unit/fakes.rs`
 - Modified: `tests/unit/workflows.rs`
