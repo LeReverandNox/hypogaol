@@ -401,7 +401,22 @@ impl LuksBackend for ExecAdapter {
                 DomainError::AdapterFailure(format!("failed to run cryptsetup isLuks: {e}"))
             })?;
 
-        Ok(output.status.success())
+        // Confirmed empirically on this machine's cryptsetup: exit 0 = is a
+        // LUKS2 device, exit 1 = not a LUKS device (the true "no header"
+        // case). Any other code (2 wrong parameters, 3 out of memory, 4
+        // device does not exist/access denied, 5 device busy, or no code at
+        // all) means isLuks could not actually determine header status —
+        // collapsing those into "no header" would let a permission or
+        // transient error silently bypass AC #4's refusal.
+        match output.status.code() {
+            Some(0) => Ok(true),
+            Some(1) => Ok(false),
+            _ => Err(DomainError::AdapterFailure(format!(
+                "cryptsetup isLuks could not determine LUKS2 header status for {}: {}",
+                path.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ))),
+        }
     }
 
     fn bootstrap_format_and_open(
