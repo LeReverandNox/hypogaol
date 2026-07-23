@@ -16,14 +16,23 @@ use tomb_fido2::domain::workflows::create;
 /// `Drop`-based `losetup -d` would tear the loop device down the instant the
 /// test function returns — before those instructions are ever followed.
 /// Detaching is the last step of the printed manual sequence instead. Any
-/// loop device left over from an interrupted previous run is cleaned up at
-/// the top of `attach` so repeated runs don't accumulate stale devices.
+/// loop device left over from an interrupted previous run is cleaned up via
+/// `detach_stale`, called by the test *before* it deletes/recreates the
+/// backing file (see that function's own doc comment for why the ordering
+/// matters) so repeated runs don't accumulate stale devices.
 struct LoopDevice {
     path: PathBuf,
 }
 
 impl LoopDevice {
-    fn attach(backing_file: &std::path::Path) -> Self {
+    /// Detaches any loop device still bound to `backing_file` from a
+    /// previous, interrupted run. Must be called with the backing file in
+    /// the state a prior run left it in — i.e. *before* the caller deletes
+    /// and recreates it. `losetup -j` matches a backing file by its current
+    /// dev/inode; once the file is recreated it gets a fresh inode, and a
+    /// loop device still bound to the old (now-orphaned) inode can no
+    /// longer be found this way.
+    fn detach_stale(backing_file: &std::path::Path) {
         if let Ok(existing) = Command::new("sudo")
             .args(["losetup", "-j"])
             .arg(backing_file)
@@ -37,7 +46,9 @@ impl LoopDevice {
                 }
             }
         }
+    }
 
+    fn attach(backing_file: &std::path::Path) -> Self {
         let output = privileged_output("losetup", &["-f", "--show"], backing_file);
         assert!(
             output.status.success(),
@@ -131,9 +142,14 @@ fn create_a_file_backed_tomb_is_independently_unlockable_via_bare_cryptsetup() {
 #[ignore]
 fn create_a_device_backed_tomb_leaves_headroom_for_a_later_resize() {
     let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-device");
+    let backing_file = dir.join("loop-backing.img");
+
+    // Must run before the backing file is deleted/recreated below — see
+    // `detach_stale`'s doc comment.
+    LoopDevice::detach_stale(&backing_file);
+
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
-    let backing_file = dir.join("loop-backing.img");
 
     let loop_capacity: u64 = 64 * 1024 * 1024;
     let requested_size: u64 = 32 * 1024 * 1024;
