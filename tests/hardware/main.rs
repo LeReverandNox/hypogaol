@@ -238,22 +238,31 @@ fn create_a_device_backed_tomb_leaves_headroom_for_a_later_resize() {
     );
 }
 
-/// Confirms `findmnt` recognizes `device_node` as actually mounted at
-/// `mountpoint` — the real, kernel-level check backing AC #1's "the mounted
-/// filesystem becomes accessible at a discoverable mount point (via the
-/// kernel's mount table)" claim.
+/// Confirms `findmnt` recognizes `device_node` as actually mounted, and
+/// specifically at `mountpoint` — the real, kernel-level check backing AC
+/// #1's "the mounted filesystem becomes accessible at a discoverable mount
+/// point (via the kernel's mount table)" claim. Checking `TARGET` (not just
+/// that `device_node` is mounted *somewhere*) catches a bug that mounted the
+/// right device at the wrong directory.
 fn assert_actually_mounted(device_node: &std::path::Path, mountpoint: &std::path::Path) {
     let output = Command::new("findmnt")
-        .arg("--source")
+        .args(["-n", "-o", "TARGET", "--source"])
         .arg(device_node)
         .output()
         .expect("failed to run findmnt");
     assert!(
         output.status.success(),
-        "expected {} to be mounted at {}, findmnt found nothing: {}",
+        "expected {} to be mounted, findmnt found nothing: {}",
         device_node.display(),
-        mountpoint.display(),
         String::from_utf8_lossy(&output.stderr)
+    );
+
+    let actual_target = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    assert_eq!(
+        actual_target,
+        mountpoint.display().to_string(),
+        "{} is mounted, but not at the mount point unlock::run returned",
+        device_node.display()
     );
 }
 
