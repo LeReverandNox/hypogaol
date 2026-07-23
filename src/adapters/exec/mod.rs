@@ -417,11 +417,6 @@ impl LuksBackend for ExecAdapter {
 
         let passphrase = generate_transient_passphrase().map_err(DomainError::AdapterFailure)?;
 
-        // `--size` takes 512-byte sectors (cryptsetup-luksFormat(8)); integer
-        // division loses at most 511 bytes of precision on a non-aligned
-        // request, acceptable for a max-size cap.
-        let size_sectors = (size / 512).to_string();
-
         run_piping_stdin(
             Command::new("cryptsetup")
                 .args([
@@ -429,8 +424,6 @@ impl LuksBackend for ExecAdapter {
                     "--type",
                     "luks2",
                     "--batch-mode",
-                    "--size",
-                    &size_sectors,
                     "--key-file",
                     "-",
                 ])
@@ -447,6 +440,32 @@ impl LuksBackend for ExecAdapter {
             passphrase.as_bytes(),
         )
         .map_err(DomainError::AdapterFailure)?;
+
+        // `luksFormat --size`/`-b` is rejected outright by this installed
+        // cryptsetup version ("Option --size is not allowed with luksFormat
+        // action" — confirmed empirically, contradicting the generic --help
+        // listing and this story's original assumption). The documented
+        // mechanism to constrain a LUKS2 mapping to less than the underlying
+        // device's full capacity is instead `cryptsetup resize --device-size`
+        // on the already-open mapping (cryptsetup-resize(8)); it takes a
+        // plain byte count with no unit suffix, so no sector-rounding
+        // precision loss. Must run before mkfs (a separate port call) ever
+        // sees the mapped device. Harmless no-op for file-backed create,
+        // where `size` already equals the backing file's own exact size.
+        let resize_output = privileged("cryptsetup")
+            .args(["resize", "--device-size", &size.to_string()])
+            .arg(name)
+            .output()
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!("failed to run cryptsetup resize: {e}"))
+            })?;
+
+        if !resize_output.status.success() {
+            return Err(DomainError::AdapterFailure(format!(
+                "cryptsetup resize --device-size failed: {}",
+                String::from_utf8_lossy(&resize_output.stderr).trim()
+            )));
+        }
 
         // Not wiped yet: enroll_fido2_key still needs it to authenticate
         // adding the real key's keyslot. Cached here, never surfaced to
