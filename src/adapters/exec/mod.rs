@@ -452,20 +452,30 @@ impl LuksBackend for ExecAdapter {
         // precision loss. Must run before mkfs (a separate port call) ever
         // sees the mapped device. Harmless no-op for file-backed create,
         // where `size` already equals the backing file's own exact size.
-        let resize_output = privileged("cryptsetup")
-            .args(["resize", "--device-size", &size.to_string()])
-            .arg(name)
-            .output()
-            .map_err(|e| {
-                DomainError::AdapterFailure(format!("failed to run cryptsetup resize: {e}"))
-            })?;
-
-        if !resize_output.status.success() {
-            return Err(DomainError::AdapterFailure(format!(
-                "cryptsetup resize --device-size failed: {}",
-                String::from_utf8_lossy(&resize_output.stderr).trim()
-            )));
-        }
+        //
+        // `resize` normally re-authenticates via the LUKS2 kernel keyring
+        // rather than a passphrase — but that keyring lookup is scoped to
+        // the calling process/session, and `luksOpen` and `resize` here are
+        // two separate `sudo cryptsetup` invocations, so the key isn't
+        // visible across them (confirmed empirically on real hardware:
+        // resize fell back to an interactive passphrase prompt against a
+        // stdin this adapter leaves unattached, producing "Nothing to read
+        // on input."). Piping the still-in-scope transient passphrase via
+        // `--key-file -`, the same non-interactive mechanism already used
+        // for `luksFormat`/`luksOpen`, sidesteps the keyring entirely.
+        run_piping_stdin(
+            privileged("cryptsetup")
+                .args([
+                    "resize",
+                    "--device-size",
+                    &size.to_string(),
+                    "--key-file",
+                    "-",
+                ])
+                .arg(name),
+            passphrase.as_bytes(),
+        )
+        .map_err(DomainError::AdapterFailure)?;
 
         // Not wiped yet: enroll_fido2_key still needs it to authenticate
         // adding the real key's keyslot. Cached here, never surfaced to
