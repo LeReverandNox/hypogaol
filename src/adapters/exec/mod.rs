@@ -897,11 +897,19 @@ impl FilesystemBackend for ExecAdapter {
         // No `-t`: let mount auto-detect the filesystem type from the
         // superblock (standard kernel behavior) rather than re-deriving it
         // from LUKS2 token metadata unlock has no other reason to read.
-        let output = privileged("mount")
+        let output = match privileged("mount")
             .arg(mapper.device_node())
             .arg(&mountpoint)
             .output()
-            .map_err(|e| DomainError::AdapterFailure(format!("failed to run mount: {e}")))?;
+        {
+            Ok(output) => output,
+            Err(e) => {
+                let _ = std::fs::remove_dir(&mountpoint);
+                return Err(DomainError::AdapterFailure(format!(
+                    "failed to run mount: {e}"
+                )));
+            }
+        };
 
         if output.status.success() {
             Ok(mountpoint)
