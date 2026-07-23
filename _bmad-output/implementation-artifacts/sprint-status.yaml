@@ -55,7 +55,7 @@ development_status:
   1-4-dependency-preflight-check: done
   1-5-create-a-file-backed-tomb: done
   1-6-create-a-device-backed-tomb: done
-  1-7-unlock-and-mount-a-tomb: review
+  1-7-unlock-and-mount-a-tomb: done
   1-8-unified-cli-dispatch-plain-language-errors: backlog
   epic-1-retrospective: optional
 
