@@ -1,4 +1,5 @@
 use tomb_fido2::domain::errors::DomainError;
+use tomb_fido2::domain::types::{CreateTarget, Filesystem};
 use tomb_fido2::domain::workflows::{close, create, resize, unlock};
 
 use crate::fakes::{FakeFido2Backend, FakeFilesystemBackend, FakeLuksBackend};
@@ -13,7 +14,12 @@ fn create_run_stops_at_preflight_before_reaching_its_own_todo() {
     let fido2 = FakeFido2Backend::passing();
     let fs = FakeFilesystemBackend::passing();
 
-    let result = create::run(&luks, &fido2, &fs);
+    let target = CreateTarget::File {
+        path: std::path::PathBuf::from("/tmp/does-not-matter"),
+        size: 1024,
+    };
+
+    let result = create::run(target, Filesystem::Ext4, &luks, &fido2, &fs);
 
     assert!(matches!(result, Err(DomainError::PreflightFailed(_))));
 }

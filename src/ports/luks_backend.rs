@@ -20,7 +20,11 @@ pub trait LuksBackend {
 
     /// Enrolls the real FIDO2 key as a `systemd-fido2` token+keyslot, writing
     /// `metadata`'s fields onto that same token object (AD-2).
-    fn enroll_fido2_key(&self, mapper: &MapperHandle, metadata: KeyMetadata) -> Result<(), DomainError>;
+    fn enroll_fido2_key(
+        &self,
+        mapper: &MapperHandle,
+        metadata: KeyMetadata,
+    ) -> Result<(), DomainError>;
 
     /// Live keyslots with an associated `systemd-fido2` token, read fresh from
     /// the header every call — the only legitimate way to count valid keyslots (AD-5).

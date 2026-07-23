@@ -50,7 +50,11 @@ pub fn run() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Create { path, size, filesystem } => {
+        Commands::Create {
+            path,
+            size,
+            filesystem,
+        } => {
             let adapter = ExecAdapter::default();
             let target = CreateTarget::File { path, size };
 

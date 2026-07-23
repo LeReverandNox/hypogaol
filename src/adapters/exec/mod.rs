@@ -100,7 +100,9 @@ fn run_piping_stdin(cmd: &mut Command, input: &[u8]) -> Result<(), String> {
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
-    let mut child = cmd.spawn().map_err(|e| format!("failed to spawn {cmd:?}: {e}"))?;
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("failed to spawn {cmd:?}: {e}"))?;
     child
         .stdin
         .take()
@@ -128,7 +130,9 @@ fn dump_json_metadata(path: &Path) -> Result<Value, DomainError> {
         .arg("--dump-json-metadata")
         .arg(path)
         .output()
-        .map_err(|e| DomainError::AdapterFailure(format!("failed to run cryptsetup luksDump: {e}")))?;
+        .map_err(|e| {
+            DomainError::AdapterFailure(format!("failed to run cryptsetup luksDump: {e}"))
+        })?;
 
     if !output.status.success() {
         return Err(DomainError::AdapterFailure(format!(
@@ -145,7 +149,9 @@ fn tokens_object(metadata: &Value) -> Result<&serde_json::Map<String, Value>, Do
     metadata
         .get("tokens")
         .and_then(Value::as_object)
-        .ok_or_else(|| DomainError::AdapterFailure("luksDump JSON missing a tokens object".to_string()))
+        .ok_or_else(|| {
+            DomainError::AdapterFailure("luksDump JSON missing a tokens object".to_string())
+        })
 }
 
 fn find_systemd_fido2_token_id(path: &Path) -> Result<String, DomainError> {
@@ -156,21 +162,29 @@ fn find_systemd_fido2_token_id(path: &Path) -> Result<String, DomainError> {
         .iter()
         .find(|(_, token)| token.get("type").and_then(Value::as_str) == Some("systemd-fido2"))
         .map(|(id, _)| id.clone())
-        .ok_or_else(|| DomainError::AdapterFailure("no systemd-fido2 token found after enrollment".to_string()))
+        .ok_or_else(|| {
+            DomainError::AdapterFailure("no systemd-fido2 token found after enrollment".to_string())
+        })
 }
 
 impl ExecAdapter {
     /// Writes `metadata`'s fields directly onto the `systemd-fido2` token
     /// `systemd-cryptenroll` just created (AD-2 — confirmed by Story 1.5's
     /// Task 1 spike that the plugin tolerates these extra fields).
-    fn write_fido2_token_metadata(&self, path: &Path, metadata: KeyMetadata) -> Result<(), DomainError> {
+    fn write_fido2_token_metadata(
+        &self,
+        path: &Path,
+        metadata: KeyMetadata,
+    ) -> Result<(), DomainError> {
         let token_id = find_systemd_fido2_token_id(path)?;
 
         let export = Command::new("cryptsetup")
             .args(["token", "export", "--token-id", &token_id])
             .arg(path)
             .output()
-            .map_err(|e| DomainError::AdapterFailure(format!("failed to run cryptsetup token export: {e}")))?;
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!("failed to run cryptsetup token export: {e}"))
+            })?;
 
         if !export.status.success() {
             return Err(DomainError::AdapterFailure(format!(
@@ -179,8 +193,9 @@ impl ExecAdapter {
             )));
         }
 
-        let mut token: Value = serde_json::from_slice(&export.stdout)
-            .map_err(|e| DomainError::AdapterFailure(format!("failed to parse exported token JSON: {e}")))?;
+        let mut token: Value = serde_json::from_slice(&export.stdout).map_err(|e| {
+            DomainError::AdapterFailure(format!("failed to parse exported token JSON: {e}"))
+        })?;
 
         // systemd-cryptenroll already wrote this at enroll time; it is the
         // FIDO2 credential ID, non-secret (AD-3).
@@ -199,21 +214,31 @@ impl ExecAdapter {
             Filesystem::Ext4 => "ext4",
         };
 
-        let object = token
-            .as_object_mut()
-            .ok_or_else(|| DomainError::AdapterFailure("exported token JSON was not an object".to_string()))?;
+        let object = token.as_object_mut().ok_or_else(|| {
+            DomainError::AdapterFailure("exported token JSON was not an object".to_string())
+        })?;
 
         object.insert("key_label".to_string(), Value::String(metadata.key_label));
-        object.insert("filesystem".to_string(), Value::String(filesystem_name.to_string()));
+        object.insert(
+            "filesystem".to_string(),
+            Value::String(filesystem_name.to_string()),
+        );
         object.insert("credential_id".to_string(), Value::String(credential_id));
         object.insert("created_at".to_string(), Value::String(created_at));
 
-        let payload = serde_json::to_vec(&token)
-            .map_err(|e| DomainError::AdapterFailure(format!("failed to serialize updated token JSON: {e}")))?;
+        let payload = serde_json::to_vec(&token).map_err(|e| {
+            DomainError::AdapterFailure(format!("failed to serialize updated token JSON: {e}"))
+        })?;
 
         run_piping_stdin(
             Command::new("cryptsetup")
-                .args(["token", "import", "--token-id", &token_id, "--token-replace"])
+                .args([
+                    "token",
+                    "import",
+                    "--token-id",
+                    &token_id,
+                    "--token-replace",
+                ])
                 .arg(path),
             &payload,
         )
@@ -255,13 +280,25 @@ impl LuksBackend for ExecAdapter {
         let passphrase = generate_transient_passphrase().map_err(DomainError::AdapterFailure)?;
 
         run_piping_stdin(
-            Command::new("cryptsetup").args(["luksFormat", "--type", "luks2", "--batch-mode", "--key-file", "-"]).arg(path),
+            Command::new("cryptsetup")
+                .args([
+                    "luksFormat",
+                    "--type",
+                    "luks2",
+                    "--batch-mode",
+                    "--key-file",
+                    "-",
+                ])
+                .arg(path),
             passphrase.as_bytes(),
         )
         .map_err(DomainError::AdapterFailure)?;
 
         run_piping_stdin(
-            Command::new("cryptsetup").args(["luksOpen", "--key-file", "-"]).arg(path).arg(name),
+            Command::new("cryptsetup")
+                .args(["luksOpen", "--key-file", "-"])
+                .arg(path)
+                .arg(name),
             passphrase.as_bytes(),
         )
         .map_err(DomainError::AdapterFailure)?;
@@ -277,12 +314,21 @@ impl LuksBackend for ExecAdapter {
         })
     }
 
-    fn enroll_fido2_key(&self, mapper: &MapperHandle, metadata: KeyMetadata) -> Result<(), DomainError> {
-        let passphrase = self.transient_passphrase.borrow_mut().take().ok_or_else(|| {
-            DomainError::AdapterFailure(
-                "no transient bootstrap passphrase available to authenticate FIDO2 enrollment".to_string(),
-            )
-        })?;
+    fn enroll_fido2_key(
+        &self,
+        mapper: &MapperHandle,
+        metadata: KeyMetadata,
+    ) -> Result<(), DomainError> {
+        let passphrase = self
+            .transient_passphrase
+            .borrow_mut()
+            .take()
+            .ok_or_else(|| {
+                DomainError::AdapterFailure(
+                    "no transient bootstrap passphrase available to authenticate FIDO2 enrollment"
+                        .to_string(),
+                )
+            })?;
 
         // Only stdin is redirected (to feed the bootstrap passphrase, the
         // volume's only current credential). stdout/stderr stay inherited so
@@ -293,9 +339,9 @@ impl LuksBackend for ExecAdapter {
         cmd.arg("--fido2-device=auto").arg(&mapper.source_path);
         cmd.stdin(Stdio::piped());
 
-        let mut child = cmd
-            .spawn()
-            .map_err(|e| DomainError::AdapterFailure(format!("failed to run systemd-cryptenroll: {e}")))?;
+        let mut child = cmd.spawn().map_err(|e| {
+            DomainError::AdapterFailure(format!("failed to run systemd-cryptenroll: {e}"))
+        })?;
 
         let write_result = child
             .stdin
@@ -308,12 +354,15 @@ impl LuksBackend for ExecAdapter {
         // (AC #3, AD-3).
         drop(passphrase);
 
-        write_result
-            .map_err(|e| DomainError::AdapterFailure(format!("failed to write bootstrap passphrase to systemd-cryptenroll's stdin: {e}")))?;
+        write_result.map_err(|e| {
+            DomainError::AdapterFailure(format!(
+                "failed to write bootstrap passphrase to systemd-cryptenroll's stdin: {e}"
+            ))
+        })?;
 
-        let status = child
-            .wait()
-            .map_err(|e| DomainError::AdapterFailure(format!("failed waiting for systemd-cryptenroll: {e}")))?;
+        let status = child.wait().map_err(|e| {
+            DomainError::AdapterFailure(format!("failed waiting for systemd-cryptenroll: {e}"))
+        })?;
 
         if !status.success() {
             return Err(DomainError::AdapterFailure(
@@ -370,7 +419,11 @@ impl LuksBackend for ExecAdapter {
                 .args(["token", "remove", "--token-id", &token_id])
                 .arg(path)
                 .output()
-                .map_err(|e| DomainError::AdapterFailure(format!("failed to run cryptsetup token remove: {e}")))?;
+                .map_err(|e| {
+                    DomainError::AdapterFailure(format!(
+                        "failed to run cryptsetup token remove: {e}"
+                    ))
+                })?;
 
             if !output.status.success() {
                 return Err(DomainError::AdapterFailure(format!(
@@ -388,7 +441,9 @@ impl LuksBackend for ExecAdapter {
             .arg(path)
             .arg(slot_str)
             .output()
-            .map_err(|e| DomainError::AdapterFailure(format!("failed to run cryptsetup luksKillSlot: {e}")))?;
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!("failed to run cryptsetup luksKillSlot: {e}"))
+            })?;
 
         if output.status.success() {
             Ok(())
@@ -442,10 +497,12 @@ impl FilesystemBackend for ExecAdapter {
     }
 
     fn set_backing_file_size(&self, path: &Path, size: u64) -> Result<(), DomainError> {
-        let file = std::fs::File::create(path)
-            .map_err(|e| DomainError::AdapterFailure(format!("failed to create {}: {e}", path.display())))?;
-        file.set_len(size)
-            .map_err(|e| DomainError::AdapterFailure(format!("failed to size {}: {e}", path.display())))?;
+        let file = std::fs::File::create(path).map_err(|e| {
+            DomainError::AdapterFailure(format!("failed to create {}: {e}", path.display()))
+        })?;
+        file.set_len(size).map_err(|e| {
+            DomainError::AdapterFailure(format!("failed to size {}: {e}", path.display()))
+        })?;
         Ok(())
     }
 
@@ -456,7 +513,9 @@ impl FilesystemBackend for ExecAdapter {
                     .arg("-F")
                     .arg(mapper.device_node())
                     .output()
-                    .map_err(|e| DomainError::AdapterFailure(format!("failed to run mkfs.ext4: {e}")))?;
+                    .map_err(|e| {
+                        DomainError::AdapterFailure(format!("failed to run mkfs.ext4: {e}"))
+                    })?;
 
                 if output.status.success() {
                     Ok(())
