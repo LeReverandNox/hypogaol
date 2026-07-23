@@ -22,10 +22,10 @@ so that I don't need to manually pre-allocate a backing file before creating my 
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: `systemd-fido2` token custom-field spike — resolve AD-2's open item before writing any enroll code (AC: #3)
-  - [ ] Throwaway `cryptsetup token export`/`import` (or equivalent `luksDump --dump-json-metadata`) experiment in the Nix devShell: enroll a real/fake FIDO2 key via `systemd-cryptenroll`, then attempt to add extra JSON fields (`key_label`, `filesystem`, `created_at`) onto that same `systemd-fido2` token object and re-import/re-read it
-  - [ ] Record in Completion Notes whether the plugin tolerates unknown extra fields. If **accepted**: proceed exactly as AD-2 describes (extra fields on the same token). If **rejected**: implement AD-2's documented fallback — a second, sibling LUKS2 token of a distinct custom type referencing the same keyslot number, still inside the LUKS2 header, no sidecar file
-  - [ ] This determines the exact shape of the token-metadata-writing port method in Task 3 below — do not write that method until this spike's outcome is known
+- [x] Task 1: `systemd-fido2` token custom-field spike — resolve AD-2's open item before writing any enroll code (AC: #3)
+  - [x] Throwaway `cryptsetup token export`/`import` (or equivalent `luksDump --dump-json-metadata`) experiment in the Nix devShell: enroll a real/fake FIDO2 key via `systemd-cryptenroll`, then attempt to add extra JSON fields (`key_label`, `filesystem`, `created_at`) onto that same `systemd-fido2` token object and re-import/re-read it
+  - [x] Record in Completion Notes whether the plugin tolerates unknown extra fields. If **accepted**: proceed exactly as AD-2 describes (extra fields on the same token). If **rejected**: implement AD-2's documented fallback — a second, sibling LUKS2 token of a distinct custom type referencing the same keyslot number, still inside the LUKS2 header, no sidecar file
+  - [x] This determines the exact shape of the token-metadata-writing port method in Task 3 below — do not write that method until this spike's outcome is known
 - [ ] Task 2: Extend the three ports with the methods this story's file-backed path needs (AC: #1, #2, #3)
   - [ ] `FilesystemBackend`: add `path_exists(&self, path: &Path) -> bool`, `set_backing_file_size(&self, path: &Path, size: u64) -> Result<(), DomainError>`, `mkfs(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<(), DomainError>` — v1 implements only `Filesystem::Ext4` per AD-8; define the `Filesystem` enum now with `Ext4` as its only variant so it's additive later, not a breaking change
   - [ ] `LuksBackend`: add `bootstrap_format_and_open(&self, path: &Path, name: &str, filesystem: Filesystem) -> Result<MapperHandle, DomainError>` per AD-9 — internally: generate a transient random passphrase in a `zeroize::Zeroizing` buffer, `luksFormat` with it as sole seed keyslot, `luksOpen --name <name>` with the same passphrase to obtain the mapper, wipe the buffer immediately — all inside `adapters::exec` (Task 6), never surfacing the passphrase to `domain`
@@ -107,8 +107,14 @@ so that I don't need to manually pre-allocate a backing file before creating my 
 
 ### Agent Model Used
 
+claude-sonnet-5
+
 ### Debug Log References
 
+- Task 1 spike commands and output: `cryptsetup luksFormat`/`systemd-cryptenroll --fido2-device=/dev/hidraw10`/`cryptsetup token export|import --token-replace` against a disposable file in the scratchpad dir (not committed) — see Completion Notes for the outcome.
+
 ### Completion Notes List
+
+- **Task 1 spike result: ACCEPTED.** Ran the throwaway experiment against real FIDO2 hardware (a TOKEN2 security key, `/dev/hidraw10`) in the Nix devShell: `luksFormat`'d a disposable 64MB file, enrolled a real FIDO2 credential via `systemd-cryptenroll --fido2-device=/dev/hidraw10` (produced token id 0, type `systemd-fido2`, keyslot 1), then `cryptsetup token export --token-id 0` to dump its JSON, injected `key_label`/`filesystem`/`created_at`/`credential_id` into that same JSON object, and `cryptsetup token import --token-id 0 --token-replace` re-imported it. The import succeeded (exit 0), `token export` afterwards shows all four extra fields round-tripped byte-for-byte alongside the original `fido2-*` fields, and `luksDump` still correctly reports it as a live `systemd-fido2` token bound to keyslot 1 — no schema validation error. Conclusion: proceed exactly as AD-2 describes — extra metadata fields are written directly onto the same `systemd-fido2` token object `systemd-cryptenroll` creates; the sibling-custom-token fallback is not needed. This determines Task 2's `enroll_fido2_key` shape: enroll via `systemd-cryptenroll`, then locate the resulting token by keyslot and `token import --token-replace` it back with the extra fields merged in.
 
 ### File List
