@@ -17,6 +17,7 @@ serde_json = "1.0.151"
 thiserror = "2.0.19"
 anyhow = "1.0.104"
 zeroize = "1.9.0"
+getrandom = "0.4"
 
 [workspace.metadata.dist]
 cargo-dist-version = "0.32.0"

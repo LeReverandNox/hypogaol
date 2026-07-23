@@ -31,13 +31,21 @@ pub fn run(
             let name = mapping_name::mapping_name(&path);
 
             let mapper = luks.bootstrap_format_and_open(&path, &name, filesystem)?;
-            fs.mkfs(&mapper, filesystem)?;
 
+            // Enroll runs before mkfs, not after: systemd-cryptenroll can only add a
+            // new keyslot by authenticating with a still-valid existing credential,
+            // and the transient bootstrap passphrase is the only one that exists at
+            // this point. It lives inside adapters::exec (never crossing into domain,
+            // AD-3) between bootstrap_format_and_open and enroll_fido2_key, and is
+            // wiped as soon as enroll_fido2_key consumes it — still strictly before
+            // mkfs runs, satisfying AC #3/AD-3's wipe-before-mkfs requirement.
             let metadata = KeyMetadata {
                 key_label: "primary".to_string(),
                 filesystem,
             };
             luks.enroll_fido2_key(&mapper, metadata)?;
+
+            fs.mkfs(&mapper, filesystem)?;
 
             keyslot_guard::remove_keyslot_guarded(luks, &path, BOOTSTRAP_KEYSLOT)
         }
