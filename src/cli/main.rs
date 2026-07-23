@@ -1,4 +1,5 @@
-use std::path::PathBuf;
+use std::io::{self, Write};
+use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand, ValueEnum};
 
@@ -17,8 +18,20 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Create a new file-backed tomb
+    /// Create a new tomb
     Create {
+        #[command(subcommand)]
+        mode: CreateMode,
+    },
+}
+
+// AD-9 requires the CLI to resolve an explicit target mode, never inferred by
+// sniffing the path — hence two distinct subcommands rather than a single
+// flat `create` with an optional device flag.
+#[derive(Subcommand)]
+enum CreateMode {
+    /// Create a new file-backed tomb
+    File {
         /// Destination path for the backing file; must not already exist
         #[arg(long)]
         path: PathBuf,
@@ -27,6 +40,23 @@ enum Commands {
         /// byte count)
         #[arg(long, value_parser = parse_size)]
         size: u64,
+
+        /// Filesystem to create inside the tomb
+        #[arg(long, value_enum, default_value = "ext4")]
+        filesystem: CliFilesystem,
+    },
+
+    /// Create a new tomb on an existing raw device or partition
+    Device {
+        /// Path to the target device or partition; must not already carry a
+        /// LUKS2 header
+        #[arg(long)]
+        path: PathBuf,
+
+        /// Size to use (e.g. 500M, 10G, or a plain byte count); defaults to
+        /// the device's full capacity when omitted
+        #[arg(long, value_parser = parse_size)]
+        size: Option<u64>,
 
         /// Filesystem to create inside the tomb
         #[arg(long, value_enum, default_value = "ext4")]
@@ -87,27 +117,76 @@ impl From<CliFilesystem> for Filesystem {
     }
 }
 
+/// Prints the wipe/data-loss warning naming `path` and reads a line from
+/// stdin, requiring the user to type exactly `yes` to proceed. Deliberately
+/// interactive rather than a scriptable `--confirm`/`--yes` flag: a flag
+/// could be pasted/scripted without the user ever reading the warning, which
+/// would undercut the whole point of a wrong-device confirmation gate.
+/// `domain::workflows::create::run` enforces the check itself regardless —
+/// this is never trusted as the sole gate.
+fn confirm_device_wipe(path: &Path) -> bool {
+    println!(
+        "WARNING: this will erase any existing data on {} and format it as a new encrypted tomb.",
+        path.display()
+    );
+    print!("Type \"yes\" to continue: ");
+    let _ = io::stdout().flush();
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).is_ok() && input.trim() == "yes"
+}
+
 pub fn run() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Create {
-            path,
-            size,
-            filesystem,
-        } => {
-            let adapter = ExecAdapter::default();
-            let display_path = path.display().to_string();
-            let target = CreateTarget::File { path, size };
+        Commands::Create { mode } => match mode {
+            CreateMode::File {
+                path,
+                size,
+                filesystem,
+            } => {
+                let adapter = ExecAdapter::default();
+                let display_path = path.display().to_string();
+                let target = CreateTarget::File { path, size };
 
-            println!("Creating tomb at {display_path}...");
+                println!("Creating tomb at {display_path}...");
 
-            if let Err(err) = create::run(target, filesystem.into(), &adapter, &adapter, &adapter) {
-                eprintln!("{err}");
-                std::process::exit(1);
+                if let Err(err) =
+                    create::run(target, filesystem.into(), &adapter, &adapter, &adapter)
+                {
+                    eprintln!("{err}");
+                    std::process::exit(1);
+                }
+
+                println!("Tomb created at {display_path}.");
             }
+            CreateMode::Device {
+                path,
+                size,
+                filesystem,
+            } => {
+                let confirmed = confirm_device_wipe(&path);
 
-            println!("Tomb created at {display_path}.");
-        }
+                let adapter = ExecAdapter::default();
+                let display_path = path.display().to_string();
+                let target = CreateTarget::Device {
+                    path,
+                    size,
+                    confirmed,
+                };
+
+                println!("Creating tomb at {display_path}...");
+
+                if let Err(err) =
+                    create::run(target, filesystem.into(), &adapter, &adapter, &adapter)
+                {
+                    eprintln!("{err}");
+                    std::process::exit(1);
+                }
+
+                println!("Tomb created at {display_path}.");
+            }
+        },
     }
 }
