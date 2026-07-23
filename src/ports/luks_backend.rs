@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use crate::domain::errors::DomainError;
-use crate::domain::types::{Filesystem, KeyMetadata, KeyslotInfo, KeyslotRef, MapperHandle};
+use crate::domain::types::{Filesystem, KeyslotInfo, KeyslotRef, MapperHandle};
 
 pub trait LuksBackend {
     /// `Err` carries one human-readable string per missing/unsupported dependency
@@ -17,14 +17,6 @@ pub trait LuksBackend {
         name: &str,
         filesystem: Filesystem,
     ) -> Result<MapperHandle, DomainError>;
-
-    /// Enrolls the real FIDO2 key as a `systemd-fido2` token+keyslot, writing
-    /// `metadata`'s fields onto that same token object (AD-2).
-    fn enroll_fido2_key(
-        &self,
-        mapper: &MapperHandle,
-        metadata: KeyMetadata,
-    ) -> Result<(), DomainError>;
 
     /// Live keyslots with an associated `systemd-fido2` token, read fresh from
     /// the header every call — the only legitimate way to count valid keyslots (AD-5).

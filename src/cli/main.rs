@@ -34,10 +34,16 @@ enum Commands {
     },
 }
 
+/// Minimum backing-file size this tool will allocate: large enough to hold a
+/// LUKS2 header/keyslot area plus a minimal ext4 filesystem. Below this,
+/// `cryptsetup luksFormat` fails deep inside the adapter with a cryptic
+/// device-too-small error instead of a clear, immediate message.
+pub const MIN_TOMB_SIZE_BYTES: u64 = 16 * 1024 * 1024;
+
 /// Parses a size string with an optional K/M/G/T suffix (binary, powers of
 /// 1024 — matching `resize2fs`/`lvreduce` convention) into a byte count. No
 /// suffix means a plain byte count.
-fn parse_size(input: &str) -> Result<u64, String> {
+pub fn parse_size(input: &str) -> Result<u64, String> {
     let trimmed = input.trim();
     if trimmed.is_empty() {
         return Err("size must not be empty".to_string());
@@ -55,9 +61,17 @@ fn parse_size(input: &str) -> Result<u64, String> {
         format!("invalid size {input:?} (expected a number, optionally followed by K/M/G/T)")
     })?;
 
-    number
+    let bytes = number
         .checked_mul(multiplier)
-        .ok_or_else(|| format!("size {input:?} is too large"))
+        .ok_or_else(|| format!("size {input:?} is too large"))?;
+
+    if bytes < MIN_TOMB_SIZE_BYTES {
+        return Err(format!(
+            "size {input:?} is too small (minimum is {MIN_TOMB_SIZE_BYTES} bytes / 16M)"
+        ));
+    }
+
+    Ok(bytes)
 }
 
 #[derive(Clone, Copy, ValueEnum)]

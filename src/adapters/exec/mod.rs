@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -121,7 +122,12 @@ impl TempKeyFile {
         let dir = if Path::new("/dev/shm").is_dir() {
             PathBuf::from("/dev/shm")
         } else {
-            std::env::temp_dir()
+            let fallback = std::env::temp_dir();
+            eprintln!(
+                "warning: /dev/shm (tmpfs) unavailable; the transient bootstrap credential's temp file will be written to disk-backed storage at {}",
+                fallback.display()
+            );
+            fallback
         };
 
         let mut suffix = [0u8; 8];
@@ -170,6 +176,12 @@ impl Drop for TempKeyFile {
 /// surfaced in the returned `Err`). Used for calls with no interactive
 /// component — `input` may be secret (the transient passphrase) or not (a
 /// token JSON payload); either way it is never logged or echoed.
+///
+/// The stdin write happens on a separate thread from `wait_with_output`'s
+/// stdout/stderr draining: if `cmd` writes enough output to fill its pipe
+/// before it has read all of `input`, a single-threaded write-then-wait
+/// would deadlock (this thread blocked writing stdin, the child blocked
+/// writing to a full stdout/stderr pipe nobody is draining yet).
 fn run_piping_stdin(cmd: &mut Command, input: &[u8]) -> Result<(), String> {
     cmd.stdin(Stdio::piped());
     cmd.stdout(Stdio::piped());
@@ -178,18 +190,21 @@ fn run_piping_stdin(cmd: &mut Command, input: &[u8]) -> Result<(), String> {
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("failed to spawn {cmd:?}: {e}"))?;
-    child
-        .stdin
-        .take()
-        .expect("stdin was requested as piped")
-        .write_all(input)
-        .map_err(|e| format!("failed writing to {cmd:?}'s stdin: {e}"))?;
+
+    let mut stdin = child.stdin.take().expect("stdin was requested as piped");
+    let input = input.to_vec();
+    let writer = std::thread::spawn(move || stdin.write_all(&input));
 
     let output = child
         .wait_with_output()
         .map_err(|e| format!("failed waiting for {cmd:?}: {e}"))?;
 
     if output.status.success() {
+        // Only surface a stdin-write failure if the process itself otherwise
+        // succeeded — a process failure's own stderr is the more useful signal.
+        if let Ok(Err(e)) = writer.join() {
+            return Err(format!("failed writing to {cmd:?}'s stdin: {e}"));
+        }
         Ok(())
     } else {
         Err(format!(
@@ -227,6 +242,30 @@ fn tokens_object(metadata: &Value) -> Result<&serde_json::Map<String, Value>, Do
         .ok_or_else(|| {
             DomainError::AdapterFailure("luksDump JSON missing a tokens object".to_string())
         })
+}
+
+/// Keyslot numbers actually present in the LUKS2 header's own top-level
+/// `keyslots` object — the ground truth for "does this keyslot still exist,"
+/// independent of what any token claims (AD-5: "a stale `systemd-fido2` token
+/// pointing at an already-gone keyslot must never be counted as a live key").
+fn live_keyslot_numbers(metadata: &Value) -> Result<HashSet<u32>, DomainError> {
+    let keyslots = metadata
+        .get("keyslots")
+        .and_then(Value::as_object)
+        .ok_or_else(|| {
+            DomainError::AdapterFailure("luksDump JSON missing a keyslots object".to_string())
+        })?;
+
+    keyslots
+        .keys()
+        .map(|id| {
+            id.parse::<u32>().map_err(|_| {
+                DomainError::AdapterFailure(format!(
+                    "unrecognized keyslot id {id:?} in luksDump JSON"
+                ))
+            })
+        })
+        .collect()
 }
 
 fn find_systemd_fido2_token_id(path: &Path) -> Result<String, DomainError> {
@@ -277,7 +316,11 @@ impl ExecAdapter {
         let credential_id = token
             .get("fido2-credential")
             .and_then(Value::as_str)
-            .unwrap_or_default()
+            .ok_or_else(|| {
+                DomainError::AdapterFailure(
+                    "exported token JSON missing expected fido2-credential field".to_string(),
+                )
+            })?
             .to_string();
 
         let created_at = SystemTime::now()
@@ -396,61 +439,10 @@ impl LuksBackend for ExecAdapter {
         })
     }
 
-    fn enroll_fido2_key(
-        &self,
-        mapper: &MapperHandle,
-        metadata: KeyMetadata,
-    ) -> Result<(), DomainError> {
-        let passphrase = self
-            .transient_passphrase
-            .borrow_mut()
-            .take()
-            .ok_or_else(|| {
-                DomainError::AdapterFailure(
-                    "no transient bootstrap passphrase available to authenticate FIDO2 enrollment"
-                        .to_string(),
-                )
-            })?;
-
-        // `systemd-cryptenroll` doesn't read a piped (non-tty) stdin as a
-        // passphrase the way `cryptsetup` does — confirmed empirically: it
-        // instead falls back to systemd's ask-password broadcast/agent
-        // mechanism and hangs waiting for an agent. `--unlock-key-file` is
-        // the documented non-interactive path instead, so the passphrase is
-        // written to a tightly-permissioned, promptly-deleted temp file.
-        let key_file =
-            TempKeyFile::create(passphrase.as_bytes()).map_err(DomainError::AdapterFailure)?;
-
-        // The in-memory passphrase is dropped (zeroized) here — strictly
-        // before `create::run` goes on to call `mkfs` (AC #3, AD-3). The
-        // on-disk copy in `key_file` is wiped by its own Drop impl once this
-        // function returns.
-        drop(passphrase);
-
-        // stdin/stdout/stderr all stay inherited: the unlock credential now
-        // travels via --unlock-key-file, so the user's terminal is free to
-        // handle systemd-cryptenroll's own FIDO2 touch/PIN prompt normally.
-        let status = Command::new("systemd-cryptenroll")
-            .arg("--fido2-device=auto")
-            .arg(format!("--unlock-key-file={}", key_file.path.display()))
-            .arg(&mapper.source_path)
-            .status()
-            .map_err(|e| {
-                DomainError::AdapterFailure(format!("failed to run systemd-cryptenroll: {e}"))
-            })?;
-
-        if !status.success() {
-            return Err(DomainError::AdapterFailure(
-                "systemd-cryptenroll --fido2-device=auto failed".to_string(),
-            ));
-        }
-
-        self.write_fido2_token_metadata(&mapper.source_path, metadata)
-    }
-
     fn list_fido2_keyslots(&self, path: &Path) -> Result<Vec<KeyslotInfo>, DomainError> {
         let metadata = dump_json_metadata(path)?;
         let tokens = tokens_object(&metadata)?;
+        let live_keyslots = live_keyslot_numbers(&metadata)?;
 
         let mut keyslots = Vec::new();
         for token in tokens.values() {
@@ -461,7 +453,18 @@ impl LuksBackend for ExecAdapter {
                 continue;
             };
             for slot in token_keyslots {
-                if let Some(slot_num) = slot.as_str().and_then(|s| s.parse::<u32>().ok()) {
+                let Some(slot_num) = slot.as_str().and_then(|s| s.parse::<u32>().ok()) else {
+                    continue;
+                };
+                // A token referencing a keyslot that no longer exists in the
+                // header (e.g. removed via bare `cryptsetup luksKillSlot`,
+                // AD-6's break-glass path) must never count as a live key
+                // (AD-5) — also dedupes if more than one token somehow
+                // references the same keyslot.
+                let already_counted = keyslots
+                    .iter()
+                    .any(|info: &KeyslotInfo| info.keyslot == KeyslotRef(slot_num));
+                if live_keyslots.contains(&slot_num) && !already_counted {
                     keyslots.push(KeyslotInfo {
                         keyslot: KeyslotRef(slot_num),
                     });
@@ -567,6 +570,58 @@ impl Fido2Backend for ExecAdapter {
             Err(missing)
         }
     }
+
+    fn enroll_fido2_key(
+        &self,
+        mapper: &MapperHandle,
+        metadata: KeyMetadata,
+    ) -> Result<(), DomainError> {
+        let passphrase = self
+            .transient_passphrase
+            .borrow_mut()
+            .take()
+            .ok_or_else(|| {
+                DomainError::AdapterFailure(
+                    "no transient bootstrap passphrase available to authenticate FIDO2 enrollment"
+                        .to_string(),
+                )
+            })?;
+
+        // `systemd-cryptenroll` doesn't read a piped (non-tty) stdin as a
+        // passphrase the way `cryptsetup` does — confirmed empirically: it
+        // instead falls back to systemd's ask-password broadcast/agent
+        // mechanism and hangs waiting for an agent. `--unlock-key-file` is
+        // the documented non-interactive path instead, so the passphrase is
+        // written to a tightly-permissioned, promptly-deleted temp file.
+        let key_file =
+            TempKeyFile::create(passphrase.as_bytes()).map_err(DomainError::AdapterFailure)?;
+
+        // The in-memory passphrase is dropped (zeroized) here — strictly
+        // before `create::run` goes on to call `mkfs` (AC #3, AD-3). The
+        // on-disk copy in `key_file` is wiped by its own Drop impl once this
+        // function returns.
+        drop(passphrase);
+
+        // stdin/stdout/stderr all stay inherited: the unlock credential now
+        // travels via --unlock-key-file, so the user's terminal is free to
+        // handle systemd-cryptenroll's own FIDO2 touch/PIN prompt normally.
+        let status = Command::new("systemd-cryptenroll")
+            .arg("--fido2-device=auto")
+            .arg(format!("--unlock-key-file={}", key_file.path.display()))
+            .arg(&mapper.source_path)
+            .status()
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!("failed to run systemd-cryptenroll: {e}"))
+            })?;
+
+        if !status.success() {
+            return Err(DomainError::AdapterFailure(
+                "systemd-cryptenroll --fido2-device=auto failed".to_string(),
+            ));
+        }
+
+        self.write_fido2_token_metadata(&mapper.source_path, metadata)
+    }
 }
 
 impl FilesystemBackend for ExecAdapter {
@@ -591,13 +646,32 @@ impl FilesystemBackend for ExecAdapter {
     }
 
     fn set_backing_file_size(&self, path: &Path, size: u64) -> Result<(), DomainError> {
-        let file = std::fs::File::create(path).map_err(|e| {
-            DomainError::AdapterFailure(format!("failed to create {}: {e}", path.display()))
-        })?;
+        // `create_new` makes the OS enforce exclusivity: it fails if anything
+        // (a regular file or a symlink, dangling or not) already exists at
+        // `path`, closing the race window between the caller's `path_exists`
+        // check and this call — a plain `File::create` would instead follow
+        // a symlink and silently truncate/write through it (AC #2).
+        let file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::AlreadyExists {
+                    DomainError::DestinationExists(path.to_path_buf())
+                } else {
+                    DomainError::AdapterFailure(format!("failed to create {}: {e}", path.display()))
+                }
+            })?;
         file.set_len(size).map_err(|e| {
             DomainError::AdapterFailure(format!("failed to size {}: {e}", path.display()))
         })?;
         Ok(())
+    }
+
+    fn remove_backing_file(&self, path: &Path) -> Result<(), DomainError> {
+        std::fs::remove_file(path).map_err(|e| {
+            DomainError::AdapterFailure(format!("failed to remove {}: {e}", path.display()))
+        })
     }
 
     fn mkfs(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<(), DomainError> {

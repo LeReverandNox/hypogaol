@@ -1,5 +1,7 @@
 use std::path::Path;
 
+use crate::domain::errors::DomainError;
+
 /// Fixed prefix for every dm-crypt mapping name this tool creates, kept
 /// independent of the product's own (placeholder) name (AD-13).
 const MAPPING_NAME_PREFIX: &str = "vault";
@@ -25,8 +27,15 @@ fn fnv1a_hash(bytes: &[u8]) -> u64 {
 /// path — `create` (naming it initially), `close`/`resize`/a later `unlock`
 /// (reconstructing it) — so two independently-written call sites can never
 /// compute divergent names for the same underlying path.
-pub fn mapping_name(path: &Path) -> String {
-    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+///
+/// Propagates a canonicalization failure rather than silently falling back to
+/// the raw path — a silent fallback could compute a different mapping name
+/// than a previous call for the same logical path, breaking AD-12's "stays
+/// identical indefinitely" guarantee without any error ever surfacing.
+pub fn mapping_name(path: &Path) -> Result<String, DomainError> {
+    let canonical = std::fs::canonicalize(path).map_err(|e| {
+        DomainError::AdapterFailure(format!("failed to canonicalize {}: {e}", path.display()))
+    })?;
     let hash = fnv1a_hash(canonical.to_string_lossy().as_bytes());
-    format!("{MAPPING_NAME_PREFIX}-{hash:016x}")
+    Ok(format!("{MAPPING_NAME_PREFIX}-{hash:016x}"))
 }

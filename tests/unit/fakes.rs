@@ -23,6 +23,7 @@ pub struct FakeLuksBackend {
     prerequisites: Result<(), Vec<String>>,
     keyslots: RefCell<Vec<KeyslotInfo>>,
     log: CallLog,
+    fail_at: Option<&'static str>,
 }
 
 impl FakeLuksBackend {
@@ -38,6 +39,7 @@ impl FakeLuksBackend {
                 keyslot: KeyslotRef(1),
             }]),
             log: new_call_log(),
+            fail_at: None,
         }
     }
 
@@ -46,6 +48,7 @@ impl FakeLuksBackend {
             prerequisites: Err(missing(missing_deps)),
             keyslots: RefCell::new(Vec::new()),
             log: new_call_log(),
+            fail_at: None,
         }
     }
 
@@ -57,6 +60,22 @@ impl FakeLuksBackend {
     pub fn with_keyslots(self, keyslots: Vec<KeyslotInfo>) -> Self {
         *self.keyslots.borrow_mut() = keyslots;
         self
+    }
+
+    /// Makes the named port call log itself as usual, then return an
+    /// `AdapterFailure` instead of succeeding — for exercising `create::run`'s
+    /// failure-cleanup paths.
+    pub fn with_failure_at(mut self, call: &'static str) -> Self {
+        self.fail_at = Some(call);
+        self
+    }
+
+    fn fail_if(&self, call: &'static str) -> Result<(), DomainError> {
+        if self.fail_at == Some(call) {
+            Err(DomainError::AdapterFailure(format!("{call} failed (test)")))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -74,10 +93,69 @@ impl LuksBackend for FakeLuksBackend {
         self.log
             .borrow_mut()
             .push("bootstrap_format_and_open".to_string());
+        self.fail_if("bootstrap_format_and_open")?;
         Ok(MapperHandle {
             name: name.to_string(),
             source_path: path.to_path_buf(),
         })
+    }
+
+    fn list_fido2_keyslots(&self, _path: &Path) -> Result<Vec<KeyslotInfo>, DomainError> {
+        self.log
+            .borrow_mut()
+            .push("list_fido2_keyslots".to_string());
+        self.fail_if("list_fido2_keyslots")?;
+        Ok(self.keyslots.borrow().clone())
+    }
+
+    fn remove_key(&self, _path: &Path, _keyslot: KeyslotRef) -> Result<(), DomainError> {
+        self.log.borrow_mut().push("remove_key".to_string());
+        self.fail_if("remove_key")
+    }
+
+    fn close(&self, _mapper: &MapperHandle) -> Result<(), DomainError> {
+        self.log.borrow_mut().push("close".to_string());
+        self.fail_if("close")
+    }
+}
+
+pub struct FakeFido2Backend {
+    prerequisites: Result<(), Vec<String>>,
+    log: CallLog,
+    fail_at: Option<&'static str>,
+}
+
+impl FakeFido2Backend {
+    pub fn passing() -> Self {
+        Self {
+            prerequisites: Ok(()),
+            log: new_call_log(),
+            fail_at: None,
+        }
+    }
+
+    pub fn failing(missing_deps: &[&str]) -> Self {
+        Self {
+            prerequisites: Err(missing(missing_deps)),
+            log: new_call_log(),
+            fail_at: None,
+        }
+    }
+
+    pub fn with_log(mut self, log: CallLog) -> Self {
+        self.log = log;
+        self
+    }
+
+    pub fn with_failure_at(mut self, call: &'static str) -> Self {
+        self.fail_at = Some(call);
+        self
+    }
+}
+
+impl Fido2Backend for FakeFido2Backend {
+    fn check_prerequisites(&self) -> Result<(), Vec<String>> {
+        self.prerequisites.clone()
     }
 
     fn enroll_fido2_key(
@@ -86,42 +164,12 @@ impl LuksBackend for FakeLuksBackend {
         _metadata: KeyMetadata,
     ) -> Result<(), DomainError> {
         self.log.borrow_mut().push("enroll_fido2_key".to_string());
+        if self.fail_at == Some("enroll_fido2_key") {
+            return Err(DomainError::AdapterFailure(
+                "enroll_fido2_key failed (test)".to_string(),
+            ));
+        }
         Ok(())
-    }
-
-    fn list_fido2_keyslots(&self, _path: &Path) -> Result<Vec<KeyslotInfo>, DomainError> {
-        self.log
-            .borrow_mut()
-            .push("list_fido2_keyslots".to_string());
-        Ok(self.keyslots.borrow().clone())
-    }
-
-    fn remove_key(&self, _path: &Path, _keyslot: KeyslotRef) -> Result<(), DomainError> {
-        self.log.borrow_mut().push("remove_key".to_string());
-        Ok(())
-    }
-
-    fn close(&self, _mapper: &MapperHandle) -> Result<(), DomainError> {
-        self.log.borrow_mut().push("close".to_string());
-        Ok(())
-    }
-}
-
-pub struct FakeFido2Backend(Result<(), Vec<String>>);
-
-impl FakeFido2Backend {
-    pub fn passing() -> Self {
-        Self(Ok(()))
-    }
-
-    pub fn failing(missing_deps: &[&str]) -> Self {
-        Self(Err(missing(missing_deps)))
-    }
-}
-
-impl Fido2Backend for FakeFido2Backend {
-    fn check_prerequisites(&self) -> Result<(), Vec<String>> {
-        self.0.clone()
     }
 }
 
@@ -129,6 +177,7 @@ pub struct FakeFilesystemBackend {
     prerequisites: Result<(), Vec<String>>,
     path_exists: bool,
     log: CallLog,
+    fail_at: Option<&'static str>,
 }
 
 impl FakeFilesystemBackend {
@@ -137,6 +186,7 @@ impl FakeFilesystemBackend {
             prerequisites: Ok(()),
             path_exists: false,
             log: new_call_log(),
+            fail_at: None,
         }
     }
 
@@ -145,6 +195,7 @@ impl FakeFilesystemBackend {
             prerequisites: Err(missing(missing_deps)),
             path_exists: false,
             log: new_call_log(),
+            fail_at: None,
         }
     }
 
@@ -156,6 +207,19 @@ impl FakeFilesystemBackend {
     pub fn with_path_exists(mut self, value: bool) -> Self {
         self.path_exists = value;
         self
+    }
+
+    pub fn with_failure_at(mut self, call: &'static str) -> Self {
+        self.fail_at = Some(call);
+        self
+    }
+
+    fn fail_if(&self, call: &'static str) -> Result<(), DomainError> {
+        if self.fail_at == Some(call) {
+            Err(DomainError::AdapterFailure(format!("{call} failed (test)")))
+        } else {
+            Ok(())
+        }
     }
 }
 
@@ -173,11 +237,18 @@ impl FilesystemBackend for FakeFilesystemBackend {
         self.log
             .borrow_mut()
             .push("set_backing_file_size".to_string());
-        Ok(())
+        self.fail_if("set_backing_file_size")
     }
 
     fn mkfs(&self, _mapper: &MapperHandle, _fs: Filesystem) -> Result<(), DomainError> {
         self.log.borrow_mut().push("mkfs".to_string());
+        self.fail_if("mkfs")
+    }
+
+    fn remove_backing_file(&self, _path: &Path) -> Result<(), DomainError> {
+        self.log
+            .borrow_mut()
+            .push("remove_backing_file".to_string());
         Ok(())
     }
 }
