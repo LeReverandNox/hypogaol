@@ -83,12 +83,17 @@ pub fn run() {
             filesystem,
         } => {
             let adapter = ExecAdapter::default();
+            let display_path = path.display().to_string();
             let target = CreateTarget::File { path, size };
+
+            println!("Creating tomb at {display_path}...");
 
             if let Err(err) = create::run(target, filesystem.into(), &adapter, &adapter, &adapter) {
                 eprintln!("{err}");
                 std::process::exit(1);
             }
+
+            println!("Tomb created at {display_path}.");
         }
     }
 }
