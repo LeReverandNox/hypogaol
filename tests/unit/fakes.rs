@@ -30,16 +30,13 @@ impl FakeLuksBackend {
         Self {
             prerequisites: Ok(()),
             // Mirrors the real bootstrap flow's state by the time the guard
-            // runs: the transient passphrase's slot plus the newly-enrolled
-            // FIDO2 slot — trivially > 1, so remove_keyslot_guarded proceeds.
-            keyslots: RefCell::new(vec![
-                KeyslotInfo {
-                    keyslot: KeyslotRef(0),
-                },
-                KeyslotInfo {
-                    keyslot: KeyslotRef(1),
-                },
-            ]),
+            // runs: only the newly-enrolled FIDO2 slot has a systemd-fido2
+            // token — the transient bootstrap passphrase slot (0) never
+            // does, so it's absent here too (confirmed against real
+            // hardware; see keyslot_guard.rs's target_is_valid check).
+            keyslots: RefCell::new(vec![KeyslotInfo {
+                keyslot: KeyslotRef(1),
+            }]),
             log: new_call_log(),
         }
     }

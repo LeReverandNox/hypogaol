@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -89,6 +89,68 @@ fn generate_transient_passphrase() -> Result<Zeroizing<String>, String> {
         hex.push(HEX_DIGITS[(byte & 0x0f) as usize] as char);
     }
     Ok(hex)
+}
+
+/// A temporary file holding the transient bootstrap passphrase, for
+/// `systemd-cryptenroll --unlock-key-file`. Created with mode 0600, in
+/// `/dev/shm` when available (tmpfs — never touches a disk-backed
+/// filesystem), falling back to the system temp dir otherwise. Its `Drop`
+/// impl best-effort-overwrites the file before unlinking it, so the
+/// passphrase's on-disk lifetime is as short as this struct's scope.
+struct TempKeyFile {
+    path: PathBuf,
+}
+
+impl TempKeyFile {
+    fn create(passphrase: &[u8]) -> Result<Self, String> {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        let dir = if Path::new("/dev/shm").is_dir() {
+            PathBuf::from("/dev/shm")
+        } else {
+            std::env::temp_dir()
+        };
+
+        let mut suffix = [0u8; 8];
+        getrandom::fill(&mut suffix)
+            .map_err(|e| format!("failed to generate temporary key file name: {e}"))?;
+        let suffix_hex = suffix
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+
+        let path = dir.join(format!(".tomb-fido2-bootstrap-{suffix_hex}"));
+
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|e| {
+                format!(
+                    "failed to create temporary key file {}: {e}",
+                    path.display()
+                )
+            })?;
+
+        file.write_all(passphrase)
+            .map_err(|e| format!("failed to write temporary key file {}: {e}", path.display()))?;
+
+        Ok(Self { path })
+    }
+}
+
+impl Drop for TempKeyFile {
+    fn drop(&mut self) {
+        if let Ok(metadata) = std::fs::metadata(&self.path) {
+            if let Ok(mut file) = std::fs::OpenOptions::new().write(true).open(&self.path) {
+                let zeros = vec![0u8; metadata.len() as usize];
+                let _ = file.write_all(&zeros);
+                let _ = file.sync_all();
+            }
+        }
+        let _ = std::fs::remove_file(&self.path);
+    }
 }
 
 /// Runs `cmd` piping `input` to its stdin, capturing stdout/stderr (only
@@ -330,39 +392,32 @@ impl LuksBackend for ExecAdapter {
                 )
             })?;
 
-        // Only stdin is redirected (to feed the bootstrap passphrase, the
-        // volume's only current credential). stdout/stderr stay inherited so
-        // the user sees systemd-cryptenroll's touch/PIN prompts on their own
-        // terminal (AD-3 — the PIN itself goes through systemd's own
-        // ask-password path, not through a stream we capture).
-        let mut cmd = Command::new("systemd-cryptenroll");
-        cmd.arg("--fido2-device=auto").arg(&mapper.source_path);
-        cmd.stdin(Stdio::piped());
+        // `systemd-cryptenroll` doesn't read a piped (non-tty) stdin as a
+        // passphrase the way `cryptsetup` does — confirmed empirically: it
+        // instead falls back to systemd's ask-password broadcast/agent
+        // mechanism and hangs waiting for an agent. `--unlock-key-file` is
+        // the documented non-interactive path instead, so the passphrase is
+        // written to a tightly-permissioned, promptly-deleted temp file.
+        let key_file =
+            TempKeyFile::create(passphrase.as_bytes()).map_err(DomainError::AdapterFailure)?;
 
-        let mut child = cmd.spawn().map_err(|e| {
-            DomainError::AdapterFailure(format!("failed to run systemd-cryptenroll: {e}"))
-        })?;
-
-        let write_result = child
-            .stdin
-            .take()
-            .expect("stdin was requested as piped")
-            .write_all(passphrase.as_bytes());
-
-        // The passphrase is dropped (zeroized) here, at the end of this
-        // scope — strictly before `create::run` goes on to call `mkfs`
-        // (AC #3, AD-3).
+        // The in-memory passphrase is dropped (zeroized) here — strictly
+        // before `create::run` goes on to call `mkfs` (AC #3, AD-3). The
+        // on-disk copy in `key_file` is wiped by its own Drop impl once this
+        // function returns.
         drop(passphrase);
 
-        write_result.map_err(|e| {
-            DomainError::AdapterFailure(format!(
-                "failed to write bootstrap passphrase to systemd-cryptenroll's stdin: {e}"
-            ))
-        })?;
-
-        let status = child.wait().map_err(|e| {
-            DomainError::AdapterFailure(format!("failed waiting for systemd-cryptenroll: {e}"))
-        })?;
+        // stdin/stdout/stderr all stay inherited: the unlock credential now
+        // travels via --unlock-key-file, so the user's terminal is free to
+        // handle systemd-cryptenroll's own FIDO2 touch/PIN prompt normally.
+        let status = Command::new("systemd-cryptenroll")
+            .arg("--fido2-device=auto")
+            .arg(format!("--unlock-key-file={}", key_file.path.display()))
+            .arg(&mapper.source_path)
+            .status()
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!("failed to run systemd-cryptenroll: {e}"))
+            })?;
 
         if !status.success() {
             return Err(DomainError::AdapterFailure(

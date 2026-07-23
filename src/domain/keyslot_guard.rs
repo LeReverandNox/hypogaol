@@ -15,7 +15,16 @@ pub fn remove_keyslot_guarded(
 ) -> Result<(), DomainError> {
     let live_keyslots = luks.list_fido2_keyslots(path)?;
 
-    if live_keyslots.len() <= 1 {
+    // Removing a keyslot that isn't itself among the counted valid ones
+    // (e.g. create's transient bootstrap passphrase slot, which never gets a
+    // systemd-fido2 token) can never reduce the valid count — confirmed by a
+    // real hardware run, where the bootstrap keyslot is invisible to
+    // list_fido2_keyslots from the start. The last-key guard only applies
+    // when target is itself one of the valid keyslots being removed (the
+    // revoke case): then, removing the sole remaining one would leave zero.
+    let target_is_valid = live_keyslots.iter().any(|info| info.keyslot == target);
+
+    if target_is_valid && live_keyslots.len() <= 1 {
         return Err(DomainError::LastKeyslotGuard);
     }
 
