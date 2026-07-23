@@ -453,6 +453,17 @@ impl LuksBackend for ExecAdapter {
         // sees the mapped device. Harmless no-op for file-backed create,
         // where `size` already equals the backing file's own exact size.
         //
+        // Confirmed empirically (`cryptsetup status` right after this call,
+        // on real hardware) that this genuinely constrains the *active*
+        // mapping mkfs subsequently sees to exactly `size` bytes — even
+        // though the LUKS2 header's own `segments.0.size` metadata stays
+        // `"dynamic"` (i.e. "recompute from the real device size at every
+        // open") rather than being rewritten to a fixed value. That's by
+        // design, not a bug: it's what lets a later grow (Story 3.2) resize
+        // just the ext4 filesystem, with no LUKS2-level resize ever needed —
+        // the mapping already dynamically represents the device's full
+        // capacity on any future plain `luksOpen`.
+        //
         // `resize` normally re-authenticates via the LUKS2 kernel keyring
         // rather than a passphrase — but that keyring lookup is scoped to
         // the calling process/session, and `luksOpen` and `resize` here are
