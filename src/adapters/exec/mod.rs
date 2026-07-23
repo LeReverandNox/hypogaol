@@ -114,6 +114,41 @@ fn random_hex_suffix() -> Result<String, String> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// The raw byte capacity of the storage backing `path` — a block device's
+/// full size via `blockdev --getsize64`, or a regular file's own length.
+/// Used by `bootstrap_format_and_open` to decide whether its `resize` step is
+/// needed at all: resizing a LUKS2 mapping to exactly the full raw capacity
+/// fails outright (there's no room left for the header alongside a
+/// full-size payload), confirmed empirically on real hardware.
+fn actual_raw_size(path: &Path) -> Result<u64, String> {
+    use std::os::unix::fs::FileTypeExt;
+
+    let metadata =
+        std::fs::metadata(path).map_err(|e| format!("failed to stat {}: {e}", path.display()))?;
+
+    if !metadata.file_type().is_block_device() {
+        return Ok(metadata.len());
+    }
+
+    let output = Command::new("blockdev")
+        .arg("--getsize64")
+        .arg(path)
+        .output()
+        .map_err(|e| format!("failed to run blockdev --getsize64: {e}"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "blockdev --getsize64 failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u64>()
+        .map_err(|e| format!("failed to parse blockdev --getsize64 output: {e}"))
+}
+
 /// A temporary file holding the transient bootstrap passphrase, for
 /// `systemd-cryptenroll --unlock-key-file`. Created with mode 0600, in
 /// `/dev/shm` when available (tmpfs — never touches a disk-backed
@@ -467,19 +502,29 @@ impl LuksBackend for ExecAdapter {
         // on the already-open mapping (cryptsetup-resize(8)); it takes a
         // plain byte count with no unit suffix, so no sector-rounding
         // precision loss. Must run before mkfs (a separate port call) ever
-        // sees the mapped device. Harmless no-op for file-backed create,
-        // where `size` already equals the backing file's own exact size.
+        // sees the mapped device.
+        //
+        // Only run it when `size` asks for less than the full raw capacity
+        // of `path` — resizing to exactly the full raw capacity fails
+        // outright ("Device is too small"), since the LUKS2 header has
+        // nowhere left to live alongside a full-size payload (confirmed on
+        // real hardware during Story 1.7's hardware verification — this
+        // unconditional call was assumed a harmless no-op for file-backed
+        // create, where `size` always equals the backing file's own exact
+        // size, but that assumption was wrong). LUKS2's default dynamic
+        // sizing already gives the correct, header-excluded mapping for the
+        // full-capacity case with no resize needed at all.
         //
         // Confirmed empirically (`cryptsetup status` right after this call,
-        // on real hardware) that this genuinely constrains the *active*
-        // mapping mkfs subsequently sees to exactly `size` bytes — even
-        // though the LUKS2 header's own `segments.0.size` metadata stays
-        // `"dynamic"` (i.e. "recompute from the real device size at every
-        // open") rather than being rewritten to a fixed value. That's by
-        // design, not a bug: it's what lets a later grow (Story 3.2) resize
-        // just the ext4 filesystem, with no LUKS2-level resize ever needed —
-        // the mapping already dynamically represents the device's full
-        // capacity on any future plain `luksOpen`.
+        // on real hardware) that when it does run, this genuinely constrains
+        // the *active* mapping mkfs subsequently sees to exactly `size`
+        // bytes — even though the LUKS2 header's own `segments.0.size`
+        // metadata stays `"dynamic"` (i.e. "recompute from the real device
+        // size at every open") rather than being rewritten to a fixed value.
+        // That's by design, not a bug: it's what lets a later grow (Story
+        // 3.2) resize just the ext4 filesystem, with no LUKS2-level resize
+        // ever needed — the mapping already dynamically represents the
+        // device's full capacity on any future plain `luksOpen`.
         //
         // `resize` normally re-authenticates via the LUKS2 kernel keyring
         // rather than a passphrase — but that keyring lookup is scoped to
@@ -491,23 +536,27 @@ impl LuksBackend for ExecAdapter {
         // on input."). Piping the still-in-scope transient passphrase via
         // `--key-file -`, the same non-interactive mechanism already used
         // for `luksFormat`/`luksOpen`, sidesteps the keyring entirely.
-        if let Err(e) = run_piping_stdin(
-            privileged("cryptsetup")
-                .args([
-                    "resize",
-                    "--device-size",
-                    &size.to_string(),
-                    "--key-file",
-                    "-",
-                ])
-                .arg(name),
-            passphrase.as_bytes(),
-        ) {
-            // `luksOpen` above already succeeded — no `MapperHandle` exists
-            // yet for the caller to close on this early return, so this
-            // adapter must close the mapping itself or it leaks indefinitely.
-            let _ = privileged("cryptsetup").arg("close").arg(name).output();
-            return Err(DomainError::AdapterFailure(e));
+        let raw_size = actual_raw_size(path).map_err(DomainError::AdapterFailure)?;
+        if raw_size > size {
+            if let Err(e) = run_piping_stdin(
+                privileged("cryptsetup")
+                    .args([
+                        "resize",
+                        "--device-size",
+                        &size.to_string(),
+                        "--key-file",
+                        "-",
+                    ])
+                    .arg(name),
+                passphrase.as_bytes(),
+            ) {
+                // `luksOpen` above already succeeded — no `MapperHandle`
+                // exists yet for the caller to close on this early return, so
+                // this adapter must close the mapping itself or it leaks
+                // indefinitely.
+                let _ = privileged("cryptsetup").arg("close").arg(name).output();
+                return Err(DomainError::AdapterFailure(e));
+            }
         }
 
         // Not wiped yet: enroll_fido2_key still needs it to authenticate
