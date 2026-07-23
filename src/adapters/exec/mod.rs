@@ -836,8 +836,7 @@ impl FilesystemBackend for ExecAdapter {
 
     fn mount(&self, mapper: &MapperHandle) -> Result<PathBuf, DomainError> {
         let suffix = random_hex_suffix().map_err(DomainError::AdapterFailure)?;
-        let mountpoint =
-            std::env::temp_dir().join(format!("tomb-fido2-{}-{suffix}", mapper.name));
+        let mountpoint = std::env::temp_dir().join(format!("tomb-fido2-{}-{suffix}", mapper.name));
 
         std::fs::create_dir(&mountpoint).map_err(|e| {
             DomainError::AdapterFailure(format!(
