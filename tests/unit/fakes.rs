@@ -314,4 +314,13 @@ impl FilesystemBackend for FakeFilesystemBackend {
             .push("remove_backing_file".to_string());
         Ok(())
     }
+
+    fn mount(&self, mapper: &MapperHandle) -> Result<std::path::PathBuf, DomainError> {
+        self.log.borrow_mut().push("mount".to_string());
+        self.fail_if("mount")?;
+        Ok(std::path::PathBuf::from(format!(
+            "/tmp/fake-mount-{}",
+            mapper.name
+        )))
+    }
 }

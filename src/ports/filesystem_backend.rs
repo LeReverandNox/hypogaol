@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::domain::errors::DomainError;
 use crate::domain::types::{Filesystem, MapperHandle};
@@ -29,4 +29,11 @@ pub trait FilesystemBackend {
     /// clean up after a file-backed `create` fails partway through, so a
     /// retry at the same destination isn't permanently blocked.
     fn remove_backing_file(&self, path: &Path) -> Result<(), DomainError>;
+
+    /// Mounts `mapper`'s decrypted device node at a fresh, uniquely-named
+    /// mount point, letting the kernel auto-detect the filesystem type from
+    /// the superblock. Returns the mount point. The mount point is never
+    /// stored or derived from `mapper`'s path (AD-12) — rediscovering it
+    /// later is `close`'s job (Story 3.1), via the kernel's own mount table.
+    fn mount(&self, mapper: &MapperHandle) -> Result<PathBuf, DomainError>;
 }

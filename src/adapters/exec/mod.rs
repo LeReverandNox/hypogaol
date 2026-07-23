@@ -105,6 +105,15 @@ fn generate_transient_passphrase() -> Result<Zeroizing<String>, String> {
     Ok(hex)
 }
 
+/// Hex-encodes 8 random bytes — used to keep sibling generated names (temp
+/// key files, mount-point directories) from colliding across concurrent runs,
+/// without embedding any secret.
+fn random_hex_suffix() -> Result<String, String> {
+    let mut bytes = [0u8; 8];
+    getrandom::fill(&mut bytes).map_err(|e| format!("failed to generate random suffix: {e}"))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
 /// A temporary file holding the transient bootstrap passphrase, for
 /// `systemd-cryptenroll --unlock-key-file`. Created with mode 0600, in
 /// `/dev/shm` when available (tmpfs — never touches a disk-backed
@@ -130,14 +139,7 @@ impl TempKeyFile {
             fallback
         };
 
-        let mut suffix = [0u8; 8];
-        getrandom::fill(&mut suffix)
-            .map_err(|e| format!("failed to generate temporary key file name: {e}"))?;
-        let suffix_hex = suffix
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>();
-
+        let suffix_hex = random_hex_suffix()?;
         let path = dir.join(format!(".tomb-fido2-bootstrap-{suffix_hex}"));
 
         let mut file = std::fs::OpenOptions::new()
@@ -737,7 +739,7 @@ impl FilesystemBackend for ExecAdapter {
     fn check_prerequisites(&self) -> Result<(), Vec<String>> {
         let mut missing = Vec::new();
 
-        for binary in ["mkfs.ext4", "resize2fs", "blockdev"] {
+        for binary in ["mkfs.ext4", "resize2fs", "blockdev", "mount"] {
             if !binary_on_path(binary) {
                 missing.push(format!("{binary} binary not found on PATH"));
             }
@@ -829,6 +831,38 @@ impl FilesystemBackend for ExecAdapter {
                     )))
                 }
             }
+        }
+    }
+
+    fn mount(&self, mapper: &MapperHandle) -> Result<PathBuf, DomainError> {
+        let suffix = random_hex_suffix().map_err(DomainError::AdapterFailure)?;
+        let mountpoint =
+            std::env::temp_dir().join(format!("tomb-fido2-{}-{suffix}", mapper.name));
+
+        std::fs::create_dir(&mountpoint).map_err(|e| {
+            DomainError::AdapterFailure(format!(
+                "failed to create mount point {}: {e}",
+                mountpoint.display()
+            ))
+        })?;
+
+        // No `-t`: let mount auto-detect the filesystem type from the
+        // superblock (standard kernel behavior) rather than re-deriving it
+        // from LUKS2 token metadata unlock has no other reason to read.
+        let output = privileged("mount")
+            .arg(mapper.device_node())
+            .arg(&mountpoint)
+            .output()
+            .map_err(|e| DomainError::AdapterFailure(format!("failed to run mount: {e}")))?;
+
+        if output.status.success() {
+            Ok(mountpoint)
+        } else {
+            let _ = std::fs::remove_dir(&mountpoint);
+            Err(DomainError::AdapterFailure(format!(
+                "mount failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )))
         }
     }
 }
