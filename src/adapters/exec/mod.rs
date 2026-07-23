@@ -489,7 +489,7 @@ impl LuksBackend for ExecAdapter {
         // on input."). Piping the still-in-scope transient passphrase via
         // `--key-file -`, the same non-interactive mechanism already used
         // for `luksFormat`/`luksOpen`, sidesteps the keyring entirely.
-        run_piping_stdin(
+        if let Err(e) = run_piping_stdin(
             privileged("cryptsetup")
                 .args([
                     "resize",
@@ -500,8 +500,13 @@ impl LuksBackend for ExecAdapter {
                 ])
                 .arg(name),
             passphrase.as_bytes(),
-        )
-        .map_err(DomainError::AdapterFailure)?;
+        ) {
+            // `luksOpen` above already succeeded — no `MapperHandle` exists
+            // yet for the caller to close on this early return, so this
+            // adapter must close the mapping itself or it leaks indefinitely.
+            let _ = privileged("cryptsetup").arg("close").arg(name).output();
+            return Err(DomainError::AdapterFailure(e));
+        }
 
         // Not wiped yet: enroll_fido2_key still needs it to authenticate
         // adding the real key's keyslot. Cached here, never surfaced to
