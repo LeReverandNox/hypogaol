@@ -31,6 +31,19 @@ fn binary_on_path(name: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// A `Command` for `program`, run under `sudo`. Used only for the handful of
+/// operations that genuinely need root (device-mapper: `luksOpen`, `close`,
+/// `mkfs` on the resulting mapper device) — everything else in this adapter
+/// (file allocation, `luksFormat`, FIDO2 enrollment, token/keyslot cleanup)
+/// operates on the LUKS2 header file directly and needs no elevation.
+/// `sudo` prompts interactively via the controlling terminal exactly when
+/// reached, rather than requiring the whole process to run as root.
+fn privileged(program: &str) -> Command {
+    let mut cmd = Command::new("sudo");
+    cmd.arg(program);
+    cmd
+}
+
 /// Confirms LUKS2 FIDO2/hmac-secret support is actually usable, not just that
 /// cryptsetup was built with token-plugin support in the abstract.
 ///
@@ -322,6 +335,13 @@ impl LuksBackend for ExecAdapter {
             missing.push("systemd-cryptenroll binary not found on PATH".to_string());
         }
 
+        if !binary_on_path("sudo") {
+            missing.push(
+                "sudo binary not found on PATH (needed to elevate privileges for luksOpen/close)"
+                    .to_string(),
+            );
+        }
+
         if missing.is_empty() {
             Ok(())
         } else {
@@ -357,7 +377,7 @@ impl LuksBackend for ExecAdapter {
         .map_err(DomainError::AdapterFailure)?;
 
         run_piping_stdin(
-            Command::new("cryptsetup")
+            privileged("cryptsetup")
                 .args(["luksOpen", "--key-file", "-"])
                 .arg(path)
                 .arg(name),
@@ -509,6 +529,25 @@ impl LuksBackend for ExecAdapter {
             )))
         }
     }
+
+    fn close(&self, mapper: &MapperHandle) -> Result<(), DomainError> {
+        let output = privileged("cryptsetup")
+            .arg("close")
+            .arg(&mapper.name)
+            .output()
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!("failed to run cryptsetup close: {e}"))
+            })?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(DomainError::AdapterFailure(format!(
+                "cryptsetup close failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )))
+        }
+    }
 }
 
 impl Fido2Backend for ExecAdapter {
@@ -564,7 +603,7 @@ impl FilesystemBackend for ExecAdapter {
     fn mkfs(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<(), DomainError> {
         match fs {
             Filesystem::Ext4 => {
-                let output = Command::new("mkfs.ext4")
+                let output = privileged("mkfs.ext4")
                     .arg("-F")
                     .arg(mapper.device_node())
                     .output()

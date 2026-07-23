@@ -23,14 +23,41 @@ enum Commands {
         #[arg(long)]
         path: PathBuf,
 
-        /// Size in bytes to allocate for the backing file
-        #[arg(long)]
+        /// Size to allocate for the backing file (e.g. 500M, 10G, or a plain
+        /// byte count)
+        #[arg(long, value_parser = parse_size)]
         size: u64,
 
         /// Filesystem to create inside the tomb
-        #[arg(long, value_enum)]
+        #[arg(long, value_enum, default_value = "ext4")]
         filesystem: CliFilesystem,
     },
+}
+
+/// Parses a size string with an optional K/M/G/T suffix (binary, powers of
+/// 1024 — matching `resize2fs`/`lvreduce` convention) into a byte count. No
+/// suffix means a plain byte count.
+fn parse_size(input: &str) -> Result<u64, String> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err("size must not be empty".to_string());
+    }
+
+    let (number_part, multiplier) = match trimmed.chars().last().expect("checked non-empty above") {
+        c if c.eq_ignore_ascii_case(&'k') => (&trimmed[..trimmed.len() - 1], 1024u64),
+        c if c.eq_ignore_ascii_case(&'m') => (&trimmed[..trimmed.len() - 1], 1024u64.pow(2)),
+        c if c.eq_ignore_ascii_case(&'g') => (&trimmed[..trimmed.len() - 1], 1024u64.pow(3)),
+        c if c.eq_ignore_ascii_case(&'t') => (&trimmed[..trimmed.len() - 1], 1024u64.pow(4)),
+        _ => (trimmed, 1u64),
+    };
+
+    let number: u64 = number_part.trim().parse().map_err(|_| {
+        format!("invalid size {input:?} (expected a number, optionally followed by K/M/G/T)")
+    })?;
+
+    number
+        .checked_mul(multiplier)
+        .ok_or_else(|| format!("size {input:?} is too large"))
 }
 
 #[derive(Clone, Copy, ValueEnum)]

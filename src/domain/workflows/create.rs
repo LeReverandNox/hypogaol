@@ -47,7 +47,12 @@ pub fn run(
 
             fs.mkfs(&mapper, filesystem)?;
 
-            keyslot_guard::remove_keyslot_guarded(luks, &path, BOOTSTRAP_KEYSLOT)
+            keyslot_guard::remove_keyslot_guarded(luks, &path, BOOTSTRAP_KEYSLOT)?;
+
+            // Leaves the tomb closed/at rest, ready for a later `unlock`
+            // (Story 1.7) — `create` never mounts it, so there is nothing to
+            // unmount first.
+            luks.close(&mapper)
         }
         CreateTarget::Device { .. } => todo!(),
     }

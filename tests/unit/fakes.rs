@@ -100,6 +100,11 @@ impl LuksBackend for FakeLuksBackend {
         self.log.borrow_mut().push("remove_key".to_string());
         Ok(())
     }
+
+    fn close(&self, _mapper: &MapperHandle) -> Result<(), DomainError> {
+        self.log.borrow_mut().push("close".to_string());
+        Ok(())
+    }
 }
 
 pub struct FakeFido2Backend(Result<(), Vec<String>>);

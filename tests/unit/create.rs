@@ -65,6 +65,7 @@ fn happy_path_runs_every_port_call_once_in_order() {
             "mkfs".to_string(),
             "list_fido2_keyslots".to_string(),
             "remove_key".to_string(),
+            "close".to_string(),
         ]
     );
 }
