@@ -4,7 +4,7 @@ baseline_commit: 9395b10
 
 # Story 1.7: Unlock and Mount a Tomb
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
