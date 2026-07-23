@@ -14,6 +14,12 @@ use crate::ports::luks_backend::LuksBackend;
 /// only) keyslot to index 0.
 const BOOTSTRAP_KEYSLOT: KeyslotRef = KeyslotRef(0);
 
+/// Minimum viable tomb size: large enough to hold a LUKS2 header/keyslot area
+/// plus a minimal ext4 filesystem. Enforced here (not just by the CLI's
+/// `parse_size`) because a device-backed create's size can also come from an
+/// unvalidated `device_capacity` reading with no `--size` given.
+pub const MIN_TOMB_SIZE_BYTES: u64 = 16 * 1024 * 1024;
+
 pub fn run(
     target: CreateTarget,
     filesystem: Filesystem,
@@ -35,31 +41,80 @@ pub fn run(
             // remove it again before returning, or every future `create` at
             // this same destination would permanently hit `DestinationExists`
             // with no way to recover.
-            let result = bootstrap_file_backed(&path, filesystem, luks, fido2, fs);
+            let result = bootstrap_and_provision(&path, size, filesystem, luks, fido2, fs);
             if result.is_err() {
                 let _ = fs.remove_backing_file(&path);
             }
             result
         }
-        CreateTarget::Device { .. } => todo!(),
+        CreateTarget::Device {
+            path,
+            size,
+            confirmed,
+        } => {
+            // Order is load-bearing (AD-9): the header check must win even
+            // when `confirmed` is true (AC #4), so it runs unconditionally
+            // first. Confirmation is checked second, independent of header
+            // state (AC #5). Size resolution/validation runs last, since it
+            // needs an extra adapter call and has no bearing on whether the
+            // destination should be refused outright.
+            if luks.has_luks2_header(&path)? {
+                return Err(DomainError::DeviceAlreadyFormatted(path));
+            }
+            if !confirmed {
+                return Err(DomainError::DeviceConfirmationRequired);
+            }
+
+            let capacity = fs.device_capacity(&path)?;
+            let resolved_size = match size {
+                Some(requested) if requested > capacity => {
+                    return Err(DomainError::DeviceSizeExceedsCapacity {
+                        path,
+                        requested,
+                        capacity,
+                    });
+                }
+                Some(requested) => requested,
+                None => capacity,
+            };
+
+            // Below this, `cryptsetup luksFormat`/`mkfs.ext4` fail deep inside
+            // the adapter with a cryptic error instead of a clear refusal.
+            // An explicit `--size` is already floor-checked by the CLI's
+            // `parse_size`, but a defaulted-from-capacity size (no `--size`
+            // given) never passes through that check — this is domain's own
+            // independent guarantee, not a trust in the CLI having done it.
+            if resolved_size < MIN_TOMB_SIZE_BYTES {
+                return Err(DomainError::DeviceTooSmall {
+                    path,
+                    size: resolved_size,
+                });
+            }
+
+            // No backing file was ever created for a device/partition target,
+            // so — unlike the File branch — a failure here must not attempt
+            // any file removal.
+            bootstrap_and_provision(&path, resolved_size, filesystem, luks, fido2, fs)
+        }
     }
 }
 
-fn bootstrap_file_backed(
+fn bootstrap_and_provision(
     path: &Path,
+    size: u64,
     filesystem: Filesystem,
     luks: &dyn LuksBackend,
     fido2: &dyn Fido2Backend,
     fs: &dyn FilesystemBackend,
 ) -> Result<(), DomainError> {
     let name = mapping_name::mapping_name(path)?;
-    let mapper = luks.bootstrap_format_and_open(path, &name, filesystem)?;
+    let mapper = luks.bootstrap_format_and_open(path, &name, size, filesystem)?;
 
     // Whatever happens next, a successfully opened mapping must be closed —
     // otherwise a mid-flow failure leaks an open `/dev/mapper/vault-*`
     // mapping indefinitely, same as this story's post-review hardware-run fix
     // for the happy path, just extended to the failure paths too.
-    let result = finish_file_backed(&mapper, filesystem, luks, fido2, fs);
+    let result = finish_provisioning(&mapper, filesystem, luks, fido2, fs);
     match result {
         Ok(()) => luks.close(&mapper),
         Err(err) => {
@@ -69,7 +124,7 @@ fn bootstrap_file_backed(
     }
 }
 
-fn finish_file_backed(
+fn finish_provisioning(
     mapper: &MapperHandle,
     filesystem: Filesystem,
     luks: &dyn LuksBackend,

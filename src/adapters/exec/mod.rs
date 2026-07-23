@@ -392,10 +392,38 @@ impl LuksBackend for ExecAdapter {
         }
     }
 
+    fn has_luks2_header(&self, path: &Path) -> Result<bool, DomainError> {
+        let output = Command::new("cryptsetup")
+            .args(["isLuks", "--type", "luks2"])
+            .arg(path)
+            .output()
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!("failed to run cryptsetup isLuks: {e}"))
+            })?;
+
+        // Confirmed empirically on this machine's cryptsetup: exit 0 = is a
+        // LUKS2 device, exit 1 = not a LUKS device (the true "no header"
+        // case). Any other code (2 wrong parameters, 3 out of memory, 4
+        // device does not exist/access denied, 5 device busy, or no code at
+        // all) means isLuks could not actually determine header status —
+        // collapsing those into "no header" would let a permission or
+        // transient error silently bypass AC #4's refusal.
+        match output.status.code() {
+            Some(0) => Ok(true),
+            Some(1) => Ok(false),
+            _ => Err(DomainError::AdapterFailure(format!(
+                "cryptsetup isLuks could not determine LUKS2 header status for {}: {}",
+                path.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ))),
+        }
+    }
+
     fn bootstrap_format_and_open(
         &self,
         path: &Path,
         name: &str,
+        size: u64,
         filesystem: Filesystem,
     ) -> Result<MapperHandle, DomainError> {
         // v1 has only one Filesystem variant; luksFormat/luksOpen don't need
@@ -427,6 +455,58 @@ impl LuksBackend for ExecAdapter {
             passphrase.as_bytes(),
         )
         .map_err(DomainError::AdapterFailure)?;
+
+        // `luksFormat --size`/`-b` is rejected outright by this installed
+        // cryptsetup version ("Option --size is not allowed with luksFormat
+        // action" — confirmed empirically, contradicting the generic --help
+        // listing and this story's original assumption). The documented
+        // mechanism to constrain a LUKS2 mapping to less than the underlying
+        // device's full capacity is instead `cryptsetup resize --device-size`
+        // on the already-open mapping (cryptsetup-resize(8)); it takes a
+        // plain byte count with no unit suffix, so no sector-rounding
+        // precision loss. Must run before mkfs (a separate port call) ever
+        // sees the mapped device. Harmless no-op for file-backed create,
+        // where `size` already equals the backing file's own exact size.
+        //
+        // Confirmed empirically (`cryptsetup status` right after this call,
+        // on real hardware) that this genuinely constrains the *active*
+        // mapping mkfs subsequently sees to exactly `size` bytes — even
+        // though the LUKS2 header's own `segments.0.size` metadata stays
+        // `"dynamic"` (i.e. "recompute from the real device size at every
+        // open") rather than being rewritten to a fixed value. That's by
+        // design, not a bug: it's what lets a later grow (Story 3.2) resize
+        // just the ext4 filesystem, with no LUKS2-level resize ever needed —
+        // the mapping already dynamically represents the device's full
+        // capacity on any future plain `luksOpen`.
+        //
+        // `resize` normally re-authenticates via the LUKS2 kernel keyring
+        // rather than a passphrase — but that keyring lookup is scoped to
+        // the calling process/session, and `luksOpen` and `resize` here are
+        // two separate `sudo cryptsetup` invocations, so the key isn't
+        // visible across them (confirmed empirically on real hardware:
+        // resize fell back to an interactive passphrase prompt against a
+        // stdin this adapter leaves unattached, producing "Nothing to read
+        // on input."). Piping the still-in-scope transient passphrase via
+        // `--key-file -`, the same non-interactive mechanism already used
+        // for `luksFormat`/`luksOpen`, sidesteps the keyring entirely.
+        if let Err(e) = run_piping_stdin(
+            privileged("cryptsetup")
+                .args([
+                    "resize",
+                    "--device-size",
+                    &size.to_string(),
+                    "--key-file",
+                    "-",
+                ])
+                .arg(name),
+            passphrase.as_bytes(),
+        ) {
+            // `luksOpen` above already succeeded — no `MapperHandle` exists
+            // yet for the caller to close on this early return, so this
+            // adapter must close the mapping itself or it leaks indefinitely.
+            let _ = privileged("cryptsetup").arg("close").arg(name).output();
+            return Err(DomainError::AdapterFailure(e));
+        }
 
         // Not wiped yet: enroll_fido2_key still needs it to authenticate
         // adding the real key's keyslot. Cached here, never surfaced to
@@ -643,6 +723,32 @@ impl FilesystemBackend for ExecAdapter {
 
     fn path_exists(&self, path: &Path) -> bool {
         path.exists()
+    }
+
+    fn device_capacity(&self, path: &Path) -> Result<u64, DomainError> {
+        let output = Command::new("blockdev")
+            .arg("--getsize64")
+            .arg(path)
+            .output()
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!("failed to run blockdev --getsize64: {e}"))
+            })?;
+
+        if !output.status.success() {
+            return Err(DomainError::AdapterFailure(format!(
+                "blockdev --getsize64 failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+
+        String::from_utf8_lossy(&output.stdout)
+            .trim()
+            .parse::<u64>()
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!(
+                    "failed to parse blockdev --getsize64 output: {e}"
+                ))
+            })
     }
 
     fn set_backing_file_size(&self, path: &Path, size: u64) -> Result<(), DomainError> {

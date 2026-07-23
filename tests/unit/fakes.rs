@@ -22,8 +22,10 @@ pub fn new_call_log() -> CallLog {
 pub struct FakeLuksBackend {
     prerequisites: Result<(), Vec<String>>,
     keyslots: RefCell<Vec<KeyslotInfo>>,
+    has_luks2_header: bool,
     log: CallLog,
     fail_at: Option<&'static str>,
+    last_bootstrap_size: RefCell<Option<u64>>,
 }
 
 impl FakeLuksBackend {
@@ -38,8 +40,10 @@ impl FakeLuksBackend {
             keyslots: RefCell::new(vec![KeyslotInfo {
                 keyslot: KeyslotRef(1),
             }]),
+            has_luks2_header: false,
             log: new_call_log(),
             fail_at: None,
+            last_bootstrap_size: RefCell::new(None),
         }
     }
 
@@ -47,8 +51,10 @@ impl FakeLuksBackend {
         Self {
             prerequisites: Err(missing(missing_deps)),
             keyslots: RefCell::new(Vec::new()),
+            has_luks2_header: false,
             log: new_call_log(),
             fail_at: None,
+            last_bootstrap_size: RefCell::new(None),
         }
     }
 
@@ -60,6 +66,18 @@ impl FakeLuksBackend {
     pub fn with_keyslots(self, keyslots: Vec<KeyslotInfo>) -> Self {
         *self.keyslots.borrow_mut() = keyslots;
         self
+    }
+
+    pub fn with_has_luks2_header(mut self, value: bool) -> Self {
+        self.has_luks2_header = value;
+        self
+    }
+
+    /// The `size` argument most recently passed to `bootstrap_format_and_open`
+    /// — lets a test assert AC #1/#2's resolved-size behavior directly,
+    /// instead of only the call-log's method-name sequence.
+    pub fn last_bootstrap_size(&self) -> Option<u64> {
+        *self.last_bootstrap_size.borrow()
     }
 
     /// Makes the named port call log itself as usual, then return an
@@ -84,15 +102,23 @@ impl LuksBackend for FakeLuksBackend {
         self.prerequisites.clone()
     }
 
+    fn has_luks2_header(&self, _path: &Path) -> Result<bool, DomainError> {
+        self.log.borrow_mut().push("has_luks2_header".to_string());
+        self.fail_if("has_luks2_header")?;
+        Ok(self.has_luks2_header)
+    }
+
     fn bootstrap_format_and_open(
         &self,
         path: &Path,
         name: &str,
+        size: u64,
         _filesystem: Filesystem,
     ) -> Result<MapperHandle, DomainError> {
         self.log
             .borrow_mut()
             .push("bootstrap_format_and_open".to_string());
+        *self.last_bootstrap_size.borrow_mut() = Some(size);
         self.fail_if("bootstrap_format_and_open")?;
         Ok(MapperHandle {
             name: name.to_string(),
@@ -173,9 +199,14 @@ impl Fido2Backend for FakeFido2Backend {
     }
 }
 
+/// Default fake device capacity: large enough that existing tests which
+/// don't care about sizing never accidentally trip `DeviceSizeExceedsCapacity`.
+const DEFAULT_DEVICE_CAPACITY: u64 = 1024u64.pow(4);
+
 pub struct FakeFilesystemBackend {
     prerequisites: Result<(), Vec<String>>,
     path_exists: bool,
+    device_capacity: u64,
     log: CallLog,
     fail_at: Option<&'static str>,
 }
@@ -185,6 +216,7 @@ impl FakeFilesystemBackend {
         Self {
             prerequisites: Ok(()),
             path_exists: false,
+            device_capacity: DEFAULT_DEVICE_CAPACITY,
             log: new_call_log(),
             fail_at: None,
         }
@@ -194,6 +226,7 @@ impl FakeFilesystemBackend {
         Self {
             prerequisites: Err(missing(missing_deps)),
             path_exists: false,
+            device_capacity: DEFAULT_DEVICE_CAPACITY,
             log: new_call_log(),
             fail_at: None,
         }
@@ -206,6 +239,11 @@ impl FakeFilesystemBackend {
 
     pub fn with_path_exists(mut self, value: bool) -> Self {
         self.path_exists = value;
+        self
+    }
+
+    pub fn with_device_capacity(mut self, value: u64) -> Self {
+        self.device_capacity = value;
         self
     }
 
@@ -231,6 +269,12 @@ impl FilesystemBackend for FakeFilesystemBackend {
     fn path_exists(&self, _path: &Path) -> bool {
         self.log.borrow_mut().push("path_exists".to_string());
         self.path_exists
+    }
+
+    fn device_capacity(&self, _path: &Path) -> Result<u64, DomainError> {
+        self.log.borrow_mut().push("device_capacity".to_string());
+        self.fail_if("device_capacity")?;
+        Ok(self.device_capacity)
     }
 
     fn set_backing_file_size(&self, _path: &Path, _size: u64) -> Result<(), DomainError> {

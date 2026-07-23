@@ -11,6 +11,11 @@ pub trait FilesystemBackend {
     /// True if `path` already exists (AD-9's create-mode refusal check).
     fn path_exists(&self, path: &Path) -> bool;
 
+    /// Byte capacity of the block device/partition at `path` (AD-9's
+    /// device-mode default-to-full-capacity sizing) — a pure query, no
+    /// mutation.
+    fn device_capacity(&self, path: &Path) -> Result<u64, DomainError>;
+
     /// Creates the backing file at `path` sized to exactly `size` bytes; fails
     /// if a file (or symlink) already exists at `path` — `path_exists` narrows
     /// the check-then-create race but does not eliminate it, so this call
