@@ -14,6 +14,12 @@ use crate::ports::luks_backend::LuksBackend;
 /// only) keyslot to index 0.
 const BOOTSTRAP_KEYSLOT: KeyslotRef = KeyslotRef(0);
 
+/// Minimum viable tomb size: large enough to hold a LUKS2 header/keyslot area
+/// plus a minimal ext4 filesystem. Enforced here (not just by the CLI's
+/// `parse_size`) because a device-backed create's size can also come from an
+/// unvalidated `device_capacity` reading with no `--size` given.
+pub const MIN_TOMB_SIZE_BYTES: u64 = 16 * 1024 * 1024;
+
 pub fn run(
     target: CreateTarget,
     filesystem: Filesystem,
@@ -71,6 +77,19 @@ pub fn run(
                 Some(requested) => requested,
                 None => capacity,
             };
+
+            // Below this, `cryptsetup luksFormat`/`mkfs.ext4` fail deep inside
+            // the adapter with a cryptic error instead of a clear refusal.
+            // An explicit `--size` is already floor-checked by the CLI's
+            // `parse_size`, but a defaulted-from-capacity size (no `--size`
+            // given) never passes through that check — this is domain's own
+            // independent guarantee, not a trust in the CLI having done it.
+            if resolved_size < MIN_TOMB_SIZE_BYTES {
+                return Err(DomainError::DeviceTooSmall {
+                    path,
+                    size: resolved_size,
+                });
+            }
 
             // No backing file was ever created for a device/partition target,
             // so — unlike the File branch — a failure here must not attempt

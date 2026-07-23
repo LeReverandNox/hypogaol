@@ -25,6 +25,7 @@ pub struct FakeLuksBackend {
     has_luks2_header: bool,
     log: CallLog,
     fail_at: Option<&'static str>,
+    last_bootstrap_size: RefCell<Option<u64>>,
 }
 
 impl FakeLuksBackend {
@@ -42,6 +43,7 @@ impl FakeLuksBackend {
             has_luks2_header: false,
             log: new_call_log(),
             fail_at: None,
+            last_bootstrap_size: RefCell::new(None),
         }
     }
 
@@ -52,6 +54,7 @@ impl FakeLuksBackend {
             has_luks2_header: false,
             log: new_call_log(),
             fail_at: None,
+            last_bootstrap_size: RefCell::new(None),
         }
     }
 
@@ -68,6 +71,13 @@ impl FakeLuksBackend {
     pub fn with_has_luks2_header(mut self, value: bool) -> Self {
         self.has_luks2_header = value;
         self
+    }
+
+    /// The `size` argument most recently passed to `bootstrap_format_and_open`
+    /// — lets a test assert AC #1/#2's resolved-size behavior directly,
+    /// instead of only the call-log's method-name sequence.
+    pub fn last_bootstrap_size(&self) -> Option<u64> {
+        *self.last_bootstrap_size.borrow()
     }
 
     /// Makes the named port call log itself as usual, then return an
@@ -102,12 +112,13 @@ impl LuksBackend for FakeLuksBackend {
         &self,
         path: &Path,
         name: &str,
-        _size: u64,
+        size: u64,
         _filesystem: Filesystem,
     ) -> Result<MapperHandle, DomainError> {
         self.log
             .borrow_mut()
             .push("bootstrap_format_and_open".to_string());
+        *self.last_bootstrap_size.borrow_mut() = Some(size);
         self.fail_if("bootstrap_format_and_open")?;
         Ok(MapperHandle {
             name: name.to_string(),

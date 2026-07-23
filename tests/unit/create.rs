@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use tomb_fido2::domain::errors::DomainError;
 use tomb_fido2::domain::types::{CreateTarget, Filesystem};
-use tomb_fido2::domain::workflows::create;
+use tomb_fido2::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
 
 use crate::fakes::{new_call_log, FakeFido2Backend, FakeFilesystemBackend, FakeLuksBackend};
 
@@ -202,7 +202,7 @@ fn device_happy_path_with_no_size_given_uses_the_full_capacity() {
     let fido2 = FakeFido2Backend::passing().with_log(log.clone());
     let fs = FakeFilesystemBackend::passing()
         .with_log(log.clone())
-        .with_device_capacity(2048);
+        .with_device_capacity(MIN_TOMB_SIZE_BYTES * 2);
 
     let fixture = RealFixtureFile::create("device-happy-path-no-size");
     let target = CreateTarget::Device {
@@ -214,6 +214,7 @@ fn device_happy_path_with_no_size_given_uses_the_full_capacity() {
     let result = create::run(target, Filesystem::Ext4, &luks, &fido2, &fs);
 
     assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(luks.last_bootstrap_size(), Some(MIN_TOMB_SIZE_BYTES * 2));
     assert_eq!(
         *log.borrow(),
         vec![
@@ -236,21 +237,21 @@ fn device_happy_path_with_a_size_smaller_than_capacity_uses_the_requested_size()
     let fido2 = FakeFido2Backend::passing().with_log(log.clone());
     let fs = FakeFilesystemBackend::passing()
         .with_log(log.clone())
-        .with_device_capacity(2048);
+        .with_device_capacity(MIN_TOMB_SIZE_BYTES * 2);
 
     let fixture = RealFixtureFile::create("device-happy-path-smaller-size");
     let target = CreateTarget::Device {
         path: fixture.0.clone(),
-        size: Some(1024),
+        size: Some(MIN_TOMB_SIZE_BYTES),
         confirmed: true,
     };
 
     let result = create::run(target, Filesystem::Ext4, &luks, &fido2, &fs);
 
     assert!(result.is_ok(), "expected Ok(()), got {result:?}");
-    // Same port-call sequence as the no-size case — the size passed into
-    // bootstrap_format_and_open isn't observable via the call log, but a
-    // requested size smaller than capacity must not be rejected (AC #2).
+    // The requested (smaller) size must reach bootstrap_format_and_open
+    // unchanged, not the full capacity (AC #2).
+    assert_eq!(luks.last_bootstrap_size(), Some(MIN_TOMB_SIZE_BYTES));
     assert_eq!(
         *log.borrow(),
         vec![
@@ -262,6 +263,41 @@ fn device_happy_path_with_a_size_smaller_than_capacity_uses_the_requested_size()
             "list_fido2_keyslots".to_string(),
             "remove_key".to_string(),
             "close".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn device_with_no_size_given_and_capacity_below_the_minimum_refuses_before_any_mutating_call() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_device_capacity(MIN_TOMB_SIZE_BYTES - 1);
+
+    let fixture = RealFixtureFile::create("device-capacity-below-minimum");
+    let target = CreateTarget::Device {
+        path: fixture.0.clone(),
+        size: None,
+        confirmed: true,
+    };
+
+    let result = create::run(target, Filesystem::Ext4, &luks, &fido2, &fs);
+
+    match result {
+        Err(DomainError::DeviceTooSmall { path, size }) => {
+            assert_eq!(path, fixture.0);
+            assert_eq!(size, MIN_TOMB_SIZE_BYTES - 1);
+        }
+        other => panic!("expected DomainError::DeviceTooSmall, got {other:?}"),
+    }
+
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "has_luks2_header".to_string(),
+            "device_capacity".to_string()
         ]
     );
 }
@@ -373,7 +409,7 @@ fn device_branch_failure_closes_the_mapping_without_removing_any_backing_file() 
         .with_failure_at("enroll_fido2_key");
     let fs = FakeFilesystemBackend::passing()
         .with_log(log.clone())
-        .with_device_capacity(2048);
+        .with_device_capacity(MIN_TOMB_SIZE_BYTES);
 
     let fixture = RealFixtureFile::create("device-failure-path");
     let target = CreateTarget::Device {

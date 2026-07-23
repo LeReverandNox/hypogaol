@@ -29,6 +29,12 @@ pub enum DomainError {
         capacity: u64,
     },
 
+    #[error(
+        "resolved size {size} bytes for {} is too small for a viable tomb",
+        .path.display()
+    )]
+    DeviceTooSmall { path: PathBuf, size: u64 },
+
     #[error("{0}")]
     AdapterFailure(String),
 }

@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::adapters::exec::ExecAdapter;
 use crate::domain::types::{CreateTarget, Filesystem};
-use crate::domain::workflows::create;
+use crate::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
 
 // `name`/`version`/`about` are populated by clap from this crate's own
 // `CARGO_PKG_*` metadata (AD-13) — never a hardcoded product-name literal.
@@ -63,12 +63,6 @@ enum CreateMode {
         filesystem: CliFilesystem,
     },
 }
-
-/// Minimum backing-file size this tool will allocate: large enough to hold a
-/// LUKS2 header/keyslot area plus a minimal ext4 filesystem. Below this,
-/// `cryptsetup luksFormat` fails deep inside the adapter with a cryptic
-/// device-too-small error instead of a clear, immediate message.
-pub const MIN_TOMB_SIZE_BYTES: u64 = 16 * 1024 * 1024;
 
 /// Parses a size string with an optional K/M/G/T suffix (binary, powers of
 /// 1024 — matching `resize2fs`/`lvreduce` convention) into a byte count. No
