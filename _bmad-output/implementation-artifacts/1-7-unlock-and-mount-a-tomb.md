@@ -22,11 +22,11 @@ so that I can access its contents in one guided step.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Add `LuksBackend::open` — opens an existing LUKS2 volume via its FIDO2 token (AC: #1, #2)
-  - [ ] Signature: `fn open(&self, path: &Path, name: &str) -> Result<MapperHandle, DomainError>`. Mirrors `bootstrap_format_and_open`'s shape (`domain` derives `name` via the shared helper and passes it in — the port never computes it itself, AC #3), but performs no formatting: it only opens an *existing* header.
-  - [ ] Real implementation (`adapters::exec`): `privileged("cryptsetup").args(["open", "--token-only"]).arg(path).arg(name)`, run with **inherited stdio** (`.status()`, not `.output()`) so the systemd-fido2 plugin's touch/PIN prompt reaches the real terminal — the same interactive pattern `Fido2Backend::enroll_fido2_key`'s `systemd-cryptenroll` call already uses (`src/adapters/exec/mod.rs:688-695`).
-  - [ ] **`--token-only` is not optional — this exact gap was already found and documented by Story 1.6's own hardware run:** "`cryptsetup open <device> <name>` without `--token-only` prompts for a passphrase instead of going straight to the FIDO2 PIN/touch flow" [Source: _bmad-output/implementation-artifacts/1-6-create-a-device-backed-tomb.md Completion Notes, finding (1)]. Omitting it would silently break AC #1's "touch my key when prompted" flow.
-  - [ ] No `has_luks2_header`-style pre-check before calling `open` — unlike `create`'s refuse-before-touching-anything gate, there is no AC requiring a friendlier pre-flight error for "this isn't a tomb": if `open` fails, `cryptsetup`'s own stderr surfaces via the existing `AdapterFailure` path. Do not add a speculative pre-check the ACs don't ask for.
+- [x] Task 1: Add `LuksBackend::open` — opens an existing LUKS2 volume via its FIDO2 token (AC: #1, #2)
+  - [x] Signature: `fn open(&self, path: &Path, name: &str) -> Result<MapperHandle, DomainError>`. Mirrors `bootstrap_format_and_open`'s shape (`domain` derives `name` via the shared helper and passes it in — the port never computes it itself, AC #3), but performs no formatting: it only opens an *existing* header.
+  - [x] Real implementation (`adapters::exec`): `privileged("cryptsetup").args(["open", "--token-only"]).arg(path).arg(name)`, run with **inherited stdio** (`.status()`, not `.output()`) so the systemd-fido2 plugin's touch/PIN prompt reaches the real terminal — the same interactive pattern `Fido2Backend::enroll_fido2_key`'s `systemd-cryptenroll` call already uses (`src/adapters/exec/mod.rs:688-695`).
+  - [x] **`--token-only` is not optional — this exact gap was already found and documented by Story 1.6's own hardware run:** "`cryptsetup open <device> <name>` without `--token-only` prompts for a passphrase instead of going straight to the FIDO2 PIN/touch flow" [Source: _bmad-output/implementation-artifacts/1-6-create-a-device-backed-tomb.md Completion Notes, finding (1)]. Omitting it would silently break AC #1's "touch my key when prompted" flow.
+  - [x] No `has_luks2_header`-style pre-check before calling `open` — unlike `create`'s refuse-before-touching-anything gate, there is no AC requiring a friendlier pre-flight error for "this isn't a tomb": if `open` fails, `cryptsetup`'s own stderr surfaces via the existing `AdapterFailure` path. Do not add a speculative pre-check the ACs don't ask for.
 - [ ] Task 2: Add `FilesystemBackend::mount` — mounts an opened mapping at a fresh, discoverable mount point (AC: #1)
   - [ ] Signature: `fn mount(&self, mapper: &MapperHandle) -> Result<PathBuf, DomainError>`. No `Filesystem` parameter: let `mount` auto-detect the filesystem type from the superblock (standard, well-known kernel behavior, satisfying NFR10) rather than re-deriving `Filesystem::Ext4` from the LUKS2 token's stored `filesystem` field (AD-2) just to pass `-t` — that field's only documented reader is `resize` (Story 3.2, AD-2); do not give `unlock` a new, unneeded reason to parse token metadata.
   - [ ] Mount point: create a fresh, uniquely-named directory under `std::env::temp_dir()` for every unlock — reuse `adapters::exec::generate_transient_passphrase`'s sibling pattern already in this file, `TempKeyFile::create`'s random-suffix generation (`src/adapters/exec/mod.rs:133-141`, `getrandom::fill` + hex-encode), just for a directory name instead of a temp-file name (e.g. `tomb-fido2-<mapper.name>-<suffix>`). **Do not make the mount point deterministic/derived-from-path** — per AD-12, "the mount point is not stored either... resolves the live mountpoint via the kernel's own mount table... never a remembered path." A fresh path each unlock, discoverable later only via `findmnt`/the mount table against the (deterministic) mapper device node, is exactly what AD-12 describes; Story 3.1 (`close`) is what will call `findmnt` to rediscover it — do not build that lookup now, it is out of scope for this story.
@@ -107,4 +107,10 @@ so that I can access its contents in one guided step.
 
 ### Completion Notes List
 
+- Task 1: Added `LuksBackend::open`, real `ExecAdapter` impl using `cryptsetup open --token-only` with inherited stdio (`.status()`), and `FakeLuksBackend::open` (`last_open()` accessor) so the suite keeps compiling. `cargo test --test unit` green (31 passed).
+
 ### File List
+
+- Modified: `src/ports/luks_backend.rs`
+- Modified: `src/adapters/exec/mod.rs`
+- Modified: `tests/unit/fakes.rs`

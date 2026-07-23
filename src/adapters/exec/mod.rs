@@ -631,6 +631,35 @@ impl LuksBackend for ExecAdapter {
             )))
         }
     }
+
+    fn open(&self, path: &Path, name: &str) -> Result<MapperHandle, DomainError> {
+        // `--token-only` is not optional: without it, `cryptsetup open` falls
+        // back to an interactive passphrase prompt instead of the FIDO2
+        // PIN/touch flow (confirmed empirically during Story 1.6's hardware
+        // run). Inherited stdio (`.status()`, not `.output()`) lets the
+        // systemd-fido2 plugin's own prompt reach the real terminal, the same
+        // pattern `enroll_fido2_key`'s `systemd-cryptenroll` call already
+        // uses.
+        let status = privileged("cryptsetup")
+            .args(["open", "--token-only"])
+            .arg(path)
+            .arg(name)
+            .status()
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!("failed to run cryptsetup open: {e}"))
+            })?;
+
+        if status.success() {
+            Ok(MapperHandle {
+                name: name.to_string(),
+                source_path: path.to_path_buf(),
+            })
+        } else {
+            Err(DomainError::AdapterFailure(
+                "cryptsetup open --token-only failed".to_string(),
+            ))
+        }
+    }
 }
 
 impl Fido2Backend for ExecAdapter {
