@@ -2,8 +2,9 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use tomb_fido2::adapters::exec::ExecAdapter;
+use tomb_fido2::domain::mapping_name;
 use tomb_fido2::domain::types::{CreateTarget, Filesystem};
-use tomb_fido2::domain::workflows::create;
+use tomb_fido2::domain::workflows::{create, unlock};
 
 /// Attaches a genuine `/dev/loopN` block device backed by a disposable file —
 /// `cryptsetup`/`blockdev` treat it identically to physical storage, so this
@@ -235,4 +236,233 @@ fn create_a_device_backed_tomb_leaves_headroom_for_a_later_resize() {
         loop_device.path.display(),
         loop_device.path.display(),
     );
+}
+
+/// Confirms `findmnt` recognizes `device_node` as actually mounted, and
+/// specifically at `mountpoint` — the real, kernel-level check backing AC
+/// #1's "the mounted filesystem becomes accessible at a discoverable mount
+/// point (via the kernel's mount table)" claim. Checking `TARGET` (not just
+/// that `device_node` is mounted *somewhere*) catches a bug that mounted the
+/// right device at the wrong directory.
+fn assert_actually_mounted(device_node: &std::path::Path, mountpoint: &std::path::Path) {
+    let output = Command::new("findmnt")
+        .args(["-n", "-o", "TARGET", "--source"])
+        .arg(device_node)
+        .output()
+        .expect("failed to run findmnt");
+    assert!(
+        output.status.success(),
+        "expected {} to be mounted, findmnt found nothing: {}",
+        device_node.display(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let actual_target = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    assert_eq!(
+        actual_target,
+        mountpoint.display().to_string(),
+        "{} is mounted, but not at the mount point unlock::run returned",
+        device_node.display()
+    );
+}
+
+/// Writes a marker file at `mountpoint` and reads it back, proving the
+/// filesystem `unlock::run` mounted is actually readable/writable, not just
+/// present in the mount table.
+fn assert_readable_and_writable(mountpoint: &std::path::Path) {
+    let marker = mountpoint.join("tomb-fido2-marker.txt");
+    std::fs::write(&marker, b"tomb-fido2 hardware test").expect("failed to write marker file");
+    let contents = std::fs::read_to_string(&marker).expect("failed to read marker file back");
+    assert_eq!(contents, "tomb-fido2 hardware test");
+}
+
+/// Manual-close cleanup: `close` (Story 3.1) doesn't exist yet, so unmount
+/// and close the mapping directly via bare `cryptsetup`, mirroring the
+/// break-glass pattern already used elsewhere in this file.
+fn unmount_and_close(mountpoint: &std::path::Path, mapping_name: &str) {
+    let umount = Command::new("sudo")
+        .arg("umount")
+        .arg(mountpoint)
+        .output()
+        .expect("failed to run umount");
+    assert!(
+        umount.status.success(),
+        "umount failed: {}",
+        String::from_utf8_lossy(&umount.stderr)
+    );
+    let _ = std::fs::remove_dir(mountpoint);
+
+    let close = Command::new("sudo")
+        .args(["cryptsetup", "close", mapping_name])
+        .output()
+        .expect("failed to run cryptsetup close");
+    assert!(
+        close.status.success(),
+        "cryptsetup close failed: {}",
+        String::from_utf8_lossy(&close.stderr)
+    );
+}
+
+/// Guards a hardware unlock scenario's cleanup (unmount, close, optional
+/// loop-device detach) so a panicking assertion mid-test — e.g. in
+/// `assert_actually_mounted`/`assert_readable_and_writable` — doesn't leak
+/// mount/mapping/loop-device state, mirroring `RealFixtureFile`'s Drop-based
+/// cleanup in `tests/unit/unlock.rs`. Call `.run()` explicitly at the normal
+/// end of a test for the full asserted cleanup (via `unmount_and_close`); if
+/// a panic happens first, `Drop` runs a best-effort fallback instead —
+/// asserting again while already unwinding would abort the process rather
+/// than report the original test failure.
+struct UnlockCleanup {
+    mountpoint: PathBuf,
+    mapping_name: String,
+    loop_device_path: Option<PathBuf>,
+    done: bool,
+}
+
+impl UnlockCleanup {
+    fn new(mountpoint: PathBuf, mapping_name: String) -> Self {
+        Self {
+            mountpoint,
+            mapping_name,
+            loop_device_path: None,
+            done: false,
+        }
+    }
+
+    fn with_loop_device(mut self, loop_device_path: PathBuf) -> Self {
+        self.loop_device_path = Some(loop_device_path);
+        self
+    }
+
+    fn run(mut self) {
+        unmount_and_close(&self.mountpoint, &self.mapping_name);
+        if let Some(loop_path) = &self.loop_device_path {
+            let detach = Command::new("sudo")
+                .args(["losetup", "-d"])
+                .arg(loop_path)
+                .output()
+                .expect("failed to run losetup -d");
+            assert!(
+                detach.status.success(),
+                "losetup -d failed: {}",
+                String::from_utf8_lossy(&detach.stderr)
+            );
+        }
+        self.done = true;
+    }
+}
+
+impl Drop for UnlockCleanup {
+    fn drop(&mut self) {
+        if self.done {
+            return;
+        }
+        let _ = Command::new("sudo")
+            .arg("umount")
+            .arg(&self.mountpoint)
+            .output();
+        let _ = std::fs::remove_dir(&self.mountpoint);
+        let _ = Command::new("sudo")
+            .args(["cryptsetup", "close", &self.mapping_name])
+            .output();
+        if let Some(loop_path) = &self.loop_device_path {
+            let _ = Command::new("sudo")
+                .args(["losetup", "-d"])
+                .arg(loop_path)
+                .output();
+        }
+    }
+}
+
+/// End-to-end unlock verification (Story 1.7, AC #1): create a real
+/// file-backed tomb via this tool's own `create::run`, then unlock and mount
+/// it via `unlock::run`, and confirm — independently of this tool's own
+/// code, via `findmnt` — that the returned mount point is actually mounted
+/// and its filesystem is readable/writable.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and a real FIDO2
+/// security key present, ready to be touched and to enter its PIN when
+/// prompted (once for `create`'s enrollment, once more for `unlock`'s open).
+#[test]
+#[ignore]
+fn unlock_mounts_a_file_backed_tomb_with_a_readable_writable_filesystem() {
+    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-unlock");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("tomb.img");
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::File {
+        path: path.clone(),
+        size: 64 * 1024 * 1024,
+    };
+
+    let result = create::run(target, Filesystem::Ext4, &adapter, &adapter, &adapter);
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    let mountpoint = unlock::run(&path, &adapter, &adapter, &adapter).expect("unlock::run failed");
+
+    let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
+    let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
+    let cleanup = UnlockCleanup::new(mountpoint.clone(), name);
+
+    assert_actually_mounted(&device_node, &mountpoint);
+    assert_readable_and_writable(&mountpoint);
+
+    cleanup.run();
+}
+
+/// Covers AC #2 (identical `unlock::run` call, no branching on target type)
+/// against a real device-backed target instead of a plain file, using the
+/// same `LoopDevice` helper as the device-backed create hardware test above.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and a real FIDO2
+/// security key present, ready to be touched and to enter its PIN when
+/// prompted (once for `create`'s enrollment, once more for `unlock`'s open).
+#[test]
+#[ignore]
+fn unlock_works_unmodified_against_a_device_backed_tomb() {
+    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-unlock-device");
+    let backing_file = dir.join("loop-backing.img");
+
+    // Must run before the backing file is deleted/recreated below — see
+    // `detach_stale`'s doc comment.
+    LoopDevice::detach_stale(&backing_file);
+
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+
+    let loop_capacity: u64 = 64 * 1024 * 1024;
+    {
+        let file = std::fs::File::create(&backing_file).expect("failed to create backing file");
+        file.set_len(loop_capacity)
+            .expect("failed to size backing file");
+    }
+
+    let loop_device = LoopDevice::attach(&backing_file);
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::Device {
+        path: loop_device.path.clone(),
+        size: None,
+        confirmed: true,
+    };
+
+    let result = create::run(target, Filesystem::Ext4, &adapter, &adapter, &adapter);
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    // Identical unlock::run call as the file-backed scenario above — no
+    // different flags or behavior branch based on target type (AC #2).
+    let mountpoint =
+        unlock::run(&loop_device.path, &adapter, &adapter, &adapter).expect("unlock::run failed");
+
+    let name =
+        mapping_name::mapping_name(&loop_device.path).expect("failed to derive mapping name");
+    let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
+    let cleanup = UnlockCleanup::new(mountpoint.clone(), name).with_loop_device(loop_device.path);
+
+    assert_actually_mounted(&device_node, &mountpoint);
+    assert_readable_and_writable(&mountpoint);
+
+    cleanup.run();
 }

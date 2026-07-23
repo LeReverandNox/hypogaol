@@ -26,6 +26,7 @@ pub struct FakeLuksBackend {
     log: CallLog,
     fail_at: Option<&'static str>,
     last_bootstrap_size: RefCell<Option<u64>>,
+    last_open: RefCell<Option<(std::path::PathBuf, String)>>,
 }
 
 impl FakeLuksBackend {
@@ -44,6 +45,7 @@ impl FakeLuksBackend {
             log: new_call_log(),
             fail_at: None,
             last_bootstrap_size: RefCell::new(None),
+            last_open: RefCell::new(None),
         }
     }
 
@@ -55,6 +57,7 @@ impl FakeLuksBackend {
             log: new_call_log(),
             fail_at: None,
             last_bootstrap_size: RefCell::new(None),
+            last_open: RefCell::new(None),
         }
     }
 
@@ -78,6 +81,12 @@ impl FakeLuksBackend {
     /// instead of only the call-log's method-name sequence.
     pub fn last_bootstrap_size(&self) -> Option<u64> {
         *self.last_bootstrap_size.borrow()
+    }
+
+    /// The `(path, name)` most recently passed to `open` — lets a test assert
+    /// AC #3's exact derived mapping name without re-deriving it by hand.
+    pub fn last_open(&self) -> Option<(std::path::PathBuf, String)> {
+        self.last_open.borrow().clone()
     }
 
     /// Makes the named port call log itself as usual, then return an
@@ -142,6 +151,16 @@ impl LuksBackend for FakeLuksBackend {
     fn close(&self, _mapper: &MapperHandle) -> Result<(), DomainError> {
         self.log.borrow_mut().push("close".to_string());
         self.fail_if("close")
+    }
+
+    fn open(&self, path: &Path, name: &str) -> Result<MapperHandle, DomainError> {
+        self.log.borrow_mut().push("open".to_string());
+        *self.last_open.borrow_mut() = Some((path.to_path_buf(), name.to_string()));
+        self.fail_if("open")?;
+        Ok(MapperHandle {
+            name: name.to_string(),
+            source_path: path.to_path_buf(),
+        })
     }
 }
 
@@ -294,5 +313,14 @@ impl FilesystemBackend for FakeFilesystemBackend {
             .borrow_mut()
             .push("remove_backing_file".to_string());
         Ok(())
+    }
+
+    fn mount(&self, mapper: &MapperHandle) -> Result<std::path::PathBuf, DomainError> {
+        self.log.borrow_mut().push("mount".to_string());
+        self.fail_if("mount")?;
+        Ok(std::path::PathBuf::from(format!(
+            "/tmp/fake-mount-{}",
+            mapper.name
+        )))
     }
 }

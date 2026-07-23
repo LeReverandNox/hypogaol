@@ -105,6 +105,50 @@ fn generate_transient_passphrase() -> Result<Zeroizing<String>, String> {
     Ok(hex)
 }
 
+/// Hex-encodes 8 random bytes — used to keep sibling generated names (temp
+/// key files, mount-point directories) from colliding across concurrent runs,
+/// without embedding any secret.
+fn random_hex_suffix() -> Result<String, String> {
+    let mut bytes = [0u8; 8];
+    getrandom::fill(&mut bytes).map_err(|e| format!("failed to generate random suffix: {e}"))?;
+    Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
+/// The raw byte capacity of the storage backing `path` — a block device's
+/// full size via `blockdev --getsize64`, or a regular file's own length.
+/// Used by `bootstrap_format_and_open` to decide whether its `resize` step is
+/// needed at all: resizing a LUKS2 mapping to exactly the full raw capacity
+/// fails outright (there's no room left for the header alongside a
+/// full-size payload), confirmed empirically on real hardware.
+fn actual_raw_size(path: &Path) -> Result<u64, String> {
+    use std::os::unix::fs::FileTypeExt;
+
+    let metadata =
+        std::fs::metadata(path).map_err(|e| format!("failed to stat {}: {e}", path.display()))?;
+
+    if !metadata.file_type().is_block_device() {
+        return Ok(metadata.len());
+    }
+
+    let output = Command::new("blockdev")
+        .arg("--getsize64")
+        .arg(path)
+        .output()
+        .map_err(|e| format!("failed to run blockdev --getsize64: {e}"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "blockdev --getsize64 failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u64>()
+        .map_err(|e| format!("failed to parse blockdev --getsize64 output: {e}"))
+}
+
 /// A temporary file holding the transient bootstrap passphrase, for
 /// `systemd-cryptenroll --unlock-key-file`. Created with mode 0600, in
 /// `/dev/shm` when available (tmpfs — never touches a disk-backed
@@ -130,14 +174,7 @@ impl TempKeyFile {
             fallback
         };
 
-        let mut suffix = [0u8; 8];
-        getrandom::fill(&mut suffix)
-            .map_err(|e| format!("failed to generate temporary key file name: {e}"))?;
-        let suffix_hex = suffix
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>();
-
+        let suffix_hex = random_hex_suffix()?;
         let path = dir.join(format!(".tomb-fido2-bootstrap-{suffix_hex}"));
 
         let mut file = std::fs::OpenOptions::new()
@@ -465,19 +502,29 @@ impl LuksBackend for ExecAdapter {
         // on the already-open mapping (cryptsetup-resize(8)); it takes a
         // plain byte count with no unit suffix, so no sector-rounding
         // precision loss. Must run before mkfs (a separate port call) ever
-        // sees the mapped device. Harmless no-op for file-backed create,
-        // where `size` already equals the backing file's own exact size.
+        // sees the mapped device.
+        //
+        // Only run it when `size` asks for less than the full raw capacity
+        // of `path` — resizing to exactly the full raw capacity fails
+        // outright ("Device is too small"), since the LUKS2 header has
+        // nowhere left to live alongside a full-size payload (confirmed on
+        // real hardware during Story 1.7's hardware verification — this
+        // unconditional call was assumed a harmless no-op for file-backed
+        // create, where `size` always equals the backing file's own exact
+        // size, but that assumption was wrong). LUKS2's default dynamic
+        // sizing already gives the correct, header-excluded mapping for the
+        // full-capacity case with no resize needed at all.
         //
         // Confirmed empirically (`cryptsetup status` right after this call,
-        // on real hardware) that this genuinely constrains the *active*
-        // mapping mkfs subsequently sees to exactly `size` bytes — even
-        // though the LUKS2 header's own `segments.0.size` metadata stays
-        // `"dynamic"` (i.e. "recompute from the real device size at every
-        // open") rather than being rewritten to a fixed value. That's by
-        // design, not a bug: it's what lets a later grow (Story 3.2) resize
-        // just the ext4 filesystem, with no LUKS2-level resize ever needed —
-        // the mapping already dynamically represents the device's full
-        // capacity on any future plain `luksOpen`.
+        // on real hardware) that when it does run, this genuinely constrains
+        // the *active* mapping mkfs subsequently sees to exactly `size`
+        // bytes — even though the LUKS2 header's own `segments.0.size`
+        // metadata stays `"dynamic"` (i.e. "recompute from the real device
+        // size at every open") rather than being rewritten to a fixed value.
+        // That's by design, not a bug: it's what lets a later grow (Story
+        // 3.2) resize just the ext4 filesystem, with no LUKS2-level resize
+        // ever needed — the mapping already dynamically represents the
+        // device's full capacity on any future plain `luksOpen`.
         //
         // `resize` normally re-authenticates via the LUKS2 kernel keyring
         // rather than a passphrase — but that keyring lookup is scoped to
@@ -489,23 +536,36 @@ impl LuksBackend for ExecAdapter {
         // on input."). Piping the still-in-scope transient passphrase via
         // `--key-file -`, the same non-interactive mechanism already used
         // for `luksFormat`/`luksOpen`, sidesteps the keyring entirely.
-        if let Err(e) = run_piping_stdin(
-            privileged("cryptsetup")
-                .args([
-                    "resize",
-                    "--device-size",
-                    &size.to_string(),
-                    "--key-file",
-                    "-",
-                ])
-                .arg(name),
-            passphrase.as_bytes(),
-        ) {
-            // `luksOpen` above already succeeded — no `MapperHandle` exists
-            // yet for the caller to close on this early return, so this
-            // adapter must close the mapping itself or it leaks indefinitely.
-            let _ = privileged("cryptsetup").arg("close").arg(name).output();
-            return Err(DomainError::AdapterFailure(e));
+        let raw_size = match actual_raw_size(path) {
+            Ok(raw_size) => raw_size,
+            Err(e) => {
+                // `luksOpen` above already succeeded — same leak this
+                // function's `resize` failure branch below already guards
+                // against applies here too.
+                let _ = privileged("cryptsetup").arg("close").arg(name).output();
+                return Err(DomainError::AdapterFailure(e));
+            }
+        };
+        if raw_size > size {
+            if let Err(e) = run_piping_stdin(
+                privileged("cryptsetup")
+                    .args([
+                        "resize",
+                        "--device-size",
+                        &size.to_string(),
+                        "--key-file",
+                        "-",
+                    ])
+                    .arg(name),
+                passphrase.as_bytes(),
+            ) {
+                // `luksOpen` above already succeeded — no `MapperHandle`
+                // exists yet for the caller to close on this early return, so
+                // this adapter must close the mapping itself or it leaks
+                // indefinitely.
+                let _ = privileged("cryptsetup").arg("close").arg(name).output();
+                return Err(DomainError::AdapterFailure(e));
+            }
         }
 
         // Not wiped yet: enroll_fido2_key still needs it to authenticate
@@ -631,6 +691,36 @@ impl LuksBackend for ExecAdapter {
             )))
         }
     }
+
+    fn open(&self, path: &Path, name: &str) -> Result<MapperHandle, DomainError> {
+        // `--token-only` is not optional: without it, `cryptsetup open` falls
+        // back to an interactive passphrase prompt instead of the FIDO2
+        // PIN/touch flow (confirmed empirically during Story 1.6's hardware
+        // run). Inherited stdio (`.status()`, not `.output()`) lets the
+        // systemd-fido2 plugin's own prompt reach the real terminal, the same
+        // pattern `enroll_fido2_key`'s `systemd-cryptenroll` call already
+        // uses.
+        let status = privileged("cryptsetup")
+            .args(["open", "--token-only"])
+            .arg(path)
+            .arg(name)
+            .status()
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!("failed to run cryptsetup open: {e}"))
+            })?;
+
+        if status.success() {
+            Ok(MapperHandle {
+                name: name.to_string(),
+                source_path: path.to_path_buf(),
+            })
+        } else {
+            Err(DomainError::AdapterFailure(format!(
+                "cryptsetup open --token-only failed for {} as {name}",
+                path.display()
+            )))
+        }
+    }
 }
 
 impl Fido2Backend for ExecAdapter {
@@ -708,7 +798,7 @@ impl FilesystemBackend for ExecAdapter {
     fn check_prerequisites(&self) -> Result<(), Vec<String>> {
         let mut missing = Vec::new();
 
-        for binary in ["mkfs.ext4", "resize2fs", "blockdev"] {
+        for binary in ["mkfs.ext4", "resize2fs", "blockdev", "mount"] {
             if !binary_on_path(binary) {
                 missing.push(format!("{binary} binary not found on PATH"));
             }
@@ -799,6 +889,67 @@ impl FilesystemBackend for ExecAdapter {
                         String::from_utf8_lossy(&output.stderr).trim()
                     )))
                 }
+            }
+        }
+    }
+
+    fn mount(&self, mapper: &MapperHandle) -> Result<PathBuf, DomainError> {
+        let suffix = random_hex_suffix().map_err(DomainError::AdapterFailure)?;
+        let mountpoint = std::env::temp_dir().join(format!("tomb-fido2-{}-{suffix}", mapper.name));
+
+        std::fs::create_dir(&mountpoint).map_err(|e| {
+            DomainError::AdapterFailure(format!(
+                "failed to create mount point {}: {e}",
+                mountpoint.display()
+            ))
+        })?;
+
+        // No `-t`: let mount auto-detect the filesystem type from the
+        // superblock (standard kernel behavior) rather than re-deriving it
+        // from LUKS2 token metadata unlock has no other reason to read.
+        let output = match privileged("mount")
+            .arg(mapper.device_node())
+            .arg(&mountpoint)
+            .output()
+        {
+            Ok(output) => output,
+            Err(e) => {
+                let _ = std::fs::remove_dir(&mountpoint);
+                return Err(DomainError::AdapterFailure(format!(
+                    "failed to run mount: {e}"
+                )));
+            }
+        };
+
+        if !output.status.success() {
+            let _ = std::fs::remove_dir(&mountpoint);
+            return Err(DomainError::AdapterFailure(format!(
+                "mount failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+
+        // Restrict the mount point to the invoking user only. Without this,
+        // the mounted filesystem's own root-inode permissions (e.g.
+        // mkfs.ext4's default 0755) are what's visible at `mountpoint` — left
+        // as-is, any local user could read the just-unlocked tomb's contents
+        // under a world-traversable `/tmp`, defeating the FIDO2 gate.
+        match privileged("chmod").arg("0700").arg(&mountpoint).output() {
+            Ok(chmod_output) if chmod_output.status.success() => Ok(mountpoint),
+            Ok(chmod_output) => {
+                let _ = privileged("umount").arg(&mountpoint).output();
+                let _ = std::fs::remove_dir(&mountpoint);
+                Err(DomainError::AdapterFailure(format!(
+                    "failed to restrict mount point permissions: {}",
+                    String::from_utf8_lossy(&chmod_output.stderr).trim()
+                )))
+            }
+            Err(e) => {
+                let _ = privileged("umount").arg(&mountpoint).output();
+                let _ = std::fs::remove_dir(&mountpoint);
+                Err(DomainError::AdapterFailure(format!(
+                    "failed to run chmod: {e}"
+                )))
             }
         }
     }

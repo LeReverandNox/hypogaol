@@ -4,8 +4,10 @@ use std::path::{Path, PathBuf};
 use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::adapters::exec::ExecAdapter;
+use crate::domain::preflight;
 use crate::domain::types::{CreateTarget, Filesystem};
 use crate::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
+use crate::domain::workflows::unlock;
 
 // `name`/`version`/`about` are populated by clap from this crate's own
 // `CARGO_PKG_*` metadata (AD-13) — never a hardcoded product-name literal.
@@ -22,6 +24,13 @@ enum Commands {
     Create {
         #[command(subcommand)]
         mode: CreateMode,
+    },
+
+    /// Unlock and mount an existing tomb
+    Unlock {
+        /// Path to the existing tomb's backing file or device
+        #[arg(long)]
+        path: PathBuf,
     },
 }
 
@@ -158,6 +167,35 @@ fn run_create(target: CreateTarget, filesystem: Filesystem, display_path: &str, 
     println!("Tomb created at {display_path}.");
 }
 
+/// Builds the adapter, runs `unlock::run`, and reports the result. Checks
+/// preflight first so a missing-dependency error surfaces before the
+/// touch-key prompt below, rather than after it — `unlock::run` re-checks
+/// preflight itself regardless (AD-4), so this is a cheap, side-effect-free
+/// re-check, not a bypass. Prints a plain-language line before calling
+/// `unlock::run` (FR5/NFR3 — prompts assume zero FIDO2 knowledge);
+/// `cryptsetup`'s own systemd-fido2 prompt text still appears as-is via
+/// inherited stdio, same accepted limitation as `enroll`'s
+/// `systemd-cryptenroll` prompt, and is left untranslated here (Story 1.8's
+/// job, not this one's).
+fn run_unlock(path: PathBuf) {
+    let adapter = ExecAdapter::default();
+
+    if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
+        eprintln!("{err}");
+        std::process::exit(1);
+    }
+
+    println!("Touch your security key now (you may also be asked for its PIN).");
+
+    match unlock::run(&path, &adapter, &adapter, &adapter) {
+        Ok(mountpoint) => println!("Tomb unlocked and mounted at {}.", mountpoint.display()),
+        Err(err) => {
+            eprintln!("{err}");
+            std::process::exit(1);
+        }
+    }
+}
+
 pub fn run() {
     let cli = Cli::parse();
 
@@ -187,5 +225,6 @@ pub fn run() {
                 run_create(target, filesystem.into(), &display_path, confirmed);
             }
         },
+        Commands::Unlock { path } => run_unlock(path),
     }
 }

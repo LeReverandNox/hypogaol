@@ -35,4 +35,11 @@ pub trait LuksBackend {
 
     /// Releases `mapper`'s dm-crypt mapping, leaving the tomb closed/at rest.
     fn close(&self, mapper: &MapperHandle) -> Result<(), DomainError>;
+
+    /// Opens an existing LUKS2 volume at `path` as `name` via its enrolled
+    /// FIDO2 token, prompting for touch/PIN on the real terminal. Performs no
+    /// formatting — unlike `bootstrap_format_and_open`, `path` must already
+    /// carry a LUKS2 header. `name` is derived by the caller via the shared
+    /// `mapping_name` helper, never computed here (AD-12).
+    fn open(&self, path: &Path, name: &str) -> Result<MapperHandle, DomainError>;
 }
