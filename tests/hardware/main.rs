@@ -109,7 +109,7 @@ fn create_a_file_backed_tomb_is_independently_unlockable_via_bare_cryptsetup() {
     // hand, then record the result in the story's Completion Notes:
     println!(
         "Tomb created at {}. To finish verifying AC #1 by hand:\n  \
-         sudo cryptsetup open {} tomb-fido2-hardware-test\n  \
+         sudo cryptsetup open --token-only {} tomb-fido2-hardware-test\n  \
          sudo mount /dev/mapper/tomb-fido2-hardware-test <mountpoint>\n  \
          ls <mountpoint>\n  \
          sudo umount <mountpoint> && sudo cryptsetup close tomb-fido2-hardware-test",
@@ -209,7 +209,7 @@ fn create_a_device_backed_tomb_leaves_headroom_for_a_later_resize() {
         "Device-backed tomb created at {} (loop device backed by {}).\n\
          Requested {requested_size} bytes of {capacity} bytes total capacity.\n\
          To finish verifying AC #2's headroom claim by hand:\n  \
-         sudo cryptsetup open {} tomb-fido2-hardware-test-device\n  \
+         sudo cryptsetup open --token-only {} tomb-fido2-hardware-test-device\n  \
          sudo dumpe2fs -h /dev/mapper/tomb-fido2-hardware-test-device | grep -E 'Block count|Block size'\n  \
          # confirm block_count * block_size is close to {requested_size} bytes, not {capacity}\n  \
          sudo cryptsetup close tomb-fido2-hardware-test-device\n  \
