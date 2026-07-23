@@ -911,14 +911,36 @@ impl FilesystemBackend for ExecAdapter {
             }
         };
 
-        if output.status.success() {
-            Ok(mountpoint)
-        } else {
+        if !output.status.success() {
             let _ = std::fs::remove_dir(&mountpoint);
-            Err(DomainError::AdapterFailure(format!(
+            return Err(DomainError::AdapterFailure(format!(
                 "mount failed: {}",
                 String::from_utf8_lossy(&output.stderr).trim()
-            )))
+            )));
+        }
+
+        // Restrict the mount point to the invoking user only. Without this,
+        // the mounted filesystem's own root-inode permissions (e.g.
+        // mkfs.ext4's default 0755) are what's visible at `mountpoint` — left
+        // as-is, any local user could read the just-unlocked tomb's contents
+        // under a world-traversable `/tmp`, defeating the FIDO2 gate.
+        match privileged("chmod").arg("0700").arg(&mountpoint).output() {
+            Ok(chmod_output) if chmod_output.status.success() => Ok(mountpoint),
+            Ok(chmod_output) => {
+                let _ = privileged("umount").arg(&mountpoint).output();
+                let _ = std::fs::remove_dir(&mountpoint);
+                Err(DomainError::AdapterFailure(format!(
+                    "failed to restrict mount point permissions: {}",
+                    String::from_utf8_lossy(&chmod_output.stderr).trim()
+                )))
+            }
+            Err(e) => {
+                let _ = privileged("umount").arg(&mountpoint).output();
+                let _ = std::fs::remove_dir(&mountpoint);
+                Err(DomainError::AdapterFailure(format!(
+                    "failed to run chmod: {e}"
+                )))
+            }
         }
     }
 }
