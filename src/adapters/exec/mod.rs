@@ -128,9 +128,10 @@ struct InvokingIdentity {
 
 fn invoking_identity() -> Result<InvokingIdentity, DomainError> {
     fn run_id(flag: &str) -> Result<String, DomainError> {
-        let output = Command::new("id").arg(flag).output().map_err(|e| {
-            DomainError::AdapterFailure(format!("failed to run id {flag}: {e}"))
-        })?;
+        let output = Command::new("id")
+            .arg(flag)
+            .output()
+            .map_err(|e| DomainError::AdapterFailure(format!("failed to run id {flag}: {e}")))?;
 
         if !output.status.success() {
             return Err(DomainError::AdapterFailure(format!(
@@ -147,6 +148,39 @@ fn invoking_identity() -> Result<InvokingIdentity, DomainError> {
         gid: run_id("-g")?,
         username: run_id("-un")?,
     })
+}
+
+/// Creates a fresh directory named `tomb_name` under `base` (AD-12: still
+/// deterministic from `mapper.source_path` on the common path — no registry).
+/// Falls back to a short random-suffixed name only on an actual collision,
+/// bounded to a small number of attempts.
+fn create_mount_point(base: &Path, tomb_name: &str) -> Result<PathBuf, DomainError> {
+    const MAX_ATTEMPTS: u32 = 3;
+    let mut candidate = base.join(tomb_name);
+    let mut attempt = 1;
+
+    loop {
+        match std::fs::create_dir(&candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempt < MAX_ATTEMPTS => {
+                let suffix = random_hex_suffix().map_err(DomainError::AdapterFailure)?;
+                candidate = base.join(format!("{tomb_name}-{}", &suffix[..4]));
+                attempt += 1;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(DomainError::AdapterFailure(format!(
+                    "could not find an available mount point under {} after {MAX_ATTEMPTS} attempts",
+                    base.display()
+                )));
+            }
+            Err(e) => {
+                return Err(DomainError::AdapterFailure(format!(
+                    "failed to create mount point {}: {e}",
+                    candidate.display()
+                )));
+            }
+        }
+    }
 }
 
 /// The raw byte capacity of the storage backing `path` — a block device's
@@ -929,15 +963,61 @@ impl FilesystemBackend for ExecAdapter {
     }
 
     fn mount(&self, mapper: &MapperHandle) -> Result<PathBuf, DomainError> {
-        let suffix = random_hex_suffix().map_err(DomainError::AdapterFailure)?;
-        let mountpoint = std::env::temp_dir().join(format!("tomb-fido2-{}-{suffix}", mapper.name));
+        // Fetched once up front: needed both for the `/run/media/<username>`
+        // base directory below and for the mount-point `chown` further down.
+        let identity = invoking_identity()?;
 
-        std::fs::create_dir(&mountpoint).map_err(|e| {
-            DomainError::AdapterFailure(format!(
-                "failed to create mount point {}: {e}",
-                mountpoint.display()
-            ))
-        })?;
+        // `file_stem()` strips the extension for a file path (`vault.img` ->
+        // `vault`) and returns the whole name for an extensionless device
+        // path (`/dev/sdb1` -> `sdb1`); falling back to the full name covers
+        // the never-expected case where `file_stem()` itself returns `None`.
+        let tomb_name = mapper
+            .source_path
+            .file_stem()
+            .unwrap_or_else(|| mapper.source_path.as_os_str())
+            .to_string_lossy()
+            .into_owned();
+
+        let base = PathBuf::from(format!("/run/media/{}", identity.username));
+        if !base.exists() {
+            let mkdir_output = privileged("mkdir")
+                .args(["-p", "-m", "0755"])
+                .arg(&base)
+                .output()
+                .map_err(|e| {
+                    DomainError::AdapterFailure(format!(
+                        "failed to run mkdir -p {}: {e}",
+                        base.display()
+                    ))
+                })?;
+            if !mkdir_output.status.success() {
+                return Err(DomainError::AdapterFailure(format!(
+                    "failed to create {}: {}",
+                    base.display(),
+                    String::from_utf8_lossy(&mkdir_output.stderr).trim()
+                )));
+            }
+
+            let chown_output = privileged("chown")
+                .arg(format!("{}:{}", identity.uid, identity.gid))
+                .arg(&base)
+                .output()
+                .map_err(|e| {
+                    DomainError::AdapterFailure(format!(
+                        "failed to run chown on {}: {e}",
+                        base.display()
+                    ))
+                })?;
+            if !chown_output.status.success() {
+                return Err(DomainError::AdapterFailure(format!(
+                    "failed to set ownership of {}: {}",
+                    base.display(),
+                    String::from_utf8_lossy(&chown_output.stderr).trim()
+                )));
+            }
+        }
+
+        let mountpoint = create_mount_point(&base, &tomb_name)?;
 
         // No `-t`: let mount auto-detect the filesystem type from the
         // superblock (standard kernel behavior) rather than re-deriving it
@@ -966,17 +1046,9 @@ impl FilesystemBackend for ExecAdapter {
 
         // The mount point's underlying inode was created by a privileged
         // `mkfs.ext4` at `create` time, so it's currently root-owned; hand it
-        // to the invoking user before restricting it below, or the invoking
-        // user would be locked out of their own just-unlocked tomb.
-        let identity = match invoking_identity() {
-            Ok(identity) => identity,
-            Err(e) => {
-                let _ = privileged("umount").arg(&mountpoint).output();
-                let _ = std::fs::remove_dir(&mountpoint);
-                return Err(e);
-            }
-        };
-
+        // to the invoking user (identity fetched at the top of this
+        // function) before restricting it below, or the invoking user would
+        // be locked out of their own just-unlocked tomb.
         match privileged("chown")
             .arg(format!("{}:{}", identity.uid, identity.gid))
             .arg(&mountpoint)
