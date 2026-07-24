@@ -4,7 +4,7 @@ baseline_commit: 09b9d1d
 
 # Story 1.9: Mount UX & Ownership Hardening
 
-Status: in-progress
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -85,6 +85,8 @@ so that the tool actually gives *me* access to my own decrypted data and feels n
 ## Dev Agent Record
 
 ### Agent Model Used
+
+Claude Sonnet 5 (Amelia persona)
 
 ### Debug Log References
 
