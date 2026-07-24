@@ -4,7 +4,7 @@ baseline_commit: 09b9d1d
 
 # Story 1.9: Mount UX & Ownership Hardening
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -48,6 +48,19 @@ so that the tool actually gives *me* access to my own decrypted data and feels n
   - [x] No `domain`-level unit test can exercise the real `chown`/`/run/media` logic (it lives entirely in `adapters::exec`, same as every other real-subprocess behavior in this codebase) — this story's correctness proof is the hardware-gated test below, not a fake-backed unit test
   - [x] Extend `tests/hardware/main.rs`'s existing unlock scenarios (Story 1.7) to additionally assert: the returned mount point is under `/run/media/<username>/`, its directory entry is owned by the invoking user (not root) via `std::fs::metadata`/`MetadataExt::uid()`, and its basename matches the source file's `file_stem()`. Add (or extend) a scenario that mounts two tombs with the same basename (e.g. two disposable files both named the same in different directories) to exercise the collision-suffix fallback
   - [x] Confirm `cargo test --test unit` / `make test`, `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check` all stay green, then run `make test-hardware` by hand (root required, same environment caveats as every prior story's hardware run — see References) before considering this story done
+
+### Review Findings
+
+- [x] [Review][Patch] Base directory `/run/media/<username>` ownership/permissions are never (re-)verified when it already exists (e.g. pre-created root:root 0755 by udisks2/gvfs, or left behind by a prior partially-failed run) — `mount()` silently skips its own `mkdir`+`chown` in that case, so the subsequent unprivileged `create_dir` in `create_mount_point` fails with permission denied on a very plausible real desktop configuration [src/adapters/exec/mod.rs:981-1018] — fixed: gate the mkdir+chown on a uid stat comparison instead of `base.exists()`, so a pre-existing wrong-owner directory is corrected instead of skipped, while still avoiding an extra `sudo` prompt once ownership is already correct
+- [x] [Review][Patch] `tomb_name`'s `file_stem()`-returns-`None` fallback uses the entire source path (with separators) instead of `file_name()`, which could in theory escape `/run/media/<username>` for a degenerate path [src/adapters/exec/mod.rs:974-979] — fixed: return an `AdapterFailure` instead of falling back to a value that could contain path separators
+- [x] [Review][Patch] `create_mount_point`'s collision/retry/exhaustion logic is pure, deterministic filesystem code with zero fast unit-test coverage — only exercised by the manual, hardware-gated test, which never reaches the 3rd-attempt exhaustion error arm [src/adapters/exec/mod.rs:157-184] — fixed: added inline `#[cfg(test)]` unit tests covering the plain-basename and single-collision-fallback paths, and wired `make test` to run `cargo test --lib` so they execute in CI (the true 3-attempt-exhaustion arm needs two real random-suffix collisions in a row and remains impractical to force deterministically without injecting the RNG — left uncovered, noted here rather than silently claimed)
+- [x] [Review][Patch] Only `unlock --help` got a regression test for the positional-path change; `create file --help`/`create device --help` were only checked manually, not locked into CI [tests/unit/cli.rs] — fixed: added `create_file_help_lists_path_as_positional`/`create_device_help_lists_path_as_positional`
+- [x] [Review][Patch] New hardware ownership assertions check uid/gid only, never the `chmod 0700` mode bits — the other half of AC #1 ("inaccessible to any other local user") has no regression coverage [tests/hardware/main.rs] — fixed: `assert_owned_by_invoking_user` now also asserts `metadata.permissions().mode() & 0o777 == 0o700`
+- [x] [Review][Patch] Positional `path` args (Task 4) no longer accept a leading-dash filename (e.g. `-backup.img`) without a `--` separator, since clap treats a leading-dash positional as an unrecognized flag by default [src/cli/main.rs] — fixed: added `#[arg(allow_hyphen_values = true)]` to all 3 `path` fields
+- [x] [Review][Patch] The new collision hardware test assumes no stale `/run/media/<user>/collision*` directory survives from a prior interrupted run — cleanup is best-effort via `Drop`, which doesn't fire on a hard-killed test process [tests/hardware/main.rs] — fixed: test now best-effort unmounts/removes any stale `collision`/`collision-*` entries under `/run/media/<username>` before starting
+- [x] [Review][Patch] `identity.username` (from `id -un`) is spliced unsanitized into the privileged `mkdir`/`chown` target path; a username containing `/` could redirect the base directory outside `/run/media` [src/adapters/exec/mod.rs:981] — fixed: `mount()` now rejects a username containing `/` with an `AdapterFailure` before it's used in a path
+- [x] [Review][Defer] TOCTOU race on `base.exists()` between concurrent invocations, plus the pre-existing (Story 1.7-established) convention of swallowing compensating-cleanup failures (`umount`/`remove_dir` after a chown/chmod failure) so a partial failure can silently leave a root-owned filesystem mounted — deferred, pre-existing pattern reused per this story's own Dev Notes instruction, not a new deviation
+- [x] [Review][Defer] Once `close` (Story 3.1) exists, if it doesn't `rmdir` the plain-basename mount-point directory after unmounting, re-unlocking the same tomb will permanently fall back to a suffixed name — deferred, explicitly out of this story's scope per its own Dev Notes, flag for Story 3.1's scoping
 
 ## Dev Notes
 
@@ -105,3 +118,4 @@ Claude Sonnet 5 (Amelia persona)
 - `src/cli/main.rs`
 - `tests/unit/cli.rs`
 - `tests/hardware/main.rs`
+- `Makefile` (code review fix: `make test` now runs `cargo test --lib` too, so the new inline unit tests execute in CI)

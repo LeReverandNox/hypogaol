@@ -4,7 +4,7 @@ build:
 	cargo build --release
 
 test:
-	cargo test --test unit
+	cargo test --lib --test unit
 
 test-hardware:
 	cargo test --test hardware -- --ignored
