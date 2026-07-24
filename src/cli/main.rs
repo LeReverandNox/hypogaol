@@ -30,6 +30,7 @@ enum Commands {
     /// Unlock and mount an existing tomb
     Unlock {
         /// Path to the existing tomb's backing file or device
+        #[arg(allow_hyphen_values = true)]
         path: PathBuf,
     },
 }
@@ -42,6 +43,7 @@ enum CreateMode {
     /// Create a new file-backed tomb
     File {
         /// Destination path for the backing file; must not already exist
+        #[arg(allow_hyphen_values = true)]
         path: PathBuf,
 
         /// Size to allocate for the backing file (e.g. 500M, 10G, or a plain
@@ -58,6 +60,7 @@ enum CreateMode {
     Device {
         /// Path to the target device or partition; must not already carry a
         /// LUKS2 header
+        #[arg(allow_hyphen_values = true)]
         path: PathBuf,
 
         /// Size to use (e.g. 500M, 10G, or a plain byte count); defaults to
