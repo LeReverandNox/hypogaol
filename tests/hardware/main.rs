@@ -292,10 +292,11 @@ fn id_output(flag: &str) -> String {
 }
 
 /// Confirms `mountpoint`'s directory entry is owned by the invoking (real,
-/// non-root) user and group — the actual ownership bug this story (AC #1)
-/// fixes.
+/// non-root) user and group, and restricted to `0700` — together, the full
+/// ownership bug this story (AC #1) fixes: owned by the invoking user *and*
+/// inaccessible to any other local user.
 fn assert_owned_by_invoking_user(mountpoint: &std::path::Path) {
-    use std::os::unix::fs::MetadataExt;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     let metadata = std::fs::metadata(mountpoint)
         .unwrap_or_else(|e| panic!("failed to stat {}: {e}", mountpoint.display()));
@@ -320,6 +321,14 @@ fn assert_owned_by_invoking_user(mountpoint: &std::path::Path) {
         "{} is owned by gid {}, expected the invoking user's gid {expected_gid}",
         mountpoint.display(),
         metadata.gid()
+    );
+
+    let mode = metadata.permissions().mode() & 0o777;
+    assert_eq!(
+        mode,
+        0o700,
+        "{} has mode {mode:o}, expected 0700 (inaccessible to any other local user)",
+        mountpoint.display()
     );
 }
 
@@ -567,6 +576,25 @@ fn unlock_works_unmodified_against_a_device_backed_tomb() {
 #[test]
 #[ignore]
 fn unlock_falls_back_to_a_suffixed_mount_point_on_a_basename_collision() {
+    // Guard against flakiness from a prior interrupted run: `UnlockCleanup`'s
+    // Drop-based fallback doesn't fire on a hard-killed test process, so a
+    // stale `collision`/`collision-<suffix>` mount point could otherwise
+    // pre-claim the plain name this test asserts on. Best-effort unmount +
+    // remove any such leftovers before starting.
+    let username = id_output("-un");
+    let media_base = PathBuf::from(format!("/run/media/{username}"));
+    if let Ok(entries) = std::fs::read_dir(&media_base) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name == "collision" || name.starts_with("collision-") {
+                let path = entry.path();
+                let _ = Command::new("sudo").arg("umount").arg(&path).output();
+                let _ = std::fs::remove_dir(&path);
+            }
+        }
+    }
+
     let dir_a = std::env::temp_dir().join("tomb-fido2-hardware-test-collision-a");
     let dir_b = std::env::temp_dir().join("tomb-fido2-hardware-test-collision-b");
     let _ = std::fs::remove_dir_all(&dir_a);
