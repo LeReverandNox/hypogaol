@@ -4,7 +4,7 @@ baseline_commit: e797d3c
 
 # Story 1.8: Unified CLI Dispatch & Plain-Language Errors
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -64,6 +64,17 @@ so that I never need to fall back to cryptsetup/fido2-token flags directly, even
   - [x] For `AdapterFailure`, build several `DomainError::AdapterFailure(String)` values using message text copied verbatim from the real call sites cited in Task 1 (e.g. `"cryptsetup open --token-only failed for /tmp/foo as vault-abc123"`, `"mount failed: some real stderr"`, a `{cmd:?}`-shaped string like `r#""cryptsetup" "luksFormat" "--type" "luks2" "--batch-mode" "--key-file" "-" "/tmp/foo" failed: some stderr"#`) — assert each lands in its intended category's template and the primary sentence never echoes `"cryptsetup"`/`"--token-only"`/the raw mapping name.
   - [x] Include one `AdapterFailure` input that matches no known category — assert the generic fallback still returns non-panicking, non-empty output (proves the fallback arm is actually exercised, not just theoretical).
   - [x] Confirm `cargo test --test unit`, `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check` all stay green.
+
+### Review Findings
+
+- [x] [Review][Patch] `translate_adapter_failure`'s substring-marker classifier misdiagnoses several real, reachable failures [src/cli/ux.rs:267-330] — (1) the `cryptsetup token import` failure in `write_fido2_token_metadata` (`src/adapters/exec/mod.rs:388-400`) goes through `run_piping_stdin`'s `"{cmd:?} failed: ..."` format, whose `Debug`-quoted output renders as `"token" "import"` (separate quoted tokens), never the literal substring `"token import"` the `ENROLLMENT_MARKERS` list checks for — it falls through to the generic `cryptsetup` bucket and is shown as a PIN/touch-acceptance message instead of an enrollment-metadata failure. (2) `TempKeyFile::create`'s `"failed to create temporary key file {path}: {e}"` (`src/adapters/exec/mod.rs:185-190`, reachable from `enroll_fido2_key`) matches the sizing bucket's `"failed to create"` marker and is shown as "tomb-fido2 couldn't determine or set the size needed for this tomb" — wrong for a temp-file write failure (e.g. disk full/permission denied under `/dev/shm`). (4) `enroll_fido2_key`'s own invariant-violation string `"no transient bootstrap passphrase available to authenticate FIDO2 enrollment"` matches no marker and falls to the generic fallback, leaking the literal word "FIDO2" the module's doc comment says never leaks.
+  **Fixed:** added `"temporary key file"`, `"transient bootstrap passphrase"`, and the Debug-quoted `"\"token\" \"import\""` to `ENROLLMENT_MARKERS` so all three now classify as enrollment failures. **Reconsidered, not changed:** sub-point (3) — `resize` is explicitly named alongside `luksFormat`/`luksOpen` in this story's own Task 1 category description as belonging to the PIN/touch message, so that part is spec-compliant as-is; `close`/`luksKillSlot`/`token remove` aren't enumerated by any story category and fall into the generic `cryptsetup` bucket, which is within the story's stated tolerance for not chasing every exact string — left as-is.
+- [x] [Review][Patch] `DeviceTooSmall`'s message wording implies a size the user typed in [src/cli/ux.rs:235-238] — per `src/domain/workflows/create.rs:84-92`, `size` is the device's own capacity (not a user-requested value) whenever `--size` was omitted on a device target, so "The requested size of {size} bytes ... is too small" is misleading in that path.
+  **Fixed:** reworded to "{path} would only have {size} bytes for a tomb — that's too small to be usable," which no longer implies a user-typed request.
+- [x] [Review][Patch] Canonicalize-failure path recovery is fragile against paths containing `": "` [src/cli/ux.rs:309-312] — `inner.strip_prefix("failed to canonicalize ")` then `path.split(": ").next()` truncates at the first `": "` substring, which is a legal (if rare) sequence in a Unix path, silently showing an incomplete path to the user.
+  **Fixed:** switched to `rsplit_once(": ")`, anchoring on the last occurrence so an embedded `": "` in the path itself no longer truncates it.
+- [x] [Review][Patch] Module doc comment overclaims zero jargon leakage [src/cli/ux.rs:1-5] — the comment states every `DomainError` renders with "no cryptsetup/systemd/FIDO2 jargon," but `PreflightFailed` and the generic `AdapterFailure` fallback deliberately pass through raw text verbatim by this story's own Dev Notes design; the comment should scope its claim to the primary/templated message, not every code path.
+  **Fixed:** reworded the module doc comment to name both deliberate raw-passthrough exceptions explicitly instead of claiming zero jargon everywhere.
 
 ## Dev Notes
 
