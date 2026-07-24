@@ -81,3 +81,17 @@ fn unlock_help_lists_path_as_positional() {
     assert!(help.contains("<PATH>"));
     assert!(!help.contains("--path"));
 }
+
+#[test]
+fn create_file_help_lists_path_as_positional() {
+    let help = help_text(&["tomb-fido2", "create", "file", "--help"]);
+    assert!(help.contains("<PATH>"));
+    assert!(!help.contains("--path"));
+}
+
+#[test]
+fn create_device_help_lists_path_as_positional() {
+    let help = help_text(&["tomb-fido2", "create", "device", "--help"]);
+    assert!(help.contains("<PATH>"));
+    assert!(!help.contains("--path"));
+}
