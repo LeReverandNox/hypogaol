@@ -276,6 +276,85 @@ fn assert_readable_and_writable(mountpoint: &std::path::Path) {
     assert_eq!(contents, "tomb-fido2 hardware test");
 }
 
+/// Runs unprivileged `id <flag>`, independent of `ExecAdapter`'s own
+/// `invoking_identity()` — this test process must itself run unprivileged
+/// (see the References section on the hardware-run environment: individual
+/// operations escalate via their own `sudo` call, the test binary never
+/// runs as root as a whole), so this reports the same real invoking
+/// identity `mount`'s `chown` is expected to have used.
+fn id_output(flag: &str) -> String {
+    let output = Command::new("id")
+        .arg(flag)
+        .output()
+        .unwrap_or_else(|e| panic!("failed to run id {flag}: {e}"));
+    assert!(output.status.success(), "id {flag} failed");
+    String::from_utf8_lossy(&output.stdout).trim().to_string()
+}
+
+/// Confirms `mountpoint`'s directory entry is owned by the invoking (real,
+/// non-root) user and group — the actual ownership bug this story (AC #1)
+/// fixes.
+fn assert_owned_by_invoking_user(mountpoint: &std::path::Path) {
+    use std::os::unix::fs::MetadataExt;
+
+    let metadata = std::fs::metadata(mountpoint)
+        .unwrap_or_else(|e| panic!("failed to stat {}: {e}", mountpoint.display()));
+
+    let expected_uid: u32 = id_output("-u")
+        .parse()
+        .expect("failed to parse id -u output");
+    let expected_gid: u32 = id_output("-g")
+        .parse()
+        .expect("failed to parse id -g output");
+
+    assert_eq!(
+        metadata.uid(),
+        expected_uid,
+        "{} is owned by uid {}, expected the invoking user's uid {expected_uid} (not root)",
+        mountpoint.display(),
+        metadata.uid()
+    );
+    assert_eq!(
+        metadata.gid(),
+        expected_gid,
+        "{} is owned by gid {}, expected the invoking user's gid {expected_gid}",
+        mountpoint.display(),
+        metadata.gid()
+    );
+}
+
+/// Confirms `mountpoint` lives directly under `/run/media/<username>/` and
+/// its basename matches `source_path`'s `file_stem()`, optionally followed
+/// by a `-<suffix>` collision fallback (AC #2).
+fn assert_mountpoint_under_run_media(mountpoint: &std::path::Path, source_path: &std::path::Path) {
+    let username = id_output("-un");
+    let expected_parent = PathBuf::from(format!("/run/media/{username}"));
+    assert_eq!(
+        mountpoint.parent(),
+        Some(expected_parent.as_path()),
+        "{} is not directly under {}",
+        mountpoint.display(),
+        expected_parent.display()
+    );
+
+    let expected_stem = source_path
+        .file_stem()
+        .unwrap_or(source_path.as_os_str())
+        .to_string_lossy()
+        .into_owned();
+    let actual_basename = mountpoint
+        .file_name()
+        .expect("mountpoint has no basename")
+        .to_string_lossy()
+        .into_owned();
+    assert!(
+        actual_basename == expected_stem
+            || actual_basename.starts_with(&format!("{expected_stem}-")),
+        "{} basename {actual_basename:?} doesn't match source stem {expected_stem:?} (with optional collision suffix)",
+        mountpoint.display()
+    );
+}
+
 /// Manual-close cleanup: `close` (Story 3.1) doesn't exist yet, so unmount
 /// and close the mapping directly via bare `cryptsetup`, mirroring the
 /// break-glass pattern already used elsewhere in this file.
@@ -408,6 +487,8 @@ fn unlock_mounts_a_file_backed_tomb_with_a_readable_writable_filesystem() {
 
     assert_actually_mounted(&device_node, &mountpoint);
     assert_readable_and_writable(&mountpoint);
+    assert_owned_by_invoking_user(&mountpoint);
+    assert_mountpoint_under_run_media(&mountpoint, &path);
 
     cleanup.run();
 }
@@ -459,10 +540,99 @@ fn unlock_works_unmodified_against_a_device_backed_tomb() {
     let name =
         mapping_name::mapping_name(&loop_device.path).expect("failed to derive mapping name");
     let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
+    let loop_device_path = loop_device.path.clone();
     let cleanup = UnlockCleanup::new(mountpoint.clone(), name).with_loop_device(loop_device.path);
 
     assert_actually_mounted(&device_node, &mountpoint);
     assert_readable_and_writable(&mountpoint);
+    assert_owned_by_invoking_user(&mountpoint);
+    // `MapperHandle::source_path` is the device path unlock::run was called
+    // with (`loop_device_path`, e.g. `/dev/loop0`), not the loop-backing
+    // file — `file_stem()` on an extensionless device path is the whole
+    // basename (`/dev/sdb1` -> `sdb1`), matching AC #2 directly.
+    assert_mountpoint_under_run_media(&mountpoint, &loop_device_path);
 
     cleanup.run();
+}
+
+/// Exercises the collision-suffix fallback (AC #2): two file-backed tombs
+/// with the *same* basename (`collision.img`) in different scratch
+/// directories derive the same `tomb_name`, so the second `unlock::run` must
+/// land at a distinct, suffixed mount point rather than failing or
+/// colliding with the first.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and a real FIDO2
+/// security key present, ready to be touched and to enter its PIN when
+/// prompted (once per `create`/`unlock` call — 4 touches total).
+#[test]
+#[ignore]
+fn unlock_falls_back_to_a_suffixed_mount_point_on_a_basename_collision() {
+    let dir_a = std::env::temp_dir().join("tomb-fido2-hardware-test-collision-a");
+    let dir_b = std::env::temp_dir().join("tomb-fido2-hardware-test-collision-b");
+    let _ = std::fs::remove_dir_all(&dir_a);
+    let _ = std::fs::remove_dir_all(&dir_b);
+    std::fs::create_dir_all(&dir_a).expect("failed to create scratch dir a");
+    std::fs::create_dir_all(&dir_b).expect("failed to create scratch dir b");
+
+    // Same basename in two different directories -> the same derived
+    // tomb_name, forcing the fallback path.
+    let path_a = dir_a.join("collision.img");
+    let path_b = dir_b.join("collision.img");
+
+    let adapter = ExecAdapter::default();
+
+    for path in [&path_a, &path_b] {
+        let target = CreateTarget::File {
+            path: path.clone(),
+            size: 64 * 1024 * 1024,
+        };
+        let result = create::run(target, Filesystem::Ext4, &adapter, &adapter, &adapter);
+        assert!(
+            result.is_ok(),
+            "create::run failed for {}: {result:?}",
+            path.display()
+        );
+    }
+
+    let mountpoint_a =
+        unlock::run(&path_a, &adapter, &adapter, &adapter).expect("unlock::run failed for a");
+    let name_a = mapping_name::mapping_name(&path_a).expect("failed to derive mapping name a");
+    let device_node_a = PathBuf::from(format!("/dev/mapper/{name_a}"));
+    let cleanup_a = UnlockCleanup::new(mountpoint_a.clone(), name_a);
+
+    let mountpoint_b =
+        unlock::run(&path_b, &adapter, &adapter, &adapter).expect("unlock::run failed for b");
+    let name_b = mapping_name::mapping_name(&path_b).expect("failed to derive mapping name b");
+    let device_node_b = PathBuf::from(format!("/dev/mapper/{name_b}"));
+    let cleanup_b = UnlockCleanup::new(mountpoint_b.clone(), name_b);
+
+    assert_actually_mounted(&device_node_a, &mountpoint_a);
+    assert_actually_mounted(&device_node_b, &mountpoint_b);
+
+    assert_eq!(
+        mountpoint_a.parent(),
+        mountpoint_b.parent(),
+        "both mount points should share the same /run/media/<username> base directory"
+    );
+    assert_ne!(
+        mountpoint_a, mountpoint_b,
+        "both tombs share the basename \"collision\" and must land at different mount points via the collision-suffix fallback"
+    );
+    assert_eq!(
+        mountpoint_a.file_name().and_then(|n| n.to_str()),
+        Some("collision"),
+        "the first tomb to claim the basename should get the plain, unsuffixed name"
+    );
+    let basename_b = mountpoint_b
+        .file_name()
+        .expect("mountpoint_b has no basename")
+        .to_string_lossy()
+        .into_owned();
+    assert!(
+        basename_b.starts_with("collision-"),
+        "expected the second tomb's mount point to fall back to a \"collision-<suffix>\" name, got {basename_b:?}"
+    );
+
+    cleanup_b.run();
+    cleanup_a.run();
 }

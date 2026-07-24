@@ -974,7 +974,7 @@ impl FilesystemBackend for ExecAdapter {
         let tomb_name = mapper
             .source_path
             .file_stem()
-            .unwrap_or_else(|| mapper.source_path.as_os_str())
+            .unwrap_or(mapper.source_path.as_os_str())
             .to_string_lossy()
             .into_owned();
 
