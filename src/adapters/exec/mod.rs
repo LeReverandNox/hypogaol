@@ -114,6 +114,41 @@ fn random_hex_suffix() -> Result<String, String> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// The real (non-root) user invoking this process — uid, gid, and username,
+/// each read via a plain unprivileged `id` query. `tomb_fido2` always runs
+/// unprivileged itself (only specific calls escalate via `privileged()`), so
+/// these already report the real invoker, not root; never wrap them in
+/// `privileged()`, which would prompt `sudo` for information the process
+/// already has.
+struct InvokingIdentity {
+    uid: String,
+    gid: String,
+    username: String,
+}
+
+fn invoking_identity() -> Result<InvokingIdentity, DomainError> {
+    fn run_id(flag: &str) -> Result<String, DomainError> {
+        let output = Command::new("id").arg(flag).output().map_err(|e| {
+            DomainError::AdapterFailure(format!("failed to run id {flag}: {e}"))
+        })?;
+
+        if !output.status.success() {
+            return Err(DomainError::AdapterFailure(format!(
+                "id {flag} failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+
+    Ok(InvokingIdentity {
+        uid: run_id("-u")?,
+        gid: run_id("-g")?,
+        username: run_id("-un")?,
+    })
+}
+
 /// The raw byte capacity of the storage backing `path` — a block device's
 /// full size via `blockdev --getsize64`, or a regular file's own length.
 /// Used by `bootstrap_format_and_open` to decide whether its `resize` step is
@@ -798,7 +833,7 @@ impl FilesystemBackend for ExecAdapter {
     fn check_prerequisites(&self) -> Result<(), Vec<String>> {
         let mut missing = Vec::new();
 
-        for binary in ["mkfs.ext4", "resize2fs", "blockdev", "mount"] {
+        for binary in ["mkfs.ext4", "resize2fs", "blockdev", "mount", "id"] {
             if !binary_on_path(binary) {
                 missing.push(format!("{binary} binary not found on PATH"));
             }

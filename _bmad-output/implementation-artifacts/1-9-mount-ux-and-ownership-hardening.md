@@ -4,7 +4,7 @@ baseline_commit: 09b9d1d
 
 # Story 1.9: Mount UX & Ownership Hardening
 
-Status: ready-for-dev
+Status: in-progress
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -25,10 +25,10 @@ so that the tool actually gives *me* access to my own decrypted data and feels n
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Add an "invoking identity" lookup to `adapters::exec` — needed by both Task 2 (chown) and Task 3 (mount base path) (AC: #1, #2)
-  - [ ] Add a small internal helper, e.g. `fn invoking_identity() -> Result<(String uid, String gid, String username), DomainError>` (or three separate small helpers — dev's call), shelling out to `id -u`, `id -g`, `id -un` — three quick, unprivileged, non-secret queries, the same class as the existing `blockdev --getsize64`/`cryptsetup isLuks` pure-query calls (Story 1.6's Dev Notes explicitly draws this "no secret material, no mutation" distinction; reuse it here)
-  - [ ] **Do not add a new Cargo dependency** (`libc`/`nix`) for this and **do not use `unsafe`** — this codebase has zero `unsafe` blocks and gets every OS-level fact (sizes, header state, PATH lookups) via subprocess calls parsed as plain strings; shelling out to `id` matches that established pattern exactly. `tomb_fido2` itself always runs unprivileged as the invoking user — only specific calls escalate via the existing `privileged()` helper — so `id -u`/`id -g`/`id -un` invoked directly (no `privileged()` wrapper) already report the real invoking identity, not root's
-  - [ ] Add `"id"` to `FilesystemBackend::check_prerequisites`'s required-binaries list (`src/adapters/exec/mod.rs:801`, currently `["mkfs.ext4", "resize2fs", "blockdev", "mount"]`) — AD-4's preflight gate must cover every hard dependency this story introduces, same discipline Story 1.5 used for `blockdev` and Story 1.7 used for `mount`
+- [x] Task 1: Add an "invoking identity" lookup to `adapters::exec` — needed by both Task 2 (chown) and Task 3 (mount base path) (AC: #1, #2)
+  - [x] Add a small internal helper, e.g. `fn invoking_identity() -> Result<(String uid, String gid, String username), DomainError>` (or three separate small helpers — dev's call), shelling out to `id -u`, `id -g`, `id -un` — three quick, unprivileged, non-secret queries, the same class as the existing `blockdev --getsize64`/`cryptsetup isLuks` pure-query calls (Story 1.6's Dev Notes explicitly draws this "no secret material, no mutation" distinction; reuse it here)
+  - [x] **Do not add a new Cargo dependency** (`libc`/`nix`) for this and **do not use `unsafe`** — this codebase has zero `unsafe` blocks and gets every OS-level fact (sizes, header state, PATH lookups) via subprocess calls parsed as plain strings; shelling out to `id` matches that established pattern exactly. `tomb_fido2` itself always runs unprivileged as the invoking user — only specific calls escalate via the existing `privileged()` helper — so `id -u`/`id -g`/`id -un` invoked directly (no `privileged()` wrapper) already report the real invoking identity, not root's
+  - [x] Add `"id"` to `FilesystemBackend::check_prerequisites`'s required-binaries list (`src/adapters/exec/mod.rs:801`, currently `["mkfs.ext4", "resize2fs", "blockdev", "mount"]`) — AD-4's preflight gate must cover every hard dependency this story introduces, same discipline Story 1.5 used for `blockdev` and Story 1.7 used for `mount`
 - [ ] Task 2: Fix mount-point ownership — the actual bug (AC: #1)
   - [ ] In `FilesystemBackend::mount`'s real implementation (`src/adapters/exec/mod.rs:896-955`), after the `mount` call succeeds and **before** the existing `chmod 0700` call, add `privileged("chown").arg(format!("{uid}:{gid}", ...)).arg(&mountpoint)` (both need root, since the mounted directory's underlying inode — created by a privileged `mkfs.ext4` at `create` time — is currently root-owned; a bare unprivileged `chown` would fail with EPERM)
   - [ ] Keep the existing `chmod 0700` call afterward, unchanged — the combination (owned by the invoking user, `0700`) is what actually achieves "only the invoking user can access this," which the current `chmod`-only fix (root-owned, `0700`) does not
@@ -90,4 +90,8 @@ so that the tool actually gives *me* access to my own decrypted data and feels n
 
 ### Completion Notes List
 
+- Task 1: Added `invoking_identity()` (+ `InvokingIdentity` struct) to `src/adapters/exec/mod.rs`, shelling out to `id -u`/`id -g`/`id -un` unprivileged, following the same `.output()`/`status.success()`/plain-string-parse pattern as `device_capacity`'s `blockdev --getsize64` call. Added `"id"` to `check_prerequisites`'s required-binaries list. No new Cargo dependency, no `unsafe`. `cargo build --lib` compiles (helper currently unused, consumed by Task 2/3).
+
 ### File List
+
+- `src/adapters/exec/mod.rs`
