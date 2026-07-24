@@ -4,7 +4,7 @@ baseline_commit: e797d3c
 
 # Story 1.8: Unified CLI Dispatch & Plain-Language Errors
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -102,6 +102,8 @@ so that I never need to fall back to cryptsetup/fido2-token flags directly, even
 
 ### Agent Model Used
 
+Claude Sonnet 5
+
 ### Debug Log References
 
 ### Completion Notes List
@@ -116,3 +118,11 @@ so that I never need to fall back to cryptsetup/fido2-token flags directly, even
 
 - Modified: `src/cli/ux.rs`, `src/cli/main.rs`, `tests/unit/cli.rs`, `tests/unit/main.rs`
 - New: `tests/unit/ux.rs`
+
+## Change Log
+
+- 2026-07-24: Task 1 — `cli::ux::translate` implemented, exhaustively matching all 8 `DomainError` variants
+- 2026-07-24: Task 2 — `cli::main`'s 3 raw-`Display` error sites routed through `ux::translate`
+- 2026-07-24: Task 3 — `--help` coverage verified with tests; `Cli` made `pub` for test access
+- 2026-07-24: Task 4 — audited `cli` never touches a port directly (AC #3, no changes needed)
+- 2026-07-24: Task 5 — unit tests for `ux::translate` added, covering all variants and 7 `AdapterFailure` categories
