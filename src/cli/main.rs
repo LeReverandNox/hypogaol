@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::adapters::exec::ExecAdapter;
+use crate::cli::ux;
 use crate::domain::preflight;
 use crate::domain::types::{CreateTarget, Filesystem};
 use crate::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
@@ -13,7 +14,7 @@ use crate::domain::workflows::unlock;
 // `CARGO_PKG_*` metadata (AD-13) — never a hardcoded product-name literal.
 #[derive(Parser)]
 #[command(version, about)]
-struct Cli {
+pub struct Cli {
     #[command(subcommand)]
     command: Commands,
 }
@@ -160,7 +161,7 @@ fn run_create(target: CreateTarget, filesystem: Filesystem, display_path: &str, 
     }
 
     if let Err(err) = create::run(target, filesystem, &adapter, &adapter, &adapter) {
-        eprintln!("{err}");
+        eprintln!("{}", ux::translate(&err));
         std::process::exit(1);
     }
 
@@ -181,7 +182,7 @@ fn run_unlock(path: PathBuf) {
     let adapter = ExecAdapter::default();
 
     if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
-        eprintln!("{err}");
+        eprintln!("{}", ux::translate(&err));
         std::process::exit(1);
     }
 
@@ -190,7 +191,7 @@ fn run_unlock(path: PathBuf) {
     match unlock::run(&path, &adapter, &adapter, &adapter) {
         Ok(mountpoint) => println!("Tomb unlocked and mounted at {}.", mountpoint.display()),
         Err(err) => {
-            eprintln!("{err}");
+            eprintln!("{}", ux::translate(&err));
             std::process::exit(1);
         }
     }

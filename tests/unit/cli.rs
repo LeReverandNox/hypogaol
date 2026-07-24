@@ -1,4 +1,5 @@
-use tomb_fido2::cli::main::{confirms_wipe, parse_size};
+use clap::Parser;
+use tomb_fido2::cli::main::{confirms_wipe, parse_size, Cli};
 use tomb_fido2::domain::workflows::create::MIN_TOMB_SIZE_BYTES;
 
 #[test]
@@ -51,4 +52,31 @@ fn confirms_wipe_requires_exactly_yes() {
     assert!(!confirms_wipe("y"));
     assert!(!confirms_wipe(""));
     assert!(!confirms_wipe("no"));
+}
+
+fn help_text(args: &[&str]) -> String {
+    match Cli::try_parse_from(args) {
+        Ok(_) => panic!("expected --help to short-circuit parsing with a clap::Error"),
+        Err(err) => err.to_string(),
+    }
+}
+
+#[test]
+fn top_level_help_lists_both_subcommands() {
+    let help = help_text(&["tomb-fido2", "--help"]);
+    assert!(help.contains("create"));
+    assert!(help.contains("unlock"));
+}
+
+#[test]
+fn create_help_lists_file_and_device_modes() {
+    let help = help_text(&["tomb-fido2", "create", "--help"]);
+    assert!(help.contains("file"));
+    assert!(help.contains("device"));
+}
+
+#[test]
+fn unlock_help_lists_path_flag() {
+    let help = help_text(&["tomb-fido2", "unlock", "--help"]);
+    assert!(help.contains("--path"));
 }
