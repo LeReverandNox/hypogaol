@@ -4,7 +4,7 @@ baseline_commit: 09b9d1d
 
 # Story 1.9: Mount UX & Ownership Hardening
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 

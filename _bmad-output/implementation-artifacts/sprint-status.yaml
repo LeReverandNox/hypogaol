@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-22
-last_updated: 2026-07-24
+last_updated: 2026-07-25
 project: tomb-fido2
 project_key: NOKEY
 tracking_system: file-system
@@ -57,7 +57,7 @@ development_status:
   1-6-create-a-device-backed-tomb: done
   1-7-unlock-and-mount-a-tomb: done
   1-8-unified-cli-dispatch-plain-language-errors: done
-  1-9-mount-ux-and-ownership-hardening: review
+  1-9-mount-ux-and-ownership-hardening: done
   epic-1-retrospective: done
 
   epic-2: backlog
