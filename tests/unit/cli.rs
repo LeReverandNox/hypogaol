@@ -76,7 +76,8 @@ fn create_help_lists_file_and_device_modes() {
 }
 
 #[test]
-fn unlock_help_lists_path_flag() {
+fn unlock_help_lists_path_as_positional() {
     let help = help_text(&["tomb-fido2", "unlock", "--help"]);
-    assert!(help.contains("--path"));
+    assert!(help.contains("<PATH>"));
+    assert!(!help.contains("--path"));
 }
