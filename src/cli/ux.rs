@@ -1,8 +1,11 @@
 //! Plain-language translation boundary (CAP-5): every `DomainError` is
-//! rendered here into user-facing text with no cryptsetup/systemd/FIDO2
-//! jargon — see `ARCHITECTURE-SPINE.md`'s Design Paradigm. `domain` and
-//! `adapters` keep their raw, technical error text untouched; only this
-//! module decides what the user actually reads.
+//! rendered here into user-facing text — see `ARCHITECTURE-SPINE.md`'s
+//! Design Paradigm. `domain` and `adapters` keep their raw, technical error
+//! text untouched; only this module decides what the user actually reads.
+//! Two deliberate exceptions pass raw text through as-is: `PreflightFailed`'s
+//! per-item strings (already user-actionable, e.g. "cryptsetup binary not
+//! found on PATH") and the `AdapterFailure` fallback's labeled "Technical
+//! detail" line (kept for bug-report value when no category matches).
 
 use crate::domain::errors::DomainError;
 
@@ -33,7 +36,7 @@ pub fn translate(err: &DomainError) -> String {
             path.display()
         ),
         DomainError::DeviceTooSmall { path, size } => format!(
-            "The requested size of {size} bytes for {} is too small to hold a usable tomb.",
+            "{} would only have {size} bytes for a tomb — that's too small to be usable.",
             path.display()
         ),
         DomainError::PreflightFailed(missing) => {
@@ -65,15 +68,19 @@ pub fn translate(err: &DomainError) -> String {
 /// `src/domain/mapping_name.rs`) and translated as a whole, rather than
 /// chasing a bespoke rewrite of every exact string.
 fn translate_adapter_failure(inner: &str) -> String {
-    // FIDO2 enrollment failures (`enroll_fido2_key` and its token
-    // export/import/parse helpers) — checked first since some of these
+    // FIDO2 enrollment failures (`enroll_fido2_key`'s own body — its
+    // transient temp key file, its `systemd-cryptenroll` call, and its token
+    // export/import/parse helpers) — checked first since several of these
     // messages also contain "cryptsetup" (e.g. "cryptsetup token export
-    // failed"), which would otherwise be misclassified as a bootstrap/open
-    // subprocess failure below.
-    const ENROLLMENT_MARKERS: [&str; 8] = [
+    // failed", or the token-import call's `{cmd:?}` Debug-quoted
+    // `"token" "import"`), which would otherwise be misclassified as a
+    // bootstrap/open subprocess failure below.
+    const ENROLLMENT_MARKERS: [&str; 10] = [
         "systemd-cryptenroll",
+        "temporary key file",
+        "transient bootstrap passphrase",
         "token export",
-        "token import",
+        "\"token\" \"import\"",
         "token JSON",
         "systemd-fido2 token",
         "fido2-credential",
@@ -105,9 +112,12 @@ fn translate_adapter_failure(inner: &str) -> String {
         return "Your tomb unlocked, but tomb-fido2 couldn't mount its filesystem.".to_string();
     }
 
-    // `mapping_name::mapping_name`'s canonicalization failure.
+    // `mapping_name::mapping_name`'s canonicalization failure. The message is
+    // `"failed to canonicalize {path}: {e}"` — split on the LAST ": " rather
+    // than the first, so a path that itself legally contains ": " isn't
+    // truncated at that embedded colon.
     if let Some(path) = inner.strip_prefix("failed to canonicalize ") {
-        let path = path.split(": ").next().unwrap_or(path);
+        let path = path.rsplit_once(": ").map_or(path, |(path, _)| path);
         return format!("tomb-fido2 couldn't find {path}. Check the path and try again.");
     }
 
