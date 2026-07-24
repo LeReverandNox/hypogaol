@@ -964,6 +964,42 @@ impl FilesystemBackend for ExecAdapter {
             )));
         }
 
+        // The mount point's underlying inode was created by a privileged
+        // `mkfs.ext4` at `create` time, so it's currently root-owned; hand it
+        // to the invoking user before restricting it below, or the invoking
+        // user would be locked out of their own just-unlocked tomb.
+        let identity = match invoking_identity() {
+            Ok(identity) => identity,
+            Err(e) => {
+                let _ = privileged("umount").arg(&mountpoint).output();
+                let _ = std::fs::remove_dir(&mountpoint);
+                return Err(e);
+            }
+        };
+
+        match privileged("chown")
+            .arg(format!("{}:{}", identity.uid, identity.gid))
+            .arg(&mountpoint)
+            .output()
+        {
+            Ok(chown_output) if chown_output.status.success() => {}
+            Ok(chown_output) => {
+                let _ = privileged("umount").arg(&mountpoint).output();
+                let _ = std::fs::remove_dir(&mountpoint);
+                return Err(DomainError::AdapterFailure(format!(
+                    "failed to change mount point ownership: {}",
+                    String::from_utf8_lossy(&chown_output.stderr).trim()
+                )));
+            }
+            Err(e) => {
+                let _ = privileged("umount").arg(&mountpoint).output();
+                let _ = std::fs::remove_dir(&mountpoint);
+                return Err(DomainError::AdapterFailure(format!(
+                    "failed to run chown: {e}"
+                )));
+            }
+        }
+
         // Restrict the mount point to the invoking user only. Without this,
         // the mounted filesystem's own root-inode permissions (e.g.
         // mkfs.ext4's default 0755) are what's visible at `mountpoint` — left
