@@ -57,7 +57,8 @@ development_status:
   1-6-create-a-device-backed-tomb: done
   1-7-unlock-and-mount-a-tomb: done
   1-8-unified-cli-dispatch-plain-language-errors: done
-  epic-1-retrospective: optional
+  1-9-mount-ux-and-ownership-hardening: ready-for-dev
+  epic-1-retrospective: done
 
   epic-2: backlog
   2-1-enroll-an-additional-fido2-key: backlog
@@ -69,3 +70,33 @@ development_status:
   3-2-grow-an-existing-tombs-capacity: backlog
   3-3-unlock-a-tomb-read-only: backlog
   epic-3-retrospective: optional
+
+action_items:
+  - epic: 1
+    action: "Fix mount-point ownership: chown to invoking uid/gid before chmod 0700 in FilesystemBackend::mount (currently root-owned, root-only)"
+    owner: "Amelia"
+    status: open
+  - epic: 1
+    action: "Move mount location from /tmp to /run/media/<username>/<tomb-name>, basename-derived with collision-suffix fallback"
+    owner: "Amelia"
+    status: open
+  - epic: 1
+    action: "Change --path from a flag to a positional argument on create file, create device, and unlock"
+    owner: "Amelia"
+    status: open
+  - epic: 1
+    action: "Sync a story's Status header field to done immediately after its PR merges"
+    owner: "Amelia"
+    status: open
+  - epic: 1
+    action: "Document the sudo requirement for device-backed operations in --help/README before Epic 2's revoke/enroll touch real devices"
+    owner: "unassigned"
+    status: open
+  - epic: 1
+    action: "Add a LICENSE file and a branch-protection rule requiring CI to pass before merge"
+    owner: "LeReverandNox"
+    status: open
+  - epic: 1
+    action: "Resolve the open design question on real step-by-step progress reporting during create/unlock"
+    owner: "unassigned"
+    status: open

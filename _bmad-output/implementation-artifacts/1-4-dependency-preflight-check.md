@@ -4,7 +4,7 @@ baseline_commit: 852bd91
 
 # Story 1.4: Dependency Preflight Check
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
