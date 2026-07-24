@@ -80,7 +80,10 @@ fn translate_adapter_failure(inner: &str) -> String {
         "luksDump",
         "keyslot id",
     ];
-    if ENROLLMENT_MARKERS.iter().any(|marker| inner.contains(marker)) {
+    if ENROLLMENT_MARKERS
+        .iter()
+        .any(|marker| inner.contains(marker))
+    {
         return "Enrolling your security key didn't complete. Make sure it's plugged in and \
                 touch it when prompted, then try again."
             .to_string();
@@ -121,5 +124,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // Fallback: keeps AC #2's "no jargon leaks" promise for the primary line
     // while still surfacing the original text as a labeled technical detail,
     // rather than discarding information a bug report would need.
-    format!("Something unexpected happened while working with your tomb.\nTechnical detail: {inner}")
+    format!(
+        "Something unexpected happened while working with your tomb.\nTechnical detail: {inner}"
+    )
 }

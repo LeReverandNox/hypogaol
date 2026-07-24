@@ -14,7 +14,7 @@ use crate::domain::workflows::unlock;
 // `CARGO_PKG_*` metadata (AD-13) — never a hardcoded product-name literal.
 #[derive(Parser)]
 #[command(version, about)]
-struct Cli {
+pub struct Cli {
     #[command(subcommand)]
     command: Commands,
 }
