@@ -4,7 +4,7 @@ use std::process::Command;
 use tomb_fido2::adapters::exec::ExecAdapter;
 use tomb_fido2::domain::mapping_name;
 use tomb_fido2::domain::types::{CreateTarget, Filesystem};
-use tomb_fido2::domain::workflows::{create, enroll, unlock};
+use tomb_fido2::domain::workflows::{create, enroll, revoke, unlock};
 use tomb_fido2::ports::fido2_backend::Fido2DeviceSelection;
 use tomb_fido2::ports::luks_backend::LuksBackend;
 
@@ -832,5 +832,140 @@ fn enroll_adds_an_independent_second_key_without_corrupting_the_primary() {
     println!("Unlocking with the SECOND (backup) key — touch it when prompted.");
     let mountpoint = unlock::run(&path, &adapter, &adapter, &adapter)
         .expect("unlock::run with the second key failed");
+    UnlockCleanup::new(mountpoint, name).run();
+}
+
+/// End-to-end verification that `revoke::run` removes exactly the targeted
+/// key's keyslot without disturbing any other enrolled key (Story 2.2, AC
+/// #1) — the concrete regression check for Task 1/2's label-to-keyslot
+/// resolution: a bug there could revoke the wrong keyslot instead of the one
+/// named by `--label`.
+///
+/// No separate device-backed variant needed (AC #5) — `revoke::run` has no
+/// target-type branch to test around, same reasoning as `enroll`'s own AC #5
+/// (confirmed by inspection of `domain::workflows::revoke`).
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and TWO distinct
+/// physical FIDO2 security keys. Touch the PRIMARY key when `create::run`
+/// prompts, then both keys simultaneously when `enroll::run` prompts (same
+/// device-selection flow `enroll_adds_an_independent_second_key_without_corrupting_the_primary`
+/// documents above).
+#[test]
+#[ignore]
+fn revoke_removes_a_key_without_affecting_others() {
+    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-revoke");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("tomb.img");
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::File {
+        path: path.clone(),
+        size: 64 * 1024 * 1024,
+    };
+
+    println!("Creating tomb — touch the PRIMARY key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    println!(
+        "Enrolling a second key — touch the PRIMARY key first to authorize, \
+         then touch the NEW (second) key."
+    );
+    let result = enroll::run(
+        &path,
+        "backup".to_string(),
+        Fido2DeviceSelection::Interactive,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "enroll::run failed: {result:?}");
+
+    println!("Revoking the PRIMARY key by label.");
+    let result = revoke::run(&path, "primary", &adapter, &adapter, &adapter);
+    assert!(result.is_ok(), "revoke::run failed: {result:?}");
+
+    // AD-5's ground truth: exactly one live keyslot remains, and it belongs
+    // to the surviving "backup" key — not a relabeled/shadowed "primary".
+    // Asserting on the parsed `key_label` field (rather than a raw luksDump
+    // text search) proves label-to-keyslot resolution through the same
+    // parsing path revoke::run itself relies on.
+    let keyslots = adapter
+        .list_fido2_keyslots(&path)
+        .expect("list_fido2_keyslots failed");
+    assert_eq!(
+        keyslots.len(),
+        1,
+        "expected exactly one live FIDO2 keyslot after revoking the primary, got {keyslots:?}"
+    );
+    assert_eq!(
+        keyslots[0].key_label, "backup",
+        "expected the surviving keyslot to be labeled \"backup\", got {keyslots:?}"
+    );
+
+    // The surviving backup key must still unlock the tomb (AC #1's "other
+    // enrolled keys still do").
+    println!("Unlocking with the surviving BACKUP key — touch it when prompted.");
+    let mountpoint = unlock::run(&path, &adapter, &adapter, &adapter)
+        .expect("unlock::run with the surviving backup key failed");
+    let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
+    UnlockCleanup::new(mountpoint, name).run();
+}
+
+/// End-to-end verification that `revoke::run` refuses to remove the last
+/// remaining FIDO2 key rather than locking the tomb out permanently (Story
+/// 2.2, AC #2).
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and one physical
+/// FIDO2 security key.
+#[test]
+#[ignore]
+fn revoke_aborts_on_the_last_remaining_key() {
+    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-revoke-last-key");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("tomb.img");
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::File {
+        path: path.clone(),
+        size: 64 * 1024 * 1024,
+    };
+
+    println!("Creating tomb — touch the key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    println!("Attempting to revoke the only enrolled key — expecting a refusal.");
+    let result = revoke::run(&path, "primary", &adapter, &adapter, &adapter);
+    assert!(
+        matches!(
+            result,
+            Err(tomb_fido2::domain::errors::DomainError::LastKeyslotGuard)
+        ),
+        "expected DomainError::LastKeyslotGuard, got {result:?}"
+    );
+
+    // The volume must remain unlockable (AC #2's explicit "volume remains
+    // unlockable") — the refused revoke must not have touched anything.
+    println!("Confirming the tomb is still unlockable — touch the key when prompted.");
+    let mountpoint = unlock::run(&path, &adapter, &adapter, &adapter)
+        .expect("unlock::run failed after a refused revoke — the guard must be a no-op on abort");
+    let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
     UnlockCleanup::new(mountpoint, name).run();
 }

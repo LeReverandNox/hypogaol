@@ -6,8 +6,8 @@ use crate::ports::luks_backend::LuksBackend;
 
 /// Removes `target` only if doing so would not leave the tomb with zero valid
 /// keyslots (AD-5). Originated here by Story 1.5 (CAP-8's bootstrap cleanup);
-/// Story 2.2 (CAP-3/revoke) reuses this same primitive rather than
-/// reimplementing the guard.
+/// `domain::workflows::revoke::run` (CAP-3) reuses this same primitive rather
+/// than reimplementing the guard.
 pub fn remove_keyslot_guarded(
     luks: &dyn LuksBackend,
     path: &Path,

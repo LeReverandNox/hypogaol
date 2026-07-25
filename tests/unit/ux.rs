@@ -232,6 +232,47 @@ fn translates_adapter_failure_canonicalization_failure_path_containing_colon_spa
 }
 
 #[test]
+fn translates_key_not_found() {
+    let err = DomainError::KeyNotFound("nonexistent".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(message.contains("nonexistent"));
+}
+
+#[test]
+fn translates_adapter_failure_luks_dump_read_failure_as_workflow_neutral() {
+    // Shared by `enroll`'s label-uniqueness check and `revoke`'s
+    // `list_fido2_keyslots` call — must not claim "Enrolling..." since the
+    // failure could just as easily come from a plain `revoke`.
+    let err = DomainError::AdapterFailure(
+        "cryptsetup luksDump --dump-json-metadata failed: some stderr".to_string(),
+    );
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("Enrolling"));
+}
+
+#[test]
+fn translates_adapter_failure_revoke_removal_failure_as_revoke_specific() {
+    // `remove_key`'s own failures (`luksKillSlot`/`token remove`) are a
+    // non-interactive header edit — must not fall through to the generic
+    // touch/PIN-entry cryptsetup message, which would be meaningless here.
+    let err =
+        DomainError::AdapterFailure("cryptsetup luksKillSlot failed: some stderr".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("PIN"));
+    assert!(message.contains("Revoking"));
+
+    let err =
+        DomainError::AdapterFailure("cryptsetup token remove failed: some stderr".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("PIN"));
+    assert!(message.contains("Revoking"));
+}
+
+#[test]
 fn translates_adapter_failure_unknown_category_falls_back_gracefully() {
     let err = DomainError::AdapterFailure("some completely novel failure string".to_string());
     let message = translate(&err);

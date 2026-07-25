@@ -49,3 +49,12 @@
 ## Deferred from: code review of 2-1-enroll-an-additional-fido2-key (2026-07-25)
 
 - `wait_for_enough_fido2_devices` blocks forever with no timeout, and can't distinguish "no device plugged in yet" from "a device is present but not enumerating due to a permissions/udev problem" — both print an identical, endlessly-repeating wait message with no escalation path short of killing the process. Deferred: blocking-forever is the explicitly-decided replacement for the old "fails immediately" behavior per the already-resolved architect consultation; the permission-vs-absence ambiguity is the same known device-permission gap class already flagged in Story 1.6 — not new, not blocking. [src/adapters/exec/mod.rs:442-461]
+
+## Deferred from: code review of 2-2-revoke-a-fido2-key-guarded-against-last-keyslot-lockout (2026-07-26)
+
+- Second `list_fido2_keyslots` read (inside `remove_keyslot_guarded`) re-checks the keyslot number is still live but never re-verifies the label still matches it — pre-existing multi-read pattern in a single-user local CLI, out of this story's scope. [src/domain/workflows/revoke.rs, src/domain/keyslot_guard.rs]
+- Two live keyslots sharing the same `key_label` resolve silently to the first match (`find()`) — requires bypassing enroll's own uniqueness enforcement; pre-existing invariant gap. [src/domain/workflows/revoke.rs]
+- Two `systemd-fido2` tokens referencing the same live keyslot number produce a non-deterministic reported label (HashMap iteration order) — pre-existing dedup logic, corrupted-state-only. [src/adapters/exec/mod.rs]
+- `parse_label` doesn't trim whitespace; a trailing-space label becomes practically unrevocable since lookup is exact-match — pre-existing bug shared with `enroll`, fix would need to touch out-of-scope code. [src/cli/main.rs]
+- Unsanitized `--label` value interpolated into terminal/error output (control-character risk) — pre-existing, low impact for a single-user local CLI. [src/cli/main.rs, src/cli/ux.rs]
+- `run_revoke` calls `preflight::check` before `revoke::run` also calls it internally — double `cryptsetup luksDump` subprocess spawn per invocation — pre-existing pattern shared with `enroll`/`unlock`. [src/cli/main.rs, src/domain/workflows/revoke.rs]

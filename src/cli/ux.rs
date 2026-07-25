@@ -9,10 +9,11 @@
 
 use crate::domain::errors::DomainError;
 
-/// Translates any `DomainError` reachable from `create`/`unlock`/`enroll`
-/// into a plain-language message. Exhaustive by construction: a 9th `DomainError`
-/// variant added by a later epic fails to compile here until it's given a
-/// translation, so jargon can never silently leak through an unhandled arm.
+/// Translates any `DomainError` reachable from `create`/`unlock`/`enroll`/
+/// `revoke` into a plain-language message. Exhaustive by construction: a 9th
+/// `DomainError` variant added by a later epic fails to compile here until
+/// it's given a translation, so jargon can never silently leak through an
+/// unhandled arm.
 pub fn translate(err: &DomainError) -> String {
     match err {
         DomainError::DestinationExists(path) => format!(
@@ -48,25 +49,26 @@ pub fn translate(err: &DomainError) -> String {
             }
             message
         }
-        // Not reachable from `create`/`unlock` today — only
-        // `domain::workflows::revoke` (Story 2.2) produces this — but the
-        // exhaustive match still requires a translation.
+        // Only `domain::workflows::revoke` produces this.
         DomainError::LastKeyslotGuard => {
             "That's the last key that can unlock this tomb — revoking it would lock you out \
              permanently, so this was refused."
                 .to_string()
         }
+        DomainError::KeyNotFound(label) => format!(
+            "No enrolled key is labeled {label:?}. Check the label (case-sensitive) and try again."
+        ),
         DomainError::AdapterFailure(inner) => translate_adapter_failure(inner),
     }
 }
 
 /// `AdapterFailure`'s message text varies by call site (it is the one
 /// `DomainError` variant with no structured fields). Scope is bounded to
-/// `create`'s, `unlock`'s, and `enroll`'s own call graphs, so the reachable
-/// message shapes are finite — each category below is matched by markers
-/// that appear verbatim in the real call sites (`src/adapters/exec/mod.rs`,
-/// `src/domain/mapping_name.rs`) and translated as a whole, rather than
-/// chasing a bespoke rewrite of every exact string.
+/// `create`'s, `unlock`'s, `enroll`'s, and `revoke`'s own call graphs, so the
+/// reachable message shapes are finite — each category below is matched by
+/// markers that appear verbatim in the real call sites
+/// (`src/adapters/exec/mod.rs`, `src/domain/mapping_name.rs`) and translated
+/// as a whole, rather than chasing a bespoke rewrite of every exact string.
 fn translate_adapter_failure(inner: &str) -> String {
     // FIDO2 device-enumeration failures (`fido2-token -L`, via
     // `list_fido2_devices`/`wait_for_enough_fido2_devices`) — shared by
@@ -82,6 +84,18 @@ fn translate_adapter_failure(inner: &str) -> String {
             .to_string();
     }
 
+    // `luksDump`/`dump_json_metadata` read failures — shared by `enroll`'s
+    // label-uniqueness check AND `revoke`'s `list_fido2_keyslots` call, so
+    // this gets its own workflow-neutral message rather than living inside
+    // `ENROLLMENT_MARKERS` below (which would wrongly say "Enrolling..." for
+    // a plain `revoke` failure). Checked first for the same reason as the
+    // `fido2-token` bucket above.
+    if inner.contains("luksDump") {
+        return "tomb-fido2 couldn't read this tomb's key information. Make sure the path points \
+                at a valid tomb, then try again."
+            .to_string();
+    }
+
     // FIDO2 enrollment failures (`enroll_fido2_key`'s own body — its
     // transient temp key file, its `systemd-cryptenroll` call, and its token
     // export/import/parse helpers) — checked first since several of these
@@ -89,7 +103,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // failed", or the token-import call's `{cmd:?}` Debug-quoted
     // `"token" "import"`), which would otherwise be misclassified as a
     // bootstrap/open subprocess failure below.
-    const ENROLLMENT_MARKERS: [&str; 10] = [
+    const ENROLLMENT_MARKERS: [&str; 8] = [
         "systemd-cryptenroll",
         "temporary key file",
         "transient bootstrap passphrase",
@@ -98,8 +112,6 @@ fn translate_adapter_failure(inner: &str) -> String {
         "token JSON",
         "systemd-fido2 token",
         "fido2-credential",
-        "luksDump",
-        "keyslot id",
     ];
     if ENROLLMENT_MARKERS
         .iter()
@@ -107,6 +119,15 @@ fn translate_adapter_failure(inner: &str) -> String {
     {
         return "Enrolling your security key didn't complete. Make sure it's plugged in and \
                 touch it when prompted, then try again."
+            .to_string();
+    }
+
+    // `revoke`'s own `remove_key` failures (`cryptsetup token remove`/
+    // `luksKillSlot`) — a non-interactive header edit, so the generic
+    // `cryptsetup` bucket below's touch/PIN-entry framing would be
+    // meaningless here. Checked before it for that reason.
+    if inner.contains("luksKillSlot") || inner.contains("token remove") {
+        return "Revoking that key didn't complete. Nothing has been changed — try again."
             .to_string();
     }
 

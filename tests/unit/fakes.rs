@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -27,6 +28,12 @@ pub struct FakeLuksBackend {
     fail_at: Option<&'static str>,
     last_bootstrap_size: RefCell<Option<u64>>,
     last_open: RefCell<Option<(std::path::PathBuf, String)>>,
+    last_removed_keyslot: RefCell<Option<KeyslotRef>>,
+    // Distinct return values for successive `list_fido2_keyslots` calls, so a
+    // test can prove a caller re-reads live state on each call rather than
+    // reusing an earlier result (AC #3). `None` means "always return
+    // `keyslots`" (the common case).
+    keyslots_sequence: RefCell<Option<VecDeque<Vec<KeyslotInfo>>>>,
 }
 
 impl FakeLuksBackend {
@@ -40,12 +47,15 @@ impl FakeLuksBackend {
             // hardware; see keyslot_guard.rs's target_is_valid check).
             keyslots: RefCell::new(vec![KeyslotInfo {
                 keyslot: KeyslotRef(1),
+                key_label: "primary".to_string(),
             }]),
             has_luks2_header: false,
             log: new_call_log(),
             fail_at: None,
             last_bootstrap_size: RefCell::new(None),
             last_open: RefCell::new(None),
+            last_removed_keyslot: RefCell::new(None),
+            keyslots_sequence: RefCell::new(None),
         }
     }
 
@@ -58,6 +68,8 @@ impl FakeLuksBackend {
             fail_at: None,
             last_bootstrap_size: RefCell::new(None),
             last_open: RefCell::new(None),
+            last_removed_keyslot: RefCell::new(None),
+            keyslots_sequence: RefCell::new(None),
         }
     }
 
@@ -68,6 +80,16 @@ impl FakeLuksBackend {
 
     pub fn with_keyslots(self, keyslots: Vec<KeyslotInfo>) -> Self {
         *self.keyslots.borrow_mut() = keyslots;
+        self
+    }
+
+    /// Returns each snapshot in `sequence` on successive `list_fido2_keyslots`
+    /// calls (one call consumes one snapshot), falling back to `keyslots`
+    /// once the sequence is exhausted — lets a test prove a caller re-reads
+    /// live state on each call instead of reusing an earlier result (AC #3),
+    /// by handing back a *different* answer on the second call.
+    pub fn with_keyslots_sequence(self, sequence: Vec<Vec<KeyslotInfo>>) -> Self {
+        *self.keyslots_sequence.borrow_mut() = Some(sequence.into());
         self
     }
 
@@ -87,6 +109,12 @@ impl FakeLuksBackend {
     /// AC #3's exact derived mapping name without re-deriving it by hand.
     pub fn last_open(&self) -> Option<(std::path::PathBuf, String)> {
         self.last_open.borrow().clone()
+    }
+
+    /// The `KeyslotRef` most recently passed to `remove_key` — lets a test
+    /// assert *which* keyslot label-to-keyslot resolution actually picked.
+    pub fn last_removed_keyslot(&self) -> Option<KeyslotRef> {
+        *self.last_removed_keyslot.borrow()
     }
 
     /// Makes the named port call log itself as usual, then return an
@@ -140,11 +168,20 @@ impl LuksBackend for FakeLuksBackend {
             .borrow_mut()
             .push("list_fido2_keyslots".to_string());
         self.fail_if("list_fido2_keyslots")?;
+        if let Some(next) = self
+            .keyslots_sequence
+            .borrow_mut()
+            .as_mut()
+            .and_then(VecDeque::pop_front)
+        {
+            return Ok(next);
+        }
         Ok(self.keyslots.borrow().clone())
     }
 
-    fn remove_key(&self, _path: &Path, _keyslot: KeyslotRef) -> Result<(), DomainError> {
+    fn remove_key(&self, _path: &Path, keyslot: KeyslotRef) -> Result<(), DomainError> {
         self.log.borrow_mut().push("remove_key".to_string());
+        *self.last_removed_keyslot.borrow_mut() = Some(keyslot);
         self.fail_if("remove_key")
     }
 
