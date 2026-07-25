@@ -374,6 +374,16 @@ fn live_keyslot_numbers(metadata: &Value) -> Result<HashSet<u32>, DomainError> {
         .collect()
 }
 
+/// All `systemd-fido2` token ids present in a `luksDump
+/// --dump-json-metadata` snapshot already in hand.
+fn systemd_fido2_token_ids(metadata: &Value) -> Result<HashSet<String>, DomainError> {
+    Ok(tokens_object(metadata)?
+        .iter()
+        .filter(|(_, token)| token.get("type").and_then(Value::as_str) == Some("systemd-fido2"))
+        .map(|(id, _)| id.clone())
+        .collect())
+}
+
 /// All `systemd-fido2` token ids currently present in `path`'s LUKS2 header.
 /// Called both before and after a `systemd-cryptenroll` call so the caller
 /// can diff the two sets and identify exactly which token id is newly
@@ -381,14 +391,39 @@ fn live_keyslot_numbers(metadata: &Value) -> Result<HashSet<u32>, DomainError> {
 /// from any other `systemd-fido2` token already on the header (a tomb with
 /// two enrolled keys has two of them).
 fn find_systemd_fido2_token_ids(path: &Path) -> Result<HashSet<String>, DomainError> {
-    let metadata = dump_json_metadata(path)?;
-    let tokens = tokens_object(&metadata)?;
+    systemd_fido2_token_ids(&dump_json_metadata(path)?)
+}
 
-    Ok(tokens
-        .iter()
-        .filter(|(_, token)| token.get("type").and_then(Value::as_str) == Some("systemd-fido2"))
-        .map(|(id, _)| id.clone())
+/// `key_label` values already present on any `systemd-fido2` token in
+/// `metadata` — used to reject enrolling a label that collides with an
+/// already-enrolled key's, which would defeat AD-2's whole point of telling
+/// keys apart at revoke-time listing.
+fn existing_key_labels(metadata: &Value) -> Result<Vec<String>, DomainError> {
+    Ok(tokens_object(metadata)?
+        .values()
+        .filter(|token| token.get("type").and_then(Value::as_str) == Some("systemd-fido2"))
+        .filter_map(|token| token.get("key_label").and_then(Value::as_str))
+        .map(str::to_string)
         .collect())
+}
+
+/// Keyslot numbers `metadata`'s `token_id` token currently references — used
+/// to roll back a keyslot `systemd-cryptenroll` already created if writing
+/// its metadata afterward then fails (see `enroll_fido2_key`), rather than
+/// leaving an unlabeled, un-bookkept key on the tomb.
+fn keyslots_for_token(metadata: &Value, token_id: &str) -> Vec<u32> {
+    tokens_object(metadata)
+        .ok()
+        .and_then(|tokens| tokens.get(token_id))
+        .and_then(|token| token.get("keyslots"))
+        .and_then(Value::as_array)
+        .map(|slots| {
+            slots
+                .iter()
+                .filter_map(|slot| slot.as_str()?.parse::<u32>().ok())
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// One FIDO2 security key as reported by a single `fido2-token -L`
@@ -481,10 +516,21 @@ fn prompt_for_device_index(prompt: &str, devices: &[Fido2Device]) -> Result<usiz
         let _ = io::stdout().flush();
 
         let mut input = String::new();
-        if io::stdin().read_line(&mut input).is_err() {
-            return Err(DomainError::AdapterFailure(
-                "failed to read FIDO2 device selection from stdin".to_string(),
-            ));
+        match io::stdin().read_line(&mut input) {
+            // `read_line` returns `Ok(0)` (not an `Err`) on EOF — without this
+            // arm, a closed/piped stdin (non-interactive invocation) spun
+            // this loop immediately and indefinitely instead of failing.
+            Ok(0) => {
+                return Err(DomainError::AdapterFailure(
+                    "stdin closed while waiting for a FIDO2 device selection".to_string(),
+                ));
+            }
+            Err(_) => {
+                return Err(DomainError::AdapterFailure(
+                    "failed to read FIDO2 device selection from stdin".to_string(),
+                ));
+            }
+            Ok(_) => {}
         }
 
         match input.trim().parse::<usize>() {
@@ -543,11 +589,32 @@ fn resolve_interactive_selection(
     ))
 }
 
-/// Resolves `Fido2DeviceSelection::Explicit` to concrete hidraw paths,
-/// validating each given path is currently enumerated before returning (same
-/// before-the-mutating-call discipline as AD-4) rather than letting
-/// `systemd-cryptenroll` fail deep inside with a cryptic error.
+/// Validates that `path` is currently enumerated among `devices`, returning
+/// its display string — same before-the-mutating-call discipline as AD-4,
+/// rather than letting `systemd-cryptenroll` fail deep inside with a cryptic
+/// error. `role` (e.g. `"new"`/`"existing"`) only shapes the error message.
+fn validate_device_enumerated(
+    devices: &[Fido2Device],
+    path: &Path,
+    role: &str,
+) -> Result<String, DomainError> {
+    let path_str = path.display().to_string();
+    if devices.iter().any(|device| device.path == path_str) {
+        Ok(path_str)
+    } else {
+        Err(DomainError::AdapterFailure(format!(
+            "the specified {role} FIDO2 device {path_str} is not currently enumerated by \
+             fido2-token -L"
+        )))
+    }
+}
+
+/// Resolves `Fido2DeviceSelection::Explicit` to concrete hidraw paths against
+/// a given point-in-time `devices` enumeration (injected rather than queried
+/// internally, so this validation logic is exercisable without a real
+/// `fido2-token` binary — see this module's `tests` below).
 fn resolve_explicit_selection(
+    devices: &[Fido2Device],
     new: &Path,
     existing: Option<&Path>,
     need_existing: bool,
@@ -560,27 +627,16 @@ fn resolve_explicit_selection(
         ));
     }
 
-    let devices = list_fido2_devices()?;
-    let new_path = new.display().to_string();
-    if !devices.iter().any(|device| device.path == new_path) {
-        return Err(DomainError::AdapterFailure(format!(
-            "the specified FIDO2 device {new_path} is not currently enumerated by fido2-token -L"
-        )));
-    }
+    let new_path = validate_device_enumerated(devices, new, "new")?;
+    let existing_path = existing
+        .map(|existing| validate_device_enumerated(devices, existing, "existing"))
+        .transpose()?;
 
-    let existing_path = match existing {
-        Some(existing) => {
-            let existing_path = existing.display().to_string();
-            if !devices.iter().any(|device| device.path == existing_path) {
-                return Err(DomainError::AdapterFailure(format!(
-                    "the specified existing FIDO2 device {existing_path} is not currently \
-                     enumerated by fido2-token -L"
-                )));
-            }
-            Some(existing_path)
-        }
-        None => None,
-    };
+    if existing_path.as_deref() == Some(new_path.as_str()) {
+        return Err(DomainError::AdapterFailure(
+            "--fido2-device and --unlock-fido2-device must refer to different devices".to_string(),
+        ));
+    }
 
     Ok((new_path, existing_path))
 }
@@ -595,7 +651,8 @@ fn resolve_device_selection(
     match selection {
         Fido2DeviceSelection::Interactive => resolve_interactive_selection(need_existing),
         Fido2DeviceSelection::Explicit { new, existing } => {
-            resolve_explicit_selection(new, existing.as_deref(), need_existing)
+            let devices = list_fido2_devices()?;
+            resolve_explicit_selection(&devices, new, existing.as_deref(), need_existing)
         }
     }
 }
@@ -1041,7 +1098,33 @@ impl Fido2Backend for ExecAdapter {
         // silently overwrite an existing key's metadata instead of writing
         // the new one. Empty for create's bootstrap-enroll call (no token
         // exists yet), so behavior there is unchanged.
-        let existing_token_ids = find_systemd_fido2_token_ids(path)?;
+        let existing_metadata = dump_json_metadata(path)?;
+        let existing_token_ids = systemd_fido2_token_ids(&existing_metadata)?;
+
+        // Reject a label that collides with an already-enrolled key's — two
+        // identically-labeled keys would defeat AD-2's whole point of
+        // telling them apart at revoke-time listing.
+        if existing_key_labels(&existing_metadata)?
+            .iter()
+            .any(|label| label == &metadata.key_label)
+        {
+            return Err(DomainError::AdapterFailure(format!(
+                "a key labeled {:?} is already enrolled on this tomb — choose a different label",
+                metadata.key_label
+            )));
+        }
+
+        let has_transient_passphrase = self.transient_passphrase.borrow().is_some();
+
+        // Device selection resolved before the transient passphrase (if any)
+        // is taken out of its `RefCell` — this keeps the plaintext secret's
+        // in-memory lifetime from including a potentially long interactive
+        // wait for a FIDO2 device to be plugged in. Only the "new key" role
+        // needs filling when a transient passphrase exists (create's
+        // bootstrap-enroll call); a standalone enroll also needs an
+        // "existing key" role to authenticate against.
+        let (new_device, existing_device) =
+            resolve_device_selection(&selection, !has_transient_passphrase)?;
 
         let passphrase = self.transient_passphrase.borrow_mut().take();
 
@@ -1059,11 +1142,6 @@ impl Fido2Backend for ExecAdapter {
         // touch/PIN prompt normally.
         let status = match passphrase {
             Some(passphrase) => {
-                // Only the "new key" role needs filling here — create's
-                // bootstrap passphrase, not a second physical device, is
-                // what authenticates this call.
-                let (new_device, _existing_device) = resolve_device_selection(&selection, false)?;
-
                 let key_file = TempKeyFile::create(passphrase.as_bytes())
                     .map_err(DomainError::AdapterFailure)?;
 
@@ -1099,8 +1177,8 @@ impl Fido2Backend for ExecAdapter {
                 // flag), never by diffing two enumerations taken before/after
                 // a device is plugged in — that temporal-diff approach is
                 // what produced the "More than one FIDO device found"/hang
-                // failure this design replaces.
-                let (new_device, existing_device) = resolve_device_selection(&selection, true)?;
+                // failure this design replaces. Already resolved above,
+                // before the passphrase check.
                 let existing_device = existing_device
                     .expect("resolve_device_selection guarantees Some when need_existing is true");
 
@@ -1134,7 +1212,21 @@ impl Fido2Backend for ExecAdapter {
         }
         let token_id = newly_created.pop().expect("checked len == 1 above");
 
-        self.write_fido2_token_metadata(path, &token_id, metadata)
+        if let Err(err) = self.write_fido2_token_metadata(path, &token_id, metadata) {
+            // `systemd-cryptenroll` already created a real, working keyslot
+            // above — if writing its metadata then fails, roll it back
+            // rather than leaving an unlabeled, un-bookkept key on the tomb.
+            // Best-effort: if this re-dump itself fails, the original `err`
+            // is still what's returned.
+            if let Ok(rollback_metadata) = dump_json_metadata(path) {
+                for keyslot in keyslots_for_token(&rollback_metadata, &token_id) {
+                    let _ = LuksBackend::remove_key(self, path, KeyslotRef(keyslot));
+                }
+            }
+            return Err(err);
+        }
+
+        Ok(())
     }
 }
 
@@ -1370,5 +1462,97 @@ impl FilesystemBackend for ExecAdapter {
                 )))
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn device(path: &str) -> Fido2Device {
+        Fido2Device {
+            path: path.to_string(),
+            description: "test key".to_string(),
+        }
+    }
+
+    #[test]
+    fn explicit_selection_auto_passes_through_when_new_key_enumerated_and_no_existing_needed() {
+        let devices = [device("/dev/hidraw0"), device("/dev/hidraw1")];
+        let result =
+            resolve_explicit_selection(&devices, Path::new("/dev/hidraw0"), None, false).unwrap();
+        assert_eq!(result, ("/dev/hidraw0".to_string(), None));
+    }
+
+    #[test]
+    fn explicit_selection_rejects_new_device_not_enumerated() {
+        let devices = [device("/dev/hidraw0")];
+        let err = resolve_explicit_selection(&devices, Path::new("/dev/hidraw9"), None, false)
+            .unwrap_err();
+        let DomainError::AdapterFailure(message) = err else {
+            panic!("expected AdapterFailure");
+        };
+        assert!(message.contains("/dev/hidraw9"));
+        assert!(message.contains("not currently enumerated"));
+    }
+
+    #[test]
+    fn explicit_selection_requires_existing_when_needed() {
+        let devices = [device("/dev/hidraw0")];
+        let err = resolve_explicit_selection(&devices, Path::new("/dev/hidraw0"), None, true)
+            .unwrap_err();
+        let DomainError::AdapterFailure(message) = err else {
+            panic!("expected AdapterFailure");
+        };
+        assert!(message.contains("--unlock-fido2-device"));
+    }
+
+    #[test]
+    fn explicit_selection_rejects_existing_device_not_enumerated() {
+        let devices = [device("/dev/hidraw0")];
+        let err = resolve_explicit_selection(
+            &devices,
+            Path::new("/dev/hidraw0"),
+            Some(Path::new("/dev/hidraw9")),
+            true,
+        )
+        .unwrap_err();
+        let DomainError::AdapterFailure(message) = err else {
+            panic!("expected AdapterFailure");
+        };
+        assert!(message.contains("/dev/hidraw9"));
+        assert!(message.contains("existing FIDO2 device"));
+    }
+
+    #[test]
+    fn explicit_selection_rejects_identical_new_and_existing_device() {
+        let devices = [device("/dev/hidraw0"), device("/dev/hidraw1")];
+        let err = resolve_explicit_selection(
+            &devices,
+            Path::new("/dev/hidraw0"),
+            Some(Path::new("/dev/hidraw0")),
+            true,
+        )
+        .unwrap_err();
+        let DomainError::AdapterFailure(message) = err else {
+            panic!("expected AdapterFailure");
+        };
+        assert!(message.contains("must refer to different devices"));
+    }
+
+    #[test]
+    fn explicit_selection_accepts_distinct_new_and_existing_devices() {
+        let devices = [device("/dev/hidraw0"), device("/dev/hidraw1")];
+        let result = resolve_explicit_selection(
+            &devices,
+            Path::new("/dev/hidraw1"),
+            Some(Path::new("/dev/hidraw0")),
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            result,
+            ("/dev/hidraw1".to_string(), Some("/dev/hidraw0".to_string()))
+        );
     }
 }
