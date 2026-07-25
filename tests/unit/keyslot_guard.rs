@@ -13,6 +13,7 @@ fn aborts_when_only_one_valid_keyslot_remains() {
         .with_log(log.clone())
         .with_keyslots(vec![KeyslotInfo {
             keyslot: KeyslotRef(0),
+            key_label: "primary".to_string(),
         }]);
 
     let result = remove_keyslot_guarded(&luks, Path::new("/tmp/tomb"), KeyslotRef(0));
@@ -30,9 +31,11 @@ fn proceeds_when_more_than_one_valid_keyslot_remains() {
         .with_keyslots(vec![
             KeyslotInfo {
                 keyslot: KeyslotRef(0),
+                key_label: "primary".to_string(),
             },
             KeyslotInfo {
                 keyslot: KeyslotRef(1),
+                key_label: "backup".to_string(),
             },
         ]);
 
@@ -58,6 +61,7 @@ fn proceeds_when_target_is_not_itself_a_valid_keyslot_even_if_only_one_valid_key
         .with_log(log.clone())
         .with_keyslots(vec![KeyslotInfo {
             keyslot: KeyslotRef(1),
+            key_label: "primary".to_string(),
         }]);
 
     // Target is keyslot 0 (the transient one) — absent from the valid list.

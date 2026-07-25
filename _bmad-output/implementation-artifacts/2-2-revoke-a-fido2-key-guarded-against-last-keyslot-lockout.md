@@ -4,7 +4,7 @@ baseline_commit: 20cd6f5
 
 # Story 2.2: Revoke a FIDO2 Key, Guarded Against Last-Keyslot Lockout
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -49,21 +49,21 @@ so that a lost or compromised key stops being able to unlock my tomb.
   - [x] Update `translate`'s module-level doc comment and `translate_adapter_failure`'s doc comment (both currently say "create"/"unlock"/"enroll") to also name `revoke`.
   - [x] Update `DomainError::LastKeyslotGuard`'s match-arm comment — it currently reads "Not reachable from `create`/`unlock` today — only `domain::workflows::revoke` (Story 2.2) produces this," written as a forward reference before this story existed. Now that `revoke` is implemented, reword to state plainly it's the only producer (drop the "(Story 2.2)" forward-looking phrasing).
   - [x] Update `src/domain/keyslot_guard.rs`'s doc comment the same way — it currently says "Story 2.2 (CAP-3/revoke) reuses this same primitive," also written before this story existed; reword to name `domain::workflows::revoke::run` directly now that it exists.
-- [ ] Task 5: Tests (AC: #1, #2, #3, #4, #5)
-  - [ ] Update every existing `KeyslotInfo { keyslot: ... }` construction site for the new required `key_label` field (`tests/unit/fakes.rs`'s `FakeLuksBackend::passing()` default keyslot, `tests/unit/keyslot_guard.rs`'s three tests) — pick any non-empty label per test's own intent (e.g. `"primary"`).
-  - [ ] `tests/unit/fakes.rs`: add a `last_removed_keyslot()` accessor to `FakeLuksBackend` (mirroring the existing `last_open()`/`last_bootstrap_size()` pattern) so a test can assert *which* `KeyslotRef` was actually passed to `remove_key` — needed to prove label-to-keyslot resolution picked the right one, not just that removal happened.
-  - [ ] New `tests/unit/revoke.rs` (register `mod revoke;` in `tests/unit/main.rs`), fake-backed, mirroring `tests/unit/enroll.rs`'s style:
+- [x] Task 5: Tests (AC: #1, #2, #3, #4, #5)
+  - [x] Update every existing `KeyslotInfo { keyslot: ... }` construction site for the new required `key_label` field (`tests/unit/fakes.rs`'s `FakeLuksBackend::passing()` default keyslot, `tests/unit/keyslot_guard.rs`'s three tests) — pick any non-empty label per test's own intent (e.g. `"primary"`).
+  - [x] `tests/unit/fakes.rs`: add a `last_removed_keyslot()` accessor to `FakeLuksBackend` (mirroring the existing `last_open()`/`last_bootstrap_size()` pattern) so a test can assert *which* `KeyslotRef` was actually passed to `remove_key` — needed to prove label-to-keyslot resolution picked the right one, not just that removal happened.
+  - [x] New `tests/unit/revoke.rs` (register `mod revoke;` in `tests/unit/main.rs`), fake-backed, mirroring `tests/unit/enroll.rs`'s style:
     - Preflight failure short-circuits before any port call.
     - Happy path: given two keyslots with distinct labels (e.g. `KeyslotRef(0)` labeled `"primary"`, `KeyslotRef(1)` labeled `"backup"`), revoking `"backup"` calls `remove_key` with `KeyslotRef(1)` specifically (assert via `last_removed_keyslot()`), and the call log shows `list_fido2_keyslots` before `remove_key`.
     - Targeting a label that matches no enrolled keyslot returns `DomainError::KeyNotFound("nonexistent".to_string())` and never calls `remove_key` (assert via the call log).
     - Revoking the sole remaining keyslot (single-entry `with_keyslots`) returns `DomainError::LastKeyslotGuard` and never calls `remove_key` — this exercises `keyslot_guard::remove_keyslot_guarded`'s existing, already-tested guard through `revoke::run`'s own call path, not a reimplementation.
     - An underlying `remove_key` failure (`with_failure_at("remove_key")`) propagates as `DomainError::AdapterFailure` untouched.
-  - [ ] `tests/unit/cli.rs`: add `revoke_help_lists_path_as_positional_and_label_as_a_flag`, following `enroll_help_lists_path_as_positional_and_label_as_a_flag`'s exact pattern.
-  - [ ] `tests/hardware/main.rs` (manual, `#[ignore]`, per AD-7):
+  - [x] `tests/unit/cli.rs`: add `revoke_help_lists_path_as_positional_and_label_as_a_flag`, following `enroll_help_lists_path_as_positional_and_label_as_a_flag`'s exact pattern.
+  - [x] `tests/hardware/main.rs` (manual, `#[ignore]`, per AD-7):
     - `revoke_removes_a_key_without_affecting_others`: create a tomb (primary key), enroll a second key labeled distinctly (reuse the existing enroll scenario's setup shape), revoke the **primary** by label, then assert via `list_fido2_keyslots` that exactly one live keyslot remains and via `--dump-json-metadata` that only the backup's label is present (mirrors Story 2.1's own label-survival assertion style) — the concrete regression check for Task 1/2's label-to-keyslot resolution. Also assert the backup key still unlocks the tomb via `unlock::run` (AC #1's "other enrolled keys still do").
     - `revoke_aborts_on_the_last_remaining_key`: create a tomb (one key), attempt `revoke::run` targeting that key's label, assert it returns `DomainError::LastKeyslotGuard`, then assert the tomb is still unlockable via `unlock::run` (AC #2's explicit "volume remains unlockable").
     - No separate device-backed variant needed (AC #5) — `revoke::run` has no target-type branch to test around, confirmed by inspection (same reasoning as `enroll`'s AC #5).
-  - [ ] Confirm `cargo build --lib`, `make test` (`cargo test --lib --test unit`), `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check` all stay green, then run `make test-hardware` by hand (root required, two physical FIDO2 keys needed for the first scenario) before considering this story done.
+  - [x] Confirm `cargo build --lib`, `make test` (`cargo test --lib --test unit`), `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check` all stay green — done, all four pass (74/74 unit tests). `make test-hardware` deferred: user opted to run it themselves afterward (requires root + two physical FIDO2 keys, interactive touch/PIN/key-swap prompts I can't drive unattended). Story is set to `review` pending that manual run — see Completion Notes.
 
 ## Dev Notes
 
@@ -115,6 +115,7 @@ so that a lost or compromised key stops being able to unlock my tomb.
 - Task 2: Implemented `domain::workflows::revoke::run` — preflight, resolve `key_label` to a `KeyslotRef` via `list_fido2_keyslots`, delegate to `keyslot_guard::remove_keyslot_guarded`.
 - Task 3: Added `Commands::Revoke` (positional path + required `--label`) and `run_revoke`, mirroring `run_enroll`'s shape; dispatched in `run()`.
 - Task 4: Fixed marker bleed in `translate_adapter_failure` — dropped `"luksDump"`/`"keyslot id"` from `ENROLLMENT_MARKERS`, added workflow-neutral `luksDump` bucket and a `revoke`-specific `luksKillSlot`/`token remove` bucket; updated stale doc comments in `ux.rs` and `keyslot_guard.rs` to name `revoke`.
+- Task 5: Updated all `KeyslotInfo` construction sites for the new `key_label` field; added `FakeLuksBackend::last_removed_keyslot()`; added `tests/unit/revoke.rs` (5 tests: preflight short-circuit, happy path, unenrolled label, last-keyslot guard, remove_key failure propagation) and a CLI help test; added two `#[ignore]`d hardware scenarios in `tests/hardware/main.rs`. `cargo build --lib`, `cargo test --lib --test unit` (74/74 passing), `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check` all green. `make test-hardware` intentionally **not** run by the agent — it needs root and two physical FIDO2 keys with live touch/PIN/key-swap prompts; the user will run it by hand and confirm before merge.
 
 ### File List
 
@@ -125,3 +126,13 @@ so that a lost or compromised key stops being able to unlock my tomb.
 - src/domain/workflows/revoke.rs
 - src/cli/main.rs
 - src/domain/keyslot_guard.rs
+- tests/unit/fakes.rs
+- tests/unit/keyslot_guard.rs
+- tests/unit/main.rs
+- tests/unit/cli.rs
+- tests/hardware/main.rs
+- tests/unit/revoke.rs (new)
+
+## Change Log
+
+- 2026-07-26: Implemented revoke end-to-end (Tasks 1-5): `KeyslotInfo.key_label` + `DomainError::KeyNotFound`, `domain::workflows::revoke::run` (thin orchestration over `list_fido2_keyslots`/`keyslot_guard::remove_keyslot_guarded`), the `revoke` CLI subcommand, two real `ux.rs` marker-bleed bugs fixed (revoke's own `luksDump`/`luksKillSlot`/`token remove` failures were being mislabeled as enrollment or touch/PIN errors), and full unit test coverage. `cargo build`/`test`/`clippy`/`fmt` all green (74/74 unit tests). `make test-hardware`'s two new revoke scenarios are `#[ignore]`d pending a manual run with two physical FIDO2 keys — user will run and confirm before merge.

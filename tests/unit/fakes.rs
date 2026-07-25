@@ -27,6 +27,7 @@ pub struct FakeLuksBackend {
     fail_at: Option<&'static str>,
     last_bootstrap_size: RefCell<Option<u64>>,
     last_open: RefCell<Option<(std::path::PathBuf, String)>>,
+    last_removed_keyslot: RefCell<Option<KeyslotRef>>,
 }
 
 impl FakeLuksBackend {
@@ -40,12 +41,14 @@ impl FakeLuksBackend {
             // hardware; see keyslot_guard.rs's target_is_valid check).
             keyslots: RefCell::new(vec![KeyslotInfo {
                 keyslot: KeyslotRef(1),
+                key_label: "primary".to_string(),
             }]),
             has_luks2_header: false,
             log: new_call_log(),
             fail_at: None,
             last_bootstrap_size: RefCell::new(None),
             last_open: RefCell::new(None),
+            last_removed_keyslot: RefCell::new(None),
         }
     }
 
@@ -58,6 +61,7 @@ impl FakeLuksBackend {
             fail_at: None,
             last_bootstrap_size: RefCell::new(None),
             last_open: RefCell::new(None),
+            last_removed_keyslot: RefCell::new(None),
         }
     }
 
@@ -87,6 +91,12 @@ impl FakeLuksBackend {
     /// AC #3's exact derived mapping name without re-deriving it by hand.
     pub fn last_open(&self) -> Option<(std::path::PathBuf, String)> {
         self.last_open.borrow().clone()
+    }
+
+    /// The `KeyslotRef` most recently passed to `remove_key` — lets a test
+    /// assert *which* keyslot label-to-keyslot resolution actually picked.
+    pub fn last_removed_keyslot(&self) -> Option<KeyslotRef> {
+        *self.last_removed_keyslot.borrow()
     }
 
     /// Makes the named port call log itself as usual, then return an
@@ -143,8 +153,9 @@ impl LuksBackend for FakeLuksBackend {
         Ok(self.keyslots.borrow().clone())
     }
 
-    fn remove_key(&self, _path: &Path, _keyslot: KeyslotRef) -> Result<(), DomainError> {
+    fn remove_key(&self, _path: &Path, keyslot: KeyslotRef) -> Result<(), DomainError> {
         self.log.borrow_mut().push("remove_key".to_string());
+        *self.last_removed_keyslot.borrow_mut() = Some(keyslot);
         self.fail_if("remove_key")
     }
 

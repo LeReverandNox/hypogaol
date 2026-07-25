@@ -105,6 +105,14 @@ fn enroll_help_lists_path_as_positional_and_label_as_a_flag() {
 }
 
 #[test]
+fn revoke_help_lists_path_as_positional_and_label_as_a_flag() {
+    let help = help_text(&["tomb-fido2", "revoke", "--help"]);
+    assert!(help.contains("<PATH>"));
+    assert!(!help.contains("--path"));
+    assert!(help.contains("--label"));
+}
+
+#[test]
 fn enroll_help_lists_the_explicit_device_selection_flags() {
     let help = help_text(&["tomb-fido2", "enroll", "--help"]);
     assert!(help.contains("--fido2-device"));
