@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::path::Path;
 use std::rc::Rc;
 
@@ -28,6 +29,11 @@ pub struct FakeLuksBackend {
     last_bootstrap_size: RefCell<Option<u64>>,
     last_open: RefCell<Option<(std::path::PathBuf, String)>>,
     last_removed_keyslot: RefCell<Option<KeyslotRef>>,
+    // Distinct return values for successive `list_fido2_keyslots` calls, so a
+    // test can prove a caller re-reads live state on each call rather than
+    // reusing an earlier result (AC #3). `None` means "always return
+    // `keyslots`" (the common case).
+    keyslots_sequence: RefCell<Option<VecDeque<Vec<KeyslotInfo>>>>,
 }
 
 impl FakeLuksBackend {
@@ -49,6 +55,7 @@ impl FakeLuksBackend {
             last_bootstrap_size: RefCell::new(None),
             last_open: RefCell::new(None),
             last_removed_keyslot: RefCell::new(None),
+            keyslots_sequence: RefCell::new(None),
         }
     }
 
@@ -62,6 +69,7 @@ impl FakeLuksBackend {
             last_bootstrap_size: RefCell::new(None),
             last_open: RefCell::new(None),
             last_removed_keyslot: RefCell::new(None),
+            keyslots_sequence: RefCell::new(None),
         }
     }
 
@@ -72,6 +80,16 @@ impl FakeLuksBackend {
 
     pub fn with_keyslots(self, keyslots: Vec<KeyslotInfo>) -> Self {
         *self.keyslots.borrow_mut() = keyslots;
+        self
+    }
+
+    /// Returns each snapshot in `sequence` on successive `list_fido2_keyslots`
+    /// calls (one call consumes one snapshot), falling back to `keyslots`
+    /// once the sequence is exhausted — lets a test prove a caller re-reads
+    /// live state on each call instead of reusing an earlier result (AC #3),
+    /// by handing back a *different* answer on the second call.
+    pub fn with_keyslots_sequence(self, sequence: Vec<Vec<KeyslotInfo>>) -> Self {
+        *self.keyslots_sequence.borrow_mut() = Some(sequence.into());
         self
     }
 
@@ -150,6 +168,14 @@ impl LuksBackend for FakeLuksBackend {
             .borrow_mut()
             .push("list_fido2_keyslots".to_string());
         self.fail_if("list_fido2_keyslots")?;
+        if let Some(next) = self
+            .keyslots_sequence
+            .borrow_mut()
+            .as_mut()
+            .and_then(VecDeque::pop_front)
+        {
+            return Ok(next);
+        }
         Ok(self.keyslots.borrow().clone())
     }
 

@@ -116,6 +116,49 @@ fn revoking_the_sole_remaining_keyslot_returns_last_keyslot_guard() {
 }
 
 #[test]
+fn guard_decision_uses_the_fresh_recount_not_the_earlier_label_resolution_view() {
+    // First list_fido2_keyslots call (label resolution) sees two live
+    // keyslots — nothing here would abort. Second call (inside
+    // remove_keyslot_guarded) sees only one — simulating that the count
+    // dropped between the two reads. If revoke::run reused the first read's
+    // count instead of the guard's own fresh recount, this would incorrectly
+    // proceed to remove_key; AC #3 requires the fresh (second) read to
+    // govern the decision instead.
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing()
+        .with_log(log.clone())
+        .with_keyslots_sequence(vec![
+            vec![
+                KeyslotInfo {
+                    keyslot: KeyslotRef(0),
+                    key_label: "primary".to_string(),
+                },
+                KeyslotInfo {
+                    keyslot: KeyslotRef(1),
+                    key_label: "backup".to_string(),
+                },
+            ],
+            vec![KeyslotInfo {
+                keyslot: KeyslotRef(0),
+                key_label: "primary".to_string(),
+            }],
+        ]);
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let result = revoke::run(Path::new("/tmp/tomb"), "primary", &luks, &fido2, &fs);
+
+    assert!(matches!(result, Err(DomainError::LastKeyslotGuard)));
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "list_fido2_keyslots".to_string(),
+            "list_fido2_keyslots".to_string()
+        ]
+    );
+}
+
+#[test]
 fn remove_key_failure_propagates_as_adapter_failure_untouched() {
     let luks = FakeLuksBackend::passing()
         .with_keyslots(vec![

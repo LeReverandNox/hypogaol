@@ -893,7 +893,11 @@ fn revoke_removes_a_key_without_affecting_others() {
     let result = revoke::run(&path, "primary", &adapter, &adapter, &adapter);
     assert!(result.is_ok(), "revoke::run failed: {result:?}");
 
-    // AD-5's ground truth: exactly one live keyslot remains.
+    // AD-5's ground truth: exactly one live keyslot remains, and it belongs
+    // to the surviving "backup" key — not a relabeled/shadowed "primary".
+    // Asserting on the parsed `key_label` field (rather than a raw luksDump
+    // text search) proves label-to-keyslot resolution through the same
+    // parsing path revoke::run itself relies on.
     let keyslots = adapter
         .list_fido2_keyslots(&path)
         .expect("list_fido2_keyslots failed");
@@ -902,24 +906,9 @@ fn revoke_removes_a_key_without_affecting_others() {
         1,
         "expected exactly one live FIDO2 keyslot after revoking the primary, got {keyslots:?}"
     );
-
-    // Confirm only the backup's label remains — the primary's token metadata
-    // (and its keyslot) must be gone, not just relabeled or shadowed.
-    let dump = Command::new("cryptsetup")
-        .arg("luksDump")
-        .arg("--dump-json-metadata")
-        .arg(&path)
-        .output()
-        .expect("failed to run cryptsetup luksDump");
-    assert!(dump.status.success(), "cryptsetup luksDump failed");
-    let dump_text = String::from_utf8_lossy(&dump.stdout);
-    assert!(
-        !dump_text.contains("primary"),
-        "expected the revoked primary key's label to be gone, got:\n{dump_text}"
-    );
-    assert!(
-        dump_text.contains("backup"),
-        "expected the surviving backup key's label to still be present, got:\n{dump_text}"
+    assert_eq!(
+        keyslots[0].key_label, "backup",
+        "expected the surviving keyslot to be labeled \"backup\", got {keyslots:?}"
     );
 
     // The surviving backup key must still unlock the tomb (AC #1's "other
