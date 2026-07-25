@@ -61,7 +61,7 @@ development_status:
   epic-1-retrospective: done
 
   epic-2: in-progress
-  2-1-enroll-an-additional-fido2-key: ready-for-dev
+  2-1-enroll-an-additional-fido2-key: in-progress
   2-2-revoke-a-fido2-key-guarded-against-last-keyslot-lockout: backlog
   epic-2-retrospective: optional
 
@@ -100,3 +100,7 @@ action_items:
     action: "Resolve the open design question on real step-by-step progress reporting during create/unlock"
     owner: "unassigned"
     status: open
+  - epic: 2
+    action: "RESOLVED (Winston, 2026-07-25) — full design recorded in 2-1-enroll-an-additional-fido2-key.md's Dev Notes ('Architect consultation resolved'). Summary: replace enroll_fido2_key's temporal-diff device identification (the race behind the hang/'More than one FIDO device found' failures) with a spatial choice — Fido2Backend::enroll_fido2_key gains a Fido2DeviceSelection{Interactive, Explicit{new, existing: Option<PathBuf>}} param; Interactive waits for enough enumerated devices then prompts explicitly for each needed role (scales to N>2, no elimination shortcut); Explicit adds --fido2-device/--unlock-fido2-device flags to enroll (all-or-nothing, for unattended/scripted use). unlock (LuksBackend::open) separately gets a presence-wait loop only (>=1 device, no picker, no new flag, no signature change — cryptsetup's own credential-based auto already disambiguates fine there; user declined an explicit unlock flag for now). create's bootstrap-enroll call (finish_provisioning, same shared enroll_fido2_key fn) is now explicitly in scope too (user-approved 2026-07-25, deliberately overriding the story's original 'no port/signature changes, don't touch create.rs' constraint): gets the same Interactive single-role treatment (silent auto-pick when exactly one device present, so today's single-key UX is unchanged) plus a new scripted --fido2-device flag on create file/create device (no --unlock-fido2-device there, no existing-key role to fill). No architecture-spine amendment needed. Story 2.1 is unblocked to resume implementation against this design."
+    owner: "Amelia"
+    status: in-progress
