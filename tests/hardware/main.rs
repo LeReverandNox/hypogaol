@@ -4,7 +4,9 @@ use std::process::Command;
 use tomb_fido2::adapters::exec::ExecAdapter;
 use tomb_fido2::domain::mapping_name;
 use tomb_fido2::domain::types::{CreateTarget, Filesystem};
-use tomb_fido2::domain::workflows::{create, unlock};
+use tomb_fido2::domain::workflows::{create, enroll, unlock};
+use tomb_fido2::ports::fido2_backend::Fido2DeviceSelection;
+use tomb_fido2::ports::luks_backend::LuksBackend;
 
 /// Attaches a genuine `/dev/loopN` block device backed by a disposable file —
 /// `cryptsetup`/`blockdev` treat it identically to physical storage, so this
@@ -97,7 +99,14 @@ fn create_a_file_backed_tomb_is_independently_unlockable_via_bare_cryptsetup() {
         size: 64 * 1024 * 1024,
     };
 
-    let result = create::run(target, Filesystem::Ext4, &adapter, &adapter, &adapter);
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
     assert!(result.is_ok(), "create::run failed: {result:?}");
 
     // Break-glass verification: bare cryptsetup, independent of this tool's
@@ -170,7 +179,14 @@ fn create_a_device_backed_tomb_leaves_headroom_for_a_later_resize() {
         confirmed: true,
     };
 
-    let result = create::run(target, Filesystem::Ext4, &adapter, &adapter, &adapter);
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
     assert!(result.is_ok(), "create::run failed: {result:?}");
 
     // Break-glass verification: bare cryptsetup, independent of this tool's
@@ -485,7 +501,14 @@ fn unlock_mounts_a_file_backed_tomb_with_a_readable_writable_filesystem() {
         size: 64 * 1024 * 1024,
     };
 
-    let result = create::run(target, Filesystem::Ext4, &adapter, &adapter, &adapter);
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
     assert!(result.is_ok(), "create::run failed: {result:?}");
 
     let mountpoint = unlock::run(&path, &adapter, &adapter, &adapter).expect("unlock::run failed");
@@ -538,7 +561,14 @@ fn unlock_works_unmodified_against_a_device_backed_tomb() {
         confirmed: true,
     };
 
-    let result = create::run(target, Filesystem::Ext4, &adapter, &adapter, &adapter);
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
     assert!(result.is_ok(), "create::run failed: {result:?}");
 
     // Identical unlock::run call as the file-backed scenario above — no
@@ -614,7 +644,14 @@ fn unlock_falls_back_to_a_suffixed_mount_point_on_a_basename_collision() {
             path: path.clone(),
             size: 64 * 1024 * 1024,
         };
-        let result = create::run(target, Filesystem::Ext4, &adapter, &adapter, &adapter);
+        let result = create::run(
+            target,
+            Filesystem::Ext4,
+            Fido2DeviceSelection::Interactive,
+            &adapter,
+            &adapter,
+            &adapter,
+        );
         assert!(
             result.is_ok(),
             "create::run failed for {}: {result:?}",
@@ -663,4 +700,137 @@ fn unlock_falls_back_to_a_suffixed_mount_point_on_a_basename_collision() {
 
     cleanup_b.run();
     cleanup_a.run();
+}
+
+/// Blocks on stdin until the tester presses Enter, after printing `prompt` —
+/// used only to pace a manual physical-key swap; never reads or echoes
+/// anything secret (AD-3 governs PIN/touch material, not this plain
+/// orchestration step).
+fn pause(prompt: &str) {
+    println!("{prompt}");
+    println!("Press Enter once ready.");
+    let mut input = String::new();
+    let _ = std::io::stdin().read_line(&mut input);
+}
+
+/// End-to-end verification that `enroll::run` adds a genuinely independent
+/// second key rather than corrupting the primary's own metadata (Story 2.1,
+/// AC #1/#2/#3) — the concrete regression test for Task 1's before/after
+/// token-diffing fix: a naive "pick the first `systemd-fido2` token"
+/// implementation would silently overwrite the primary key's
+/// `key_label`/`created_at` instead of writing the new token.
+///
+/// AC #5 (raw device vs. loop-backed file parity) needs no separate
+/// device-backed variant here: `enroll::run`'s own code (confirmed by
+/// inspection — see `domain::workflows::enroll`) has no target-type branch
+/// to have gotten wrong in the first place, the same reasoning already
+/// covered by the device-backed `unlock` scenarios above.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and TWO distinct
+/// physical FIDO2 security keys, each pluggable independently. Touch the
+/// PRIMARY key when `create::run` prompts. When `enroll::run` prompts: plug
+/// in *both* keys simultaneously and keep them plugged in — the interactive
+/// device-selection flow waits until both are enumerated, then lists them by
+/// index and asks "Which is your EXISTING key?" followed by "Which is your
+/// NEW key?"; answer with the primary's and the backup's numbers
+/// respectively. `systemd-cryptenroll` then runs with both devices attached,
+/// prompting for the primary's touch/PIN to authorize, then the new key's
+/// touch to complete enrollment.
+#[test]
+#[ignore]
+fn enroll_adds_an_independent_second_key_without_corrupting_the_primary() {
+    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-enroll");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("tomb.img");
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::File {
+        path: path.clone(),
+        size: 64 * 1024 * 1024,
+    };
+
+    println!("Creating tomb — touch the PRIMARY key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    println!(
+        "Enrolling a second key — touch the PRIMARY key first to authorize, \
+         then touch the NEW (second) key."
+    );
+    let result = enroll::run(
+        &path,
+        "backup".to_string(),
+        Fido2DeviceSelection::Interactive,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "enroll::run failed: {result:?}");
+
+    // AD-5's ground truth: exactly two live keyslots now exist, each backed
+    // by a systemd-fido2 token.
+    let keyslots = adapter
+        .list_fido2_keyslots(&path)
+        .expect("list_fido2_keyslots failed");
+    assert_eq!(
+        keyslots.len(),
+        2,
+        "expected exactly two live FIDO2 keyslots after enrolling a second key, got {keyslots:?}"
+    );
+
+    // Confirm the primary's original label survived untouched and the newly
+    // enrolled key's label is present — not swapped or overwritten — the
+    // concrete regression check for Task 1's before/after token-diffing fix.
+    // Deliberately `--dump-json-metadata`, not plain `luksDump`: cryptsetup's
+    // human-readable dump only renders its own known fields for external
+    // token types and never surfaces our custom `key_label`/`filesystem`/
+    // `created_at` additions, so a plain-dump substring check can never find
+    // them regardless of whether the write actually succeeded.
+    let dump = Command::new("cryptsetup")
+        .arg("luksDump")
+        .arg("--dump-json-metadata")
+        .arg(&path)
+        .output()
+        .expect("failed to run cryptsetup luksDump");
+    assert!(dump.status.success(), "cryptsetup luksDump failed");
+    let dump_text = String::from_utf8_lossy(&dump.stdout);
+    assert!(
+        dump_text.contains("primary"),
+        "expected the primary key's original \"primary\" label to survive enrollment, got:\n{dump_text}"
+    );
+    assert!(
+        dump_text.contains("backup"),
+        "expected the newly enrolled key's \"backup\" label to be present, got:\n{dump_text}"
+    );
+
+    // Both keys must independently unlock the tomb (AC #2). `unlock` relies
+    // entirely on cryptsetup's own automatic FIDO2 token-matching (no
+    // explicit device flag, by design — see the story's "Architect
+    // consultation resolved" note) — it tries every enrolled token against
+    // whatever's currently plugged in and succeeds on the first match. With
+    // *both* physical keys left plugged in, that means the second attempt
+    // below would silently re-prove the same key as the first and never
+    // actually exercise the other one. Forcing only one candidate to be
+    // physically present per attempt is the only way to prove independence,
+    // hence the pauses instructing the tester to swap keys by hand.
+    pause("Unplug the SECOND (backup) key now, leaving only the PRIMARY key plugged in.");
+    println!("Unlocking with the PRIMARY key — touch it when prompted.");
+    let mountpoint = unlock::run(&path, &adapter, &adapter, &adapter)
+        .expect("unlock::run with the primary key failed");
+    let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
+    UnlockCleanup::new(mountpoint, name.clone()).run();
+
+    pause("Now unplug the PRIMARY key and plug in ONLY the SECOND (backup) key.");
+    println!("Unlocking with the SECOND (backup) key — touch it when prompted.");
+    let mountpoint = unlock::run(&path, &adapter, &adapter, &adapter)
+        .expect("unlock::run with the second key failed");
+    UnlockCleanup::new(mountpoint, name).run();
 }

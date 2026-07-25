@@ -1,5 +1,6 @@
 mod cli;
 mod create;
+mod enroll;
 mod fakes;
 mod keyslot_guard;
 mod mapping_name;

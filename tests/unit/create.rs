@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use tomb_fido2::domain::errors::DomainError;
 use tomb_fido2::domain::types::{CreateTarget, Filesystem};
 use tomb_fido2::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
+use tomb_fido2::ports::fido2_backend::Fido2DeviceSelection;
 
 use crate::fakes::{new_call_log, FakeFido2Backend, FakeFilesystemBackend, FakeLuksBackend};
 
@@ -42,7 +43,14 @@ fn refuses_before_touching_anything_if_destination_already_exists() {
         size: 1024,
     };
 
-    let result = create::run(target, Filesystem::Ext4, &luks, &fido2, &fs);
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &luks,
+        &fido2,
+        &fs,
+    );
 
     match result {
         Err(DomainError::DestinationExists(path)) => {
@@ -69,7 +77,14 @@ fn happy_path_runs_every_port_call_once_in_order() {
         size: 1024,
     };
 
-    let result = create::run(target, Filesystem::Ext4, &luks, &fido2, &fs);
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &luks,
+        &fido2,
+        &fs,
+    );
 
     assert!(result.is_ok(), "expected Ok(()), got {result:?}");
 
@@ -108,7 +123,14 @@ fn enroll_failure_closes_the_mapping_and_removes_the_backing_file() {
         size: 1024,
     };
 
-    let result = create::run(target, Filesystem::Ext4, &luks, &fido2, &fs);
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &luks,
+        &fido2,
+        &fs,
+    );
 
     assert!(result.is_err(), "expected Err, got {result:?}");
 
@@ -145,7 +167,14 @@ fn mkfs_failure_closes_the_mapping_and_removes_the_backing_file() {
         size: 1024,
     };
 
-    let result = create::run(target, Filesystem::Ext4, &luks, &fido2, &fs);
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &luks,
+        &fido2,
+        &fs,
+    );
 
     assert!(result.is_err(), "expected Err, got {result:?}");
     assert_eq!(
@@ -177,7 +206,14 @@ fn bootstrap_format_and_open_failure_removes_the_backing_file_without_closing_a_
         size: 1024,
     };
 
-    let result = create::run(target, Filesystem::Ext4, &luks, &fido2, &fs);
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &luks,
+        &fido2,
+        &fs,
+    );
 
     assert!(result.is_err(), "expected Err, got {result:?}");
 
@@ -211,7 +247,14 @@ fn device_happy_path_with_no_size_given_uses_the_full_capacity() {
         confirmed: true,
     };
 
-    let result = create::run(target, Filesystem::Ext4, &luks, &fido2, &fs);
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &luks,
+        &fido2,
+        &fs,
+    );
 
     assert!(result.is_ok(), "expected Ok(()), got {result:?}");
     assert_eq!(luks.last_bootstrap_size(), Some(MIN_TOMB_SIZE_BYTES * 2));
@@ -246,7 +289,14 @@ fn device_happy_path_with_a_size_smaller_than_capacity_uses_the_requested_size()
         confirmed: true,
     };
 
-    let result = create::run(target, Filesystem::Ext4, &luks, &fido2, &fs);
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &luks,
+        &fido2,
+        &fs,
+    );
 
     assert!(result.is_ok(), "expected Ok(()), got {result:?}");
     // The requested (smaller) size must reach bootstrap_format_and_open
@@ -283,7 +333,14 @@ fn device_with_no_size_given_and_capacity_below_the_minimum_refuses_before_any_m
         confirmed: true,
     };
 
-    let result = create::run(target, Filesystem::Ext4, &luks, &fido2, &fs);
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &luks,
+        &fido2,
+        &fs,
+    );
 
     match result {
         Err(DomainError::DeviceTooSmall { path, size }) => {
@@ -318,7 +375,14 @@ fn device_with_existing_luks2_header_refuses_even_when_confirmed() {
         confirmed: true,
     };
 
-    let result = create::run(target, Filesystem::Ext4, &luks, &fido2, &fs);
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &luks,
+        &fido2,
+        &fs,
+    );
 
     match result {
         Err(DomainError::DeviceAlreadyFormatted(path)) => {
@@ -348,7 +412,14 @@ fn device_without_confirmation_refuses_even_with_no_header() {
         confirmed: false,
     };
 
-    let result = create::run(target, Filesystem::Ext4, &luks, &fido2, &fs);
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &luks,
+        &fido2,
+        &fs,
+    );
 
     match result {
         Err(DomainError::DeviceConfirmationRequired) => {}
@@ -376,7 +447,14 @@ fn device_with_requested_size_greater_than_capacity_refuses_before_any_mutating_
         confirmed: true,
     };
 
-    let result = create::run(target, Filesystem::Ext4, &luks, &fido2, &fs);
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &luks,
+        &fido2,
+        &fs,
+    );
 
     match result {
         Err(DomainError::DeviceSizeExceedsCapacity {
@@ -418,7 +496,14 @@ fn device_branch_failure_closes_the_mapping_without_removing_any_backing_file() 
         confirmed: true,
     };
 
-    let result = create::run(target, Filesystem::Ext4, &luks, &fido2, &fs);
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &luks,
+        &fido2,
+        &fs,
+    );
 
     assert!(result.is_err(), "expected Err, got {result:?}");
 

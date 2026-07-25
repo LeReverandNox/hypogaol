@@ -9,8 +9,8 @@
 
 use crate::domain::errors::DomainError;
 
-/// Translates any `DomainError` reachable from `create`/`unlock` into a
-/// plain-language message. Exhaustive by construction: a 9th `DomainError`
+/// Translates any `DomainError` reachable from `create`/`unlock`/`enroll`
+/// into a plain-language message. Exhaustive by construction: a 9th `DomainError`
 /// variant added by a later epic fails to compile here until it's given a
 /// translation, so jargon can never silently leak through an unhandled arm.
 pub fn translate(err: &DomainError) -> String {
@@ -62,12 +62,26 @@ pub fn translate(err: &DomainError) -> String {
 
 /// `AdapterFailure`'s message text varies by call site (it is the one
 /// `DomainError` variant with no structured fields). Scope is bounded to
-/// `create`'s and `unlock`'s own call graphs, so the reachable message shapes
-/// are finite — each category below is matched by markers that appear
-/// verbatim in the real call sites (`src/adapters/exec/mod.rs`,
+/// `create`'s, `unlock`'s, and `enroll`'s own call graphs, so the reachable
+/// message shapes are finite — each category below is matched by markers
+/// that appear verbatim in the real call sites (`src/adapters/exec/mod.rs`,
 /// `src/domain/mapping_name.rs`) and translated as a whole, rather than
 /// chasing a bespoke rewrite of every exact string.
 fn translate_adapter_failure(inner: &str) -> String {
+    // FIDO2 device-enumeration failures (`fido2-token -L`, via
+    // `list_fido2_devices`/`wait_for_enough_fido2_devices`) — shared by
+    // `create`'s bootstrap enroll, `enroll`'s own device-selection, AND
+    // `unlock`'s presence-wait (`LuksBackend::open`), so this gets its own
+    // workflow-neutral message rather than living inside `ENROLLMENT_MARKERS`
+    // below (which would wrongly say "Enrolling..." for a plain `unlock`
+    // failure). Checked first for the same reason `ENROLLMENT_MARKERS` is:
+    // some of these messages don't contain "cryptsetup" at all, but none
+    // should fall through to the generic buckets below either.
+    if inner.contains("fido2-token") {
+        return "Couldn't find your security key. Make sure it's plugged in, then try again."
+            .to_string();
+    }
+
     // FIDO2 enrollment failures (`enroll_fido2_key`'s own body — its
     // transient temp key file, its `systemd-cryptenroll` call, and its token
     // export/import/parse helpers) — checked first since several of these

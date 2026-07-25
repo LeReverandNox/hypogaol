@@ -95,3 +95,83 @@ fn create_device_help_lists_path_as_positional() {
     assert!(help.contains("<PATH>"));
     assert!(!help.contains("--path"));
 }
+
+#[test]
+fn enroll_help_lists_path_as_positional_and_label_as_a_flag() {
+    let help = help_text(&["tomb-fido2", "enroll", "--help"]);
+    assert!(help.contains("<PATH>"));
+    assert!(!help.contains("--path"));
+    assert!(help.contains("--label"));
+}
+
+#[test]
+fn enroll_help_lists_the_explicit_device_selection_flags() {
+    let help = help_text(&["tomb-fido2", "enroll", "--help"]);
+    assert!(help.contains("--fido2-device"));
+    assert!(help.contains("--unlock-fido2-device"));
+}
+
+#[test]
+fn create_file_help_lists_the_fido2_device_flag() {
+    let help = help_text(&["tomb-fido2", "create", "file", "--help"]);
+    assert!(help.contains("--fido2-device"));
+}
+
+#[test]
+fn create_device_help_lists_the_fido2_device_flag() {
+    let help = help_text(&["tomb-fido2", "create", "device", "--help"]);
+    assert!(help.contains("--fido2-device"));
+}
+
+#[test]
+fn enroll_rejects_fido2_device_flag_given_without_its_unlock_pair() {
+    let result = Cli::try_parse_from([
+        "tomb-fido2",
+        "enroll",
+        "/tmp/some-tomb",
+        "--label",
+        "backup",
+        "--fido2-device",
+        "/dev/hidraw1",
+    ]);
+    assert!(
+        result.is_err(),
+        "--fido2-device without --unlock-fido2-device must be a parse error, not a partial fallback"
+    );
+}
+
+#[test]
+fn enroll_rejects_unlock_fido2_device_flag_given_without_its_pair() {
+    let result = Cli::try_parse_from([
+        "tomb-fido2",
+        "enroll",
+        "/tmp/some-tomb",
+        "--label",
+        "backup",
+        "--unlock-fido2-device",
+        "/dev/hidraw0",
+    ]);
+    assert!(
+        result.is_err(),
+        "--unlock-fido2-device without --fido2-device must be a parse error, not a partial fallback"
+    );
+}
+
+#[test]
+fn enroll_accepts_both_explicit_device_flags_together() {
+    let result = Cli::try_parse_from([
+        "tomb-fido2",
+        "enroll",
+        "/tmp/some-tomb",
+        "--label",
+        "backup",
+        "--fido2-device",
+        "/dev/hidraw1",
+        "--unlock-fido2-device",
+        "/dev/hidraw0",
+    ]);
+    assert!(
+        result.is_ok(),
+        "expected --fido2-device and --unlock-fido2-device together to parse successfully"
+    );
+}

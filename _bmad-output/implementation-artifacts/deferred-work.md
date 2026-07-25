@@ -45,3 +45,7 @@
 
 - TOCTOU race on `base.exists()` between concurrent invocations, plus the pre-existing (Story 1.7-established) convention of swallowing compensating-cleanup failures (`umount`/`remove_dir` after a chown/chmod failure) so a partial failure can silently leave a root-owned filesystem mounted — pre-existing pattern reused per this story's own Dev Notes instruction, not a new deviation. [src/adapters/exec/mod.rs:981-1097]
 - Once `close` (Story 3.1) exists, if it doesn't `rmdir` the plain-basename mount-point directory after unmounting, re-unlocking the same tomb will permanently fall back to a suffixed name — explicitly out of this story's scope per its own Dev Notes; flag for Story 3.1's scoping. [src/adapters/exec/mod.rs:157-184]
+
+## Deferred from: code review of 2-1-enroll-an-additional-fido2-key (2026-07-25)
+
+- `wait_for_enough_fido2_devices` blocks forever with no timeout, and can't distinguish "no device plugged in yet" from "a device is present but not enumerating due to a permissions/udev problem" — both print an identical, endlessly-repeating wait message with no escalation path short of killing the process. Deferred: blocking-forever is the explicitly-decided replacement for the old "fails immediately" behavior per the already-resolved architect consultation; the permission-vs-absence ambiguity is the same known device-permission gap class already flagged in Story 1.6 — not new, not blocking. [src/adapters/exec/mod.rs:442-461]
