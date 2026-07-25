@@ -43,7 +43,7 @@ enum Commands {
         path: PathBuf,
 
         /// Label for the new key, shown later when listing enrolled keys
-        #[arg(long)]
+        #[arg(long, value_parser = parse_label)]
         label: String,
 
         /// Hidraw path (e.g. /dev/hidraw1) of the new security key to enroll
@@ -106,6 +106,16 @@ enum CreateMode {
         #[arg(long)]
         fido2_device: Option<PathBuf>,
     },
+}
+
+/// Rejects an empty or whitespace-only label — a blank label would silently
+/// defeat AD-2's whole point of telling enrolled keys apart later.
+pub fn parse_label(input: &str) -> Result<String, String> {
+    if input.trim().is_empty() {
+        Err("label must not be empty".to_string())
+    } else {
+        Ok(input.to_string())
+    }
 }
 
 /// Parses a size string with an optional K/M/G/T suffix (binary, powers of
@@ -275,12 +285,14 @@ fn run_unlock(path: PathBuf) {
 
 /// Builds the adapter, runs `enroll::run`, and reports the result. Mirrors
 /// `run_unlock`'s shape: preflight check first, then a plain-language intro
-/// (FR5/NFR3). The step-by-step "plug in your existing key" / "now also plug
-/// in the new one" prompts happen inside `Fido2Backend::enroll_fido2_key`
-/// itself (it's the only layer that can identify which physical key is
-/// which, via `fido2-token -L`), and `systemd-cryptenroll`'s own untranslated
-/// touch/PIN prompt text still appears as-is via inherited stdio, the same
-/// accepted limitation `run_unlock` documents for its own prompt.
+/// (FR5/NFR3). The device-selection prompts (waiting for both keys to be
+/// plugged in simultaneously, then "Which is your EXISTING key?"/"Which is
+/// your NEW key?" by numbered index) happen inside
+/// `Fido2Backend::enroll_fido2_key` itself (it's the only layer that can
+/// identify which physical key is which, via `fido2-token -L`), and
+/// `systemd-cryptenroll`'s own untranslated touch/PIN prompt text still
+/// appears as-is via inherited stdio, the same accepted limitation
+/// `run_unlock` documents for its own prompt.
 fn run_enroll(path: PathBuf, label: String, fido2_selection: Fido2DeviceSelection) {
     let adapter = ExecAdapter::default();
 
