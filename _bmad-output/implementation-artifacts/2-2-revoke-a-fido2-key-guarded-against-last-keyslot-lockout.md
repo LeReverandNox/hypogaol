@@ -4,7 +4,7 @@ baseline_commit: 20cd6f5
 
 # Story 2.2: Revoke a FIDO2 Key, Guarded Against Last-Keyslot Lockout
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -64,6 +64,22 @@ so that a lost or compromised key stops being able to unlock my tomb.
     - `revoke_aborts_on_the_last_remaining_key`: create a tomb (one key), attempt `revoke::run` targeting that key's label, assert it returns `DomainError::LastKeyslotGuard`, then assert the tomb is still unlockable via `unlock::run` (AC #2's explicit "volume remains unlockable").
     - No separate device-backed variant needed (AC #5) — `revoke::run` has no target-type branch to test around, confirmed by inspection (same reasoning as `enroll`'s AC #5).
   - [x] Confirm `cargo build --lib`, `make test` (`cargo test --lib --test unit`), `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check` all stay green — done, all four pass (74/74 unit tests). `make test-hardware` run by the user (root + two physical FIDO2 keys) — all scenarios passing, including this story's two new ones.
+
+### Review Findings
+
+- [x] [Review][Decision] Add a confirmation prompt before revoke executes — no AC requires it, but revoke is an irreversible, security-relevant action with no "are you sure" step (unlike `create`'s wipe-confirmation gate); the last-keyslot guard only covers the lockout case, not a mistaken `--label`/path targeting a different real key. **Resolved: add it now.** `run_revoke` prompts "Type \"yes\" to continue" naming the label/path before calling `revoke::run`, mirroring `confirm_device_wipe`'s pattern (`confirms_revoke`/`confirm_revoke` in `src/cli/main.rs`, unit-tested in `tests/unit/cli.rs`).
+
+- [x] [Review][Patch] No unit test coverage for the three new `ux.rs` translation branches (`KeyNotFound`, the `luksDump` bucket, the `luksKillSlot`/`token remove` bucket) [src/cli/ux.rs] — fixed: added `translates_key_not_found`, `translates_adapter_failure_luks_dump_read_failure_as_workflow_neutral`, `translates_adapter_failure_revoke_removal_failure_as_revoke_specific` in `tests/unit/ux.rs`
+- [x] [Review][Patch] Hardware test asserts key-label survival via raw substring search on `luksDump` output instead of parsing the JSON `key_label` field [tests/hardware/main.rs] — fixed: `revoke_removes_a_key_without_affecting_others` now asserts on the parsed `KeyslotInfo.key_label` from `adapter.list_fido2_keyslots`, dropping the raw `luksDump` text search entirely
+- [x] [Review][Patch] `top_level_help_lists_both_subcommands` test is stale — still only checks `create`/`unlock`, doesn't cover `enroll`/`revoke` despite its "both" name [tests/unit/cli.rs] — fixed: renamed to `top_level_help_lists_all_subcommands`, now asserts all four
+- [x] [Review][Patch] New `revoke` unit tests assert `list_fido2_keyslots` is called twice, but the fake returns a static snapshot both times, so AC #3's "live, never cached" guarantee isn't actually exercised [tests/unit/revoke.rs] — fixed: added `FakeLuksBackend::with_keyslots_sequence` (`tests/unit/fakes.rs`) and `guard_decision_uses_the_fresh_recount_not_the_earlier_label_resolution_view`, which returns a *different* keyslot count on the guard's second read to prove it governs the decision
+
+- [x] [Review][Defer] Second `list_fido2_keyslots` read (inside `remove_keyslot_guarded`) re-checks the keyslot number is still live but never re-verifies the label still matches it [src/domain/workflows/revoke.rs, src/domain/keyslot_guard.rs] — deferred, pre-existing multi-read pattern in a single-user local CLI, out of this story's scope
+- [x] [Review][Defer] Two live keyslots sharing the same `key_label` resolve silently to the first match (`find()`) [src/domain/workflows/revoke.rs] — deferred, requires bypassing enroll's own uniqueness enforcement; pre-existing invariant gap
+- [x] [Review][Defer] Two `systemd-fido2` tokens referencing the same live keyslot number produce a non-deterministic reported label (HashMap iteration order) [src/adapters/exec/mod.rs] — deferred, pre-existing dedup logic, corrupted-state-only
+- [x] [Review][Defer] `parse_label` doesn't trim whitespace; a trailing-space label becomes practically unrevocable since lookup is exact-match [src/cli/main.rs] — deferred, pre-existing bug shared with `enroll`, fix would need to touch out-of-scope code
+- [x] [Review][Defer] Unsanitized `--label` value interpolated into terminal/error output (control-character risk) [src/cli/main.rs, src/cli/ux.rs] — deferred, pre-existing, low impact for a single-user local CLI
+- [x] [Review][Defer] `run_revoke` calls `preflight::check` before `revoke::run` also calls it internally — double `cryptsetup luksDump` subprocess spawn per invocation [src/cli/main.rs, src/domain/workflows/revoke.rs] — deferred, pre-existing pattern shared with `enroll`/`unlock`
 
 ## Dev Notes
 
@@ -137,3 +153,4 @@ so that a lost or compromised key stops being able to unlock my tomb.
 
 - 2026-07-26: Implemented revoke end-to-end (Tasks 1-5): `KeyslotInfo.key_label` + `DomainError::KeyNotFound`, `domain::workflows::revoke::run` (thin orchestration over `list_fido2_keyslots`/`keyslot_guard::remove_keyslot_guarded`), the `revoke` CLI subcommand, two real `ux.rs` marker-bleed bugs fixed (revoke's own `luksDump`/`luksKillSlot`/`token remove` failures were being mislabeled as enrollment or touch/PIN errors), and full unit test coverage. `cargo build`/`test`/`clippy`/`fmt` all green (74/74 unit tests).
 - 2026-07-26: `make test-hardware` run by the user with two physical FIDO2 keys — all scenarios pass, including this story's two new ones (`revoke_removes_a_key_without_affecting_others`, `revoke_aborts_on_the_last_remaining_key`). Hardware-verified.
+- 2026-07-26: Code review (Blind Hunter, Edge Case Hunter, Acceptance Auditor). Added a `confirm_revoke`/`confirms_revoke` yes-confirmation gate to `run_revoke` (`src/cli/main.rs`) per the resolved decision-needed finding. Applied all 4 patch findings: 3 new `ux.rs` translation tests, hardware test now asserts on parsed `key_label` instead of raw text search, `top_level_help_lists_all_subcommands` covers all 4 subcommands, and a new `revoke` unit test (`FakeLuksBackend::with_keyslots_sequence`) proves the guard's recount — not the label-resolution read — governs the last-keyslot decision. 6 pre-existing/out-of-scope items deferred to `deferred-work.md`. `cargo build`/`test`/`clippy`/`fmt` all green (79/79 unit tests).

@@ -62,7 +62,7 @@ development_status:
 
   epic-2: in-progress
   2-1-enroll-an-additional-fido2-key: done
-  2-2-revoke-a-fido2-key-guarded-against-last-keyslot-lockout: review
+  2-2-revoke-a-fido2-key-guarded-against-last-keyslot-lockout: done
   epic-2-retrospective: optional
 
   epic-3: backlog
