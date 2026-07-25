@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use tomb_fido2::domain::errors::DomainError;
 use tomb_fido2::domain::types::{Filesystem, KeyMetadata, KeyslotInfo, KeyslotRef, MapperHandle};
-use tomb_fido2::ports::fido2_backend::Fido2Backend;
+use tomb_fido2::ports::fido2_backend::{Fido2Backend, Fido2DeviceSelection};
 use tomb_fido2::ports::filesystem_backend::FilesystemBackend;
 use tomb_fido2::ports::luks_backend::LuksBackend;
 
@@ -207,6 +207,7 @@ impl Fido2Backend for FakeFido2Backend {
         &self,
         _mapper: &MapperHandle,
         _metadata: KeyMetadata,
+        _selection: Fido2DeviceSelection,
     ) -> Result<(), DomainError> {
         self.log.borrow_mut().push("enroll_fido2_key".to_string());
         if self.fail_at == Some("enroll_fido2_key") {
