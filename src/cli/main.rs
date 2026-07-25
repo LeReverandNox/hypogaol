@@ -324,11 +324,44 @@ fn run_enroll(path: PathBuf, label: String, fido2_selection: Fido2DeviceSelectio
     }
 }
 
+/// Whether a line the user typed at the revoke-confirmation prompt counts as
+/// consent — exactly `yes`, ignoring surrounding whitespace/newline. Split
+/// out from `confirm_revoke` so this comparison is unit-testable without
+/// going through real stdin. Mirrors `confirms_wipe`'s convention.
+pub fn confirms_revoke(input: &str) -> bool {
+    input.trim() == "yes"
+}
+
+/// Prints the revoke warning naming `label`/`path` and reads a line from
+/// stdin, requiring the user to type exactly `yes` to proceed. Revoke is
+/// irreversible (the token and keyslot are gone once removed) and has no
+/// other confirmation gate — a typo'd `--label` that happens to match a
+/// different real, enrolled key would otherwise proceed straight to removal
+/// with no warning. Deliberately interactive rather than a scriptable
+/// `--confirm`/`--yes` flag, same reasoning as `confirm_device_wipe`.
+fn confirm_revoke(label: &str, path: &Path) -> bool {
+    println!(
+        "WARNING: this will permanently revoke key \"{label}\" from {}.",
+        path.display()
+    );
+    print!("Type \"yes\" to continue: ");
+    let _ = io::stdout().flush();
+
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).is_ok() && confirms_revoke(&input)
+}
+
 /// Builds the adapter, runs `revoke::run`, and reports the result. Mirrors
 /// `run_enroll`'s shape: preflight check first, then a plain-language intro
 /// (FR5/NFR3). Unlike `enroll`, revoke never touches a physical key, so there
-/// is no touch/PIN prompt to warn about beforehand.
+/// is no touch/PIN prompt to warn about beforehand — but it does need its own
+/// confirmation gate (see `confirm_revoke`).
 fn run_revoke(path: PathBuf, label: String) {
+    if !confirm_revoke(&label, &path) {
+        println!("Revoke cancelled.");
+        return;
+    }
+
     let adapter = ExecAdapter::default();
 
     if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {

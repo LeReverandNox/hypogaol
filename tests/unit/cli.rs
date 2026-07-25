@@ -1,5 +1,5 @@
 use clap::Parser;
-use tomb_fido2::cli::main::{confirms_wipe, parse_size, Cli};
+use tomb_fido2::cli::main::{confirms_revoke, confirms_wipe, parse_size, Cli};
 use tomb_fido2::domain::workflows::create::MIN_TOMB_SIZE_BYTES;
 
 #[test]
@@ -54,6 +54,18 @@ fn confirms_wipe_requires_exactly_yes() {
     assert!(!confirms_wipe("no"));
 }
 
+#[test]
+fn confirms_revoke_requires_exactly_yes() {
+    assert!(confirms_revoke("yes"));
+    assert!(confirms_revoke("yes\n"));
+    assert!(confirms_revoke("  yes  "));
+    assert!(!confirms_revoke("Yes"));
+    assert!(!confirms_revoke("YES"));
+    assert!(!confirms_revoke("y"));
+    assert!(!confirms_revoke(""));
+    assert!(!confirms_revoke("no"));
+}
+
 fn help_text(args: &[&str]) -> String {
     match Cli::try_parse_from(args) {
         Ok(_) => panic!("expected --help to short-circuit parsing with a clap::Error"),
@@ -62,10 +74,12 @@ fn help_text(args: &[&str]) -> String {
 }
 
 #[test]
-fn top_level_help_lists_both_subcommands() {
+fn top_level_help_lists_all_subcommands() {
     let help = help_text(&["tomb-fido2", "--help"]);
     assert!(help.contains("create"));
     assert!(help.contains("unlock"));
+    assert!(help.contains("enroll"));
+    assert!(help.contains("revoke"));
 }
 
 #[test]
