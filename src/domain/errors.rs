@@ -37,4 +37,7 @@ pub enum DomainError {
 
     #[error("{0}")]
     AdapterFailure(String),
+
+    #[error("no FIDO2 key labeled {0:?} is enrolled on this tomb")]
+    KeyNotFound(String),
 }

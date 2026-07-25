@@ -55,4 +55,5 @@ pub struct KeyslotRef(pub u32);
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct KeyslotInfo {
     pub keyslot: KeyslotRef,
+    pub key_label: String,
 }

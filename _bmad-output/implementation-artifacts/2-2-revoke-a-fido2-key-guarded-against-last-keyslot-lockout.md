@@ -24,11 +24,11 @@ so that a lost or compromised key stops being able to unlock my tomb.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Give `KeyslotInfo` enough identity to target a key by label, and add a "key not enrolled" domain error (AC: #4)
-  - [ ] `src/domain/types.rs`: add `pub key_label: String` to `KeyslotInfo`. This is a required field addition, not additive-only — every existing construction site must be updated (see Project Structure Notes).
-  - [ ] `src/adapters/exec/mod.rs`'s `list_fido2_keyslots`: for each `systemd-fido2` token contributing a live keyslot, also read `token.get("key_label").and_then(Value::as_str)`. Default to an empty string (`.unwrap_or_default()`) rather than erroring if absent — a foreign/corrupted token missing this field should never crash a listing, and an empty label can never collide with a user-supplied `--label` anyway (CLI's `parse_label` already rejects empty/whitespace-only labels, reused for revoke — see Task 3).
-  - [ ] `src/domain/errors.rs`: add `KeyNotFound(String)` to `DomainError` (carries the label that wasn't found), e.g. `#[error("no FIDO2 key labeled {0:?} is enrolled on this tomb")] KeyNotFound(String)`.
-  - [ ] `src/cli/ux.rs`'s `translate`: add the new match arm (the exhaustive match won't compile until you do) — plain-language, e.g. "No enrolled key is labeled {label:?}. Check the label (case-sensitive) and try again."
+- [x] Task 1: Give `KeyslotInfo` enough identity to target a key by label, and add a "key not enrolled" domain error (AC: #4)
+  - [x] `src/domain/types.rs`: add `pub key_label: String` to `KeyslotInfo`. This is a required field addition, not additive-only — every existing construction site must be updated (see Project Structure Notes).
+  - [x] `src/adapters/exec/mod.rs`'s `list_fido2_keyslots`: for each `systemd-fido2` token contributing a live keyslot, also read `token.get("key_label").and_then(Value::as_str)`. Default to an empty string (`.unwrap_or_default()`) rather than erroring if absent — a foreign/corrupted token missing this field should never crash a listing, and an empty label can never collide with a user-supplied `--label` anyway (CLI's `parse_label` already rejects empty/whitespace-only labels, reused for revoke — see Task 3).
+  - [x] `src/domain/errors.rs`: add `KeyNotFound(String)` to `DomainError` (carries the label that wasn't found), e.g. `#[error("no FIDO2 key labeled {0:?} is enrolled on this tomb")] KeyNotFound(String)`.
+  - [x] `src/cli/ux.rs`'s `translate`: add the new match arm (the exhaustive match won't compile until you do) — plain-language, e.g. "No enrolled key is labeled {label:?}. Check the label (case-sensitive) and try again."
 - [ ] Task 2: Implement `domain::workflows::revoke::run` (`src/domain/workflows/revoke.rs`, currently `pub fn run() -> Result<(), DomainError> { todo!() }`) (AC: #1, #2, #3, #4, #5)
   - [ ] Signature: `pub fn run(path: &Path, key_label: &str, luks: &dyn LuksBackend, fido2: &dyn Fido2Backend, fs: &dyn FilesystemBackend) -> Result<(), DomainError>`. Unlike `enroll::run`'s `key_label: String`, `&str` is enough here — revoke only compares it, never stores or serializes it.
   - [ ] Call `preflight::check(luks, fido2, fs)?` first (AD-4), like every other workflow.
@@ -111,4 +111,11 @@ so that a lost or compromised key stops being able to unlock my tomb.
 
 ### Completion Notes List
 
+- Task 1: Added `key_label: String` to `KeyslotInfo`; `list_fido2_keyslots` now reads `key_label` from each token (defaulting to `""` if absent); added `DomainError::KeyNotFound(String)` and its `ux::translate` arm.
+
 ### File List
+
+- src/domain/types.rs
+- src/adapters/exec/mod.rs
+- src/domain/errors.rs
+- src/cli/ux.rs

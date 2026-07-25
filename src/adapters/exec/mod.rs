@@ -939,8 +939,14 @@ impl LuksBackend for ExecAdapter {
                     .iter()
                     .any(|info: &KeyslotInfo| info.keyslot == KeyslotRef(slot_num));
                 if live_keyslots.contains(&slot_num) && !already_counted {
+                    let key_label = token
+                        .get("key_label")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string();
                     keyslots.push(KeyslotInfo {
                         keyslot: KeyslotRef(slot_num),
+                        key_label,
                     });
                 }
             }

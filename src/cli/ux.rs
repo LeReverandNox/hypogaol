@@ -56,6 +56,9 @@ pub fn translate(err: &DomainError) -> String {
              permanently, so this was refused."
                 .to_string()
         }
+        DomainError::KeyNotFound(label) => format!(
+            "No enrolled key is labeled {label:?}. Check the label (case-sensitive) and try again."
+        ),
         DomainError::AdapterFailure(inner) => translate_adapter_failure(inner),
     }
 }
