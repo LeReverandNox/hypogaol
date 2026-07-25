@@ -702,6 +702,17 @@ fn unlock_falls_back_to_a_suffixed_mount_point_on_a_basename_collision() {
     cleanup_a.run();
 }
 
+/// Blocks on stdin until the tester presses Enter, after printing `prompt` —
+/// used only to pace a manual physical-key swap; never reads or echoes
+/// anything secret (AD-3 governs PIN/touch material, not this plain
+/// orchestration step).
+fn pause(prompt: &str) {
+    println!("{prompt}");
+    println!("Press Enter once ready.");
+    let mut input = String::new();
+    let _ = std::io::stdin().read_line(&mut input);
+}
+
 /// End-to-end verification that `enroll::run` adds a genuinely independent
 /// second key rather than corrupting the primary's own metadata (Story 2.1,
 /// AC #1/#2/#3) — the concrete regression test for Task 1's before/after
@@ -777,8 +788,14 @@ fn enroll_adds_an_independent_second_key_without_corrupting_the_primary() {
     // Confirm the primary's original label survived untouched and the newly
     // enrolled key's label is present — not swapped or overwritten — the
     // concrete regression check for Task 1's before/after token-diffing fix.
+    // Deliberately `--dump-json-metadata`, not plain `luksDump`: cryptsetup's
+    // human-readable dump only renders its own known fields for external
+    // token types and never surfaces our custom `key_label`/`filesystem`/
+    // `created_at` additions, so a plain-dump substring check can never find
+    // them regardless of whether the write actually succeeded.
     let dump = Command::new("cryptsetup")
         .arg("luksDump")
+        .arg("--dump-json-metadata")
         .arg(&path)
         .output()
         .expect("failed to run cryptsetup luksDump");
@@ -793,13 +810,24 @@ fn enroll_adds_an_independent_second_key_without_corrupting_the_primary() {
         "expected the newly enrolled key's \"backup\" label to be present, got:\n{dump_text}"
     );
 
-    // Both keys must independently unlock the tomb (AC #2).
+    // Both keys must independently unlock the tomb (AC #2). `unlock` relies
+    // entirely on cryptsetup's own automatic FIDO2 token-matching (no
+    // explicit device flag, by design — see the story's "Architect
+    // consultation resolved" note) — it tries every enrolled token against
+    // whatever's currently plugged in and succeeds on the first match. With
+    // *both* physical keys left plugged in, that means the second attempt
+    // below would silently re-prove the same key as the first and never
+    // actually exercise the other one. Forcing only one candidate to be
+    // physically present per attempt is the only way to prove independence,
+    // hence the pauses instructing the tester to swap keys by hand.
+    pause("Unplug the SECOND (backup) key now, leaving only the PRIMARY key plugged in.");
     println!("Unlocking with the PRIMARY key — touch it when prompted.");
     let mountpoint = unlock::run(&path, &adapter, &adapter, &adapter)
         .expect("unlock::run with the primary key failed");
     let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
     UnlockCleanup::new(mountpoint, name.clone()).run();
 
+    pause("Now unplug the PRIMARY key and plug in ONLY the SECOND (backup) key.");
     println!("Unlocking with the SECOND (backup) key — touch it when prompted.");
     let mountpoint = unlock::run(&path, &adapter, &adapter, &adapter)
         .expect("unlock::run with the second key failed");
