@@ -9,8 +9,8 @@
 
 use crate::domain::errors::DomainError;
 
-/// Translates any `DomainError` reachable from `create`/`unlock` into a
-/// plain-language message. Exhaustive by construction: a 9th `DomainError`
+/// Translates any `DomainError` reachable from `create`/`unlock`/`enroll`
+/// into a plain-language message. Exhaustive by construction: a 9th `DomainError`
 /// variant added by a later epic fails to compile here until it's given a
 /// translation, so jargon can never silently leak through an unhandled arm.
 pub fn translate(err: &DomainError) -> String {
@@ -62,9 +62,9 @@ pub fn translate(err: &DomainError) -> String {
 
 /// `AdapterFailure`'s message text varies by call site (it is the one
 /// `DomainError` variant with no structured fields). Scope is bounded to
-/// `create`'s and `unlock`'s own call graphs, so the reachable message shapes
-/// are finite — each category below is matched by markers that appear
-/// verbatim in the real call sites (`src/adapters/exec/mod.rs`,
+/// `create`'s, `unlock`'s, and `enroll`'s own call graphs, so the reachable
+/// message shapes are finite — each category below is matched by markers
+/// that appear verbatim in the real call sites (`src/adapters/exec/mod.rs`,
 /// `src/domain/mapping_name.rs`) and translated as a whole, rather than
 /// chasing a bespoke rewrite of every exact string.
 fn translate_adapter_failure(inner: &str) -> String {
@@ -75,7 +75,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // failed", or the token-import call's `{cmd:?}` Debug-quoted
     // `"token" "import"`), which would otherwise be misclassified as a
     // bootstrap/open subprocess failure below.
-    const ENROLLMENT_MARKERS: [&str; 10] = [
+    const ENROLLMENT_MARKERS: [&str; 11] = [
         "systemd-cryptenroll",
         "temporary key file",
         "transient bootstrap passphrase",
@@ -86,6 +86,7 @@ fn translate_adapter_failure(inner: &str) -> String {
         "fido2-credential",
         "luksDump",
         "keyslot id",
+        "fido2-token",
     ];
     if ENROLLMENT_MARKERS
         .iter()

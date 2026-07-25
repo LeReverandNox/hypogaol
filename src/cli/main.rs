@@ -8,7 +8,9 @@ use crate::cli::ux;
 use crate::domain::preflight;
 use crate::domain::types::{CreateTarget, Filesystem};
 use crate::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
+use crate::domain::workflows::enroll;
 use crate::domain::workflows::unlock;
+use crate::ports::fido2_backend::Fido2DeviceSelection;
 
 // `name`/`version`/`about` are populated by clap from this crate's own
 // `CARGO_PKG_*` metadata (AD-13) — never a hardcoded product-name literal.
@@ -33,6 +35,28 @@ enum Commands {
         #[arg(allow_hyphen_values = true)]
         path: PathBuf,
     },
+
+    /// Enroll an additional FIDO2 key on an existing tomb
+    Enroll {
+        /// Path to the existing tomb's backing file or device
+        #[arg(allow_hyphen_values = true)]
+        path: PathBuf,
+
+        /// Label for the new key, shown later when listing enrolled keys
+        #[arg(long)]
+        label: String,
+
+        /// Hidraw path (e.g. /dev/hidraw1) of the new security key to enroll
+        /// — for unattended/scripted use. Must be given together with
+        /// --unlock-fido2-device; omit both to be prompted interactively.
+        #[arg(long, requires = "unlock_fido2_device")]
+        fido2_device: Option<PathBuf>,
+
+        /// Hidraw path of the already-enrolled security key to authenticate
+        /// this enrollment with. Must be given together with --fido2-device.
+        #[arg(long, requires = "fido2_device")]
+        unlock_fido2_device: Option<PathBuf>,
+    },
 }
 
 // AD-9 requires the CLI to resolve an explicit target mode, never inferred by
@@ -54,6 +78,11 @@ enum CreateMode {
         /// Filesystem to create inside the tomb
         #[arg(long, value_enum, default_value = "ext4")]
         filesystem: CliFilesystem,
+
+        /// Hidraw path (e.g. /dev/hidraw1) of the security key to enroll —
+        /// for unattended/scripted use. Omit to be prompted interactively.
+        #[arg(long)]
+        fido2_device: Option<PathBuf>,
     },
 
     /// Create a new tomb on an existing raw device or partition
@@ -71,6 +100,11 @@ enum CreateMode {
         /// Filesystem to create inside the tomb
         #[arg(long, value_enum, default_value = "ext4")]
         filesystem: CliFilesystem,
+
+        /// Hidraw path (e.g. /dev/hidraw1) of the security key to enroll —
+        /// for unattended/scripted use. Omit to be prompted interactively.
+        #[arg(long)]
+        fido2_device: Option<PathBuf>,
     },
 }
 
@@ -106,6 +140,35 @@ pub fn parse_size(input: &str) -> Result<u64, String> {
     }
 
     Ok(bytes)
+}
+
+/// Builds the `Fido2DeviceSelection` for `create`'s single `--fido2-device`
+/// flag: `Explicit` (no existing-key role to fill) when given, `Interactive`
+/// otherwise.
+fn fido2_selection_for_create(fido2_device: Option<PathBuf>) -> Fido2DeviceSelection {
+    match fido2_device {
+        Some(new) => Fido2DeviceSelection::Explicit {
+            new,
+            existing: None,
+        },
+        None => Fido2DeviceSelection::Interactive,
+    }
+}
+
+/// Builds the `Fido2DeviceSelection` for `enroll`'s pair of flags. Clap's
+/// `requires` attributes on both fields already enforce all-or-nothing, so
+/// `fido2_device.is_some()` implies `unlock_fido2_device.is_some()` here.
+fn fido2_selection_for_enroll(
+    fido2_device: Option<PathBuf>,
+    unlock_fido2_device: Option<PathBuf>,
+) -> Fido2DeviceSelection {
+    match fido2_device {
+        Some(new) => Fido2DeviceSelection::Explicit {
+            new,
+            existing: unlock_fido2_device,
+        },
+        None => Fido2DeviceSelection::Interactive,
+    }
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -153,14 +216,27 @@ fn confirm_device_wipe(path: &Path) -> bool {
 /// the Device arm passes `false` when the user already declined the wipe
 /// confirmation, so the message doesn't imply work started when the call is
 /// about to fail immediately on `domain`'s own confirmation check.
-fn run_create(target: CreateTarget, filesystem: Filesystem, display_path: &str, announce: bool) {
+fn run_create(
+    target: CreateTarget,
+    filesystem: Filesystem,
+    fido2_selection: Fido2DeviceSelection,
+    display_path: &str,
+    announce: bool,
+) {
     let adapter = ExecAdapter::default();
 
     if announce {
         println!("Creating tomb at {display_path}...");
     }
 
-    if let Err(err) = create::run(target, filesystem, &adapter, &adapter, &adapter) {
+    if let Err(err) = create::run(
+        target,
+        filesystem,
+        fido2_selection,
+        &adapter,
+        &adapter,
+        &adapter,
+    ) {
         eprintln!("{}", ux::translate(&err));
         std::process::exit(1);
     }
@@ -197,6 +273,33 @@ fn run_unlock(path: PathBuf) {
     }
 }
 
+/// Builds the adapter, runs `enroll::run`, and reports the result. Mirrors
+/// `run_unlock`'s shape: preflight check first, then a plain-language intro
+/// (FR5/NFR3). The step-by-step "plug in your existing key" / "now also plug
+/// in the new one" prompts happen inside `Fido2Backend::enroll_fido2_key`
+/// itself (it's the only layer that can identify which physical key is
+/// which, via `fido2-token -L`), and `systemd-cryptenroll`'s own untranslated
+/// touch/PIN prompt text still appears as-is via inherited stdio, the same
+/// accepted limitation `run_unlock` documents for its own prompt.
+fn run_enroll(path: PathBuf, label: String, fido2_selection: Fido2DeviceSelection) {
+    let adapter = ExecAdapter::default();
+
+    if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
+        eprintln!("{}", ux::translate(&err));
+        std::process::exit(1);
+    }
+
+    println!("Enrolling a new security key on this tomb. Follow the prompts below.");
+
+    match enroll::run(&path, label, fido2_selection, &adapter, &adapter, &adapter) {
+        Ok(()) => println!("New key enrolled."),
+        Err(err) => {
+            eprintln!("{}", ux::translate(&err));
+            std::process::exit(1);
+        }
+    }
+}
+
 pub fn run() {
     let cli = Cli::parse();
 
@@ -206,15 +309,18 @@ pub fn run() {
                 path,
                 size,
                 filesystem,
+                fido2_device,
             } => {
                 let display_path = path.display().to_string();
                 let target = CreateTarget::File { path, size };
-                run_create(target, filesystem.into(), &display_path, true);
+                let selection = fido2_selection_for_create(fido2_device);
+                run_create(target, filesystem.into(), selection, &display_path, true);
             }
             CreateMode::Device {
                 path,
                 size,
                 filesystem,
+                fido2_device,
             } => {
                 let confirmed = confirm_device_wipe(&path);
                 let display_path = path.display().to_string();
@@ -223,9 +329,25 @@ pub fn run() {
                     size,
                     confirmed,
                 };
-                run_create(target, filesystem.into(), &display_path, confirmed);
+                let selection = fido2_selection_for_create(fido2_device);
+                run_create(
+                    target,
+                    filesystem.into(),
+                    selection,
+                    &display_path,
+                    confirmed,
+                );
             }
         },
         Commands::Unlock { path } => run_unlock(path),
+        Commands::Enroll {
+            path,
+            label,
+            fido2_device,
+            unlock_fido2_device,
+        } => {
+            let selection = fido2_selection_for_enroll(fido2_device, unlock_fido2_device);
+            run_enroll(path, label, selection);
+        }
     }
 }
