@@ -728,11 +728,12 @@ fn pause(prompt: &str) {
 ///
 /// Manual-only (AD-7, `make test-hardware`): requires root and TWO distinct
 /// physical FIDO2 security keys, each pluggable independently. Touch the
-/// PRIMARY key when `create::run` prompts. When `enroll::run` prompts:
-/// first make sure *only* the PRIMARY key is plugged in and press Enter
-/// (this identifies its hidraw device without touching it); then also plug
-/// in the SECOND (new) key — keep the primary plugged in too — and press
-/// Enter again; `systemd-cryptenroll` then runs with both devices attached,
+/// PRIMARY key when `create::run` prompts. When `enroll::run` prompts: plug
+/// in *both* keys simultaneously and keep them plugged in — the interactive
+/// device-selection flow waits until both are enumerated, then lists them by
+/// index and asks "Which is your EXISTING key?" followed by "Which is your
+/// NEW key?"; answer with the primary's and the backup's numbers
+/// respectively. `systemd-cryptenroll` then runs with both devices attached,
 /// prompting for the primary's touch/PIN to authorize, then the new key's
 /// touch to complete enrollment.
 #[test]
