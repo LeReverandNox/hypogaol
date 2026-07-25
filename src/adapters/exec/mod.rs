@@ -1,6 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
-use std::io::Write;
+use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -10,7 +10,7 @@ use zeroize::Zeroizing;
 
 use crate::domain::errors::DomainError;
 use crate::domain::types::{Filesystem, KeyMetadata, KeyslotInfo, KeyslotRef, MapperHandle};
-use crate::ports::fido2_backend::Fido2Backend;
+use crate::ports::fido2_backend::{Fido2Backend, Fido2DeviceSelection};
 use crate::ports::filesystem_backend::FilesystemBackend;
 use crate::ports::luks_backend::LuksBackend;
 
@@ -374,32 +374,246 @@ fn live_keyslot_numbers(metadata: &Value) -> Result<HashSet<u32>, DomainError> {
         .collect()
 }
 
-fn find_systemd_fido2_token_id(path: &Path) -> Result<String, DomainError> {
+/// All `systemd-fido2` token ids currently present in `path`'s LUKS2 header.
+/// Called both before and after a `systemd-cryptenroll` call so the caller
+/// can diff the two sets and identify exactly which token id is newly
+/// created — the only reliable way to tell "the token just enrolled" apart
+/// from any other `systemd-fido2` token already on the header (a tomb with
+/// two enrolled keys has two of them).
+fn find_systemd_fido2_token_ids(path: &Path) -> Result<HashSet<String>, DomainError> {
     let metadata = dump_json_metadata(path)?;
     let tokens = tokens_object(&metadata)?;
 
-    tokens
+    Ok(tokens
         .iter()
-        .find(|(_, token)| token.get("type").and_then(Value::as_str) == Some("systemd-fido2"))
+        .filter(|(_, token)| token.get("type").and_then(Value::as_str) == Some("systemd-fido2"))
         .map(|(id, _)| id.clone())
-        .ok_or_else(|| {
-            DomainError::AdapterFailure("no systemd-fido2 token found after enrollment".to_string())
+        .collect())
+}
+
+/// One FIDO2 security key as reported by a single `fido2-token -L`
+/// enumeration: its hidraw path (e.g. `/dev/hidraw1`) plus whatever
+/// product/vendor description `fido2-token` prints alongside it. A pure
+/// enumeration query — never requires a touch or PIN.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Fido2Device {
+    path: String,
+    description: String,
+}
+
+/// Every FIDO2 security key currently plugged in, per one `fido2-token -L`
+/// call — a single point-in-time snapshot, in the order `fido2-token`
+/// reports them. This is the "spatial choice" primitive `enroll_fido2_key`'s
+/// device-selection logic is built on: identify devices by what's plugged in
+/// *right now*, never by diffing two enumerations taken before/after a
+/// device is plugged in (that temporal-diff approach was tried and found
+/// racy — see the story's Dev Notes/"Architect consultation resolved").
+fn list_fido2_devices() -> Result<Vec<Fido2Device>, DomainError> {
+    let output = Command::new("fido2-token")
+        .arg("-L")
+        .output()
+        .map_err(|e| DomainError::AdapterFailure(format!("failed to run fido2-token -L: {e}")))?;
+
+    if !output.status.success() {
+        return Err(DomainError::AdapterFailure(format!(
+            "fido2-token -L failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter_map(|line| {
+            line.split_once(':').map(|(path, description)| Fido2Device {
+                path: path.trim().to_string(),
+                description: description.trim().to_string(),
+            })
         })
+        .filter(|device| !device.path.is_empty())
+        .collect())
+}
+
+/// Blocks, polling `fido2-token -L`, until at least `needed` devices are
+/// enumerated — subsumes the "enroll/unlock fails immediately if no key is
+/// plugged in yet" complaint (deferred-work item) for every caller that
+/// needs at least one device present. Prints a friendly wait message only
+/// when the enumerated count changes, so it doesn't spam the terminal every
+/// poll tick.
+fn wait_for_enough_fido2_devices(needed: usize) -> Result<Vec<Fido2Device>, DomainError> {
+    let mut last_seen = usize::MAX;
+    loop {
+        let devices = list_fido2_devices()?;
+        if devices.len() >= needed {
+            return Ok(devices);
+        }
+        if devices.len() != last_seen {
+            let more = needed - devices.len();
+            println!(
+                "Found {} FIDO2 security key{} plugged in — plug in {} more and keep it there.",
+                devices.len(),
+                if devices.len() == 1 { "" } else { "s" },
+                more
+            );
+            last_seen = devices.len();
+        }
+        std::thread::sleep(std::time::Duration::from_millis(500));
+    }
+}
+
+/// Prints every currently-enumerated device, numbered from 1, with its
+/// hidraw path and whatever description `fido2-token -L` exposes — the
+/// user's only way to tell physically-identical keys apart when 3+ are
+/// plugged in at once (a known, accepted limitation; see Dev Notes).
+fn print_numbered_fido2_devices(devices: &[Fido2Device]) {
+    println!("Currently plugged-in FIDO2 security keys:");
+    for (index, device) in devices.iter().enumerate() {
+        println!("  [{}] {} ({})", index + 1, device.path, device.description);
+    }
+}
+
+/// Prompts `prompt`, then blocks for a 1-based index into `devices`,
+/// re-prompting on anything out of range or unparseable. Never reads or
+/// echoes anything secret (AD-3 governs PIN/touch material, not this plain
+/// orchestration step).
+fn prompt_for_device_index(prompt: &str, devices: &[Fido2Device]) -> Result<usize, DomainError> {
+    loop {
+        print!("{prompt} [1-{}]: ", devices.len());
+        let _ = io::stdout().flush();
+
+        let mut input = String::new();
+        if io::stdin().read_line(&mut input).is_err() {
+            return Err(DomainError::AdapterFailure(
+                "failed to read FIDO2 device selection from stdin".to_string(),
+            ));
+        }
+
+        match input.trim().parse::<usize>() {
+            Ok(n) if n >= 1 && n <= devices.len() => return Ok(n - 1),
+            _ => println!("Please enter a number between 1 and {}.", devices.len()),
+        }
+    }
+}
+
+/// Resolves `Fido2DeviceSelection::Interactive` to concrete hidraw paths.
+/// `need_existing` is false for create's bootstrap-enroll call (single "new
+/// key" role only) and true for a standalone enroll authenticating against
+/// an already-enrolled key (both "existing" and "new" roles).
+///
+/// A lone device present when only the "new key" role is needed is
+/// auto-picked with no prompt at all — this is what keeps `create`'s
+/// existing single-key UX unchanged. Otherwise every enumerated device is
+/// listed by index and the user explicitly assigns each needed role; the
+/// same list-and-pick code path handles exactly-2 and N>2 uniformly (no
+/// elimination shortcut).
+fn resolve_interactive_selection(
+    need_existing: bool,
+) -> Result<(String, Option<String>), DomainError> {
+    let needed = if need_existing { 2 } else { 1 };
+    let devices = wait_for_enough_fido2_devices(needed)?;
+
+    if !need_existing && devices.len() == 1 {
+        return Ok((devices[0].path.clone(), None));
+    }
+
+    print_numbered_fido2_devices(&devices);
+
+    let existing_index = if need_existing {
+        Some(prompt_for_device_index(
+            "Which is your EXISTING key?",
+            &devices,
+        )?)
+    } else {
+        None
+    };
+
+    let new_index = loop {
+        let index = prompt_for_device_index("Which is your NEW key?", &devices)?;
+        if Some(index) == existing_index {
+            println!(
+                "That's the same key you picked as the existing one — choose a different index."
+            );
+            continue;
+        }
+        break index;
+    };
+
+    Ok((
+        devices[new_index].path.clone(),
+        existing_index.map(|index| devices[index].path.clone()),
+    ))
+}
+
+/// Resolves `Fido2DeviceSelection::Explicit` to concrete hidraw paths,
+/// validating each given path is currently enumerated before returning (same
+/// before-the-mutating-call discipline as AD-4) rather than letting
+/// `systemd-cryptenroll` fail deep inside with a cryptic error.
+fn resolve_explicit_selection(
+    new: &Path,
+    existing: Option<&Path>,
+    need_existing: bool,
+) -> Result<(String, Option<String>), DomainError> {
+    if need_existing && existing.is_none() {
+        return Err(DomainError::AdapterFailure(
+            "enrolling against an already-enrolled key requires an explicit \
+             --unlock-fido2-device path"
+                .to_string(),
+        ));
+    }
+
+    let devices = list_fido2_devices()?;
+    let new_path = new.display().to_string();
+    if !devices.iter().any(|device| device.path == new_path) {
+        return Err(DomainError::AdapterFailure(format!(
+            "the specified FIDO2 device {new_path} is not currently enumerated by fido2-token -L"
+        )));
+    }
+
+    let existing_path = match existing {
+        Some(existing) => {
+            let existing_path = existing.display().to_string();
+            if !devices.iter().any(|device| device.path == existing_path) {
+                return Err(DomainError::AdapterFailure(format!(
+                    "the specified existing FIDO2 device {existing_path} is not currently \
+                     enumerated by fido2-token -L"
+                )));
+            }
+            Some(existing_path)
+        }
+        None => None,
+    };
+
+    Ok((new_path, existing_path))
+}
+
+/// Resolves `selection` to the concrete `(new_device, existing_device)`
+/// hidraw paths `systemd-cryptenroll` needs — `existing_device` is `Some`
+/// exactly when `need_existing` is true.
+fn resolve_device_selection(
+    selection: &Fido2DeviceSelection,
+    need_existing: bool,
+) -> Result<(String, Option<String>), DomainError> {
+    match selection {
+        Fido2DeviceSelection::Interactive => resolve_interactive_selection(need_existing),
+        Fido2DeviceSelection::Explicit { new, existing } => {
+            resolve_explicit_selection(new, existing.as_deref(), need_existing)
+        }
+    }
 }
 
 impl ExecAdapter {
     /// Writes `metadata`'s fields directly onto the `systemd-fido2` token
-    /// `systemd-cryptenroll` just created (AD-2 — confirmed by Story 1.5's
+    /// identified by `token_id` — the caller (`enroll_fido2_key`) has
+    /// already resolved this to the specific token `systemd-cryptenroll`
+    /// just created via a before/after diff (AD-2 — confirmed by Story 1.5's
     /// Task 1 spike that the plugin tolerates these extra fields).
     fn write_fido2_token_metadata(
         &self,
         path: &Path,
+        token_id: &str,
         metadata: KeyMetadata,
     ) -> Result<(), DomainError> {
-        let token_id = find_systemd_fido2_token_id(path)?;
-
         let export = Command::new("cryptsetup")
-            .args(["token", "export", "--token-id", &token_id])
+            .args(["token", "export", "--token-id", token_id])
             .arg(path)
             .output()
             .map_err(|e| {
@@ -456,13 +670,7 @@ impl ExecAdapter {
 
         run_piping_stdin(
             Command::new("cryptsetup")
-                .args([
-                    "token",
-                    "import",
-                    "--token-id",
-                    &token_id,
-                    "--token-replace",
-                ])
+                .args(["token", "import", "--token-id", token_id, "--token-replace"])
                 .arg(path),
             &payload,
         )
@@ -762,6 +970,14 @@ impl LuksBackend for ExecAdapter {
     }
 
     fn open(&self, path: &Path, name: &str) -> Result<MapperHandle, DomainError> {
+        // Waits until at least one FIDO2 device is enumerated before ever
+        // invoking cryptsetup — without this, unlocking with no key plugged
+        // in yet failed immediately instead of waiting (deferred-work item).
+        // Cryptsetup's own credential-based `--token-only auto` already
+        // disambiguates correctly once at least one device is present, so no
+        // picker/explicit-device flag is needed here, unlike `enroll`.
+        wait_for_enough_fido2_devices(1)?;
+
         // `--token-only` is not optional: without it, `cryptsetup open` falls
         // back to an interactive passphrase prompt instead of the FIDO2
         // PIN/touch flow (confirmed empirically during Story 1.6's hardware
@@ -814,17 +1030,20 @@ impl Fido2Backend for ExecAdapter {
         &self,
         mapper: &MapperHandle,
         metadata: KeyMetadata,
+        selection: Fido2DeviceSelection,
     ) -> Result<(), DomainError> {
-        let passphrase = self
-            .transient_passphrase
-            .borrow_mut()
-            .take()
-            .ok_or_else(|| {
-                DomainError::AdapterFailure(
-                    "no transient bootstrap passphrase available to authenticate FIDO2 enrollment"
-                        .to_string(),
-                )
-            })?;
+        let path = &mapper.source_path;
+
+        // Snapshotted before `systemd-cryptenroll` runs, so the new token can
+        // be identified afterward by set difference rather than picking "the
+        // first" `systemd-fido2` token — a tomb can now carry more than one
+        // (this story's whole point), and picking the wrong one would
+        // silently overwrite an existing key's metadata instead of writing
+        // the new one. Empty for create's bootstrap-enroll call (no token
+        // exists yet), so behavior there is unchanged.
+        let existing_token_ids = find_systemd_fido2_token_ids(path)?;
+
+        let passphrase = self.transient_passphrase.borrow_mut().take();
 
         // `systemd-cryptenroll` doesn't read a piped (non-tty) stdin as a
         // passphrase the way `cryptsetup` does — confirmed empirically: it
@@ -832,34 +1051,90 @@ impl Fido2Backend for ExecAdapter {
         // mechanism and hangs waiting for an agent. `--unlock-key-file` is
         // the documented non-interactive path instead, so the passphrase is
         // written to a tightly-permissioned, promptly-deleted temp file.
-        let key_file =
-            TempKeyFile::create(passphrase.as_bytes()).map_err(DomainError::AdapterFailure)?;
+        //
+        // stdin/stdout/stderr all stay inherited in both branches
+        // (`.status()`, never `.output()`): the unlock credential, when one
+        // exists, travels via `--unlock-key-file` rather than stdin, so the
+        // user's terminal is free to handle systemd-cryptenroll's own FIDO2
+        // touch/PIN prompt normally.
+        let status = match passphrase {
+            Some(passphrase) => {
+                // Only the "new key" role needs filling here — create's
+                // bootstrap passphrase, not a second physical device, is
+                // what authenticates this call.
+                let (new_device, _existing_device) = resolve_device_selection(&selection, false)?;
 
-        // The in-memory passphrase is dropped (zeroized) here — strictly
-        // before `create::run` goes on to call `mkfs` (AC #3, AD-3). The
-        // on-disk copy in `key_file` is wiped by its own Drop impl once this
-        // function returns.
-        drop(passphrase);
+                let key_file = TempKeyFile::create(passphrase.as_bytes())
+                    .map_err(DomainError::AdapterFailure)?;
 
-        // stdin/stdout/stderr all stay inherited: the unlock credential now
-        // travels via --unlock-key-file, so the user's terminal is free to
-        // handle systemd-cryptenroll's own FIDO2 touch/PIN prompt normally.
-        let status = Command::new("systemd-cryptenroll")
-            .arg("--fido2-device=auto")
-            .arg(format!("--unlock-key-file={}", key_file.path.display()))
-            .arg(&mapper.source_path)
-            .status()
-            .map_err(|e| {
-                DomainError::AdapterFailure(format!("failed to run systemd-cryptenroll: {e}"))
-            })?;
+                // The in-memory passphrase is dropped (zeroized) here —
+                // strictly before `create::run` goes on to call `mkfs` (AC
+                // #3, AD-3). The on-disk copy in `key_file` is wiped by its
+                // own Drop impl once this function returns.
+                drop(passphrase);
+
+                Command::new("systemd-cryptenroll")
+                    .arg(format!("--fido2-device={new_device}"))
+                    .arg(format!("--unlock-key-file={}", key_file.path.display()))
+                    .arg(path)
+                    .status()
+            }
+            None => {
+                // No transient bootstrap passphrase exists (this story's
+                // standalone enroll, as opposed to create's bootstrap-enroll
+                // call). Confirmed on real hardware: `systemd-cryptenroll`
+                // does NOT automatically try an already-enrolled FIDO2 token
+                // to unlock just because no unlock method was given — it
+                // falls back to an interactive passphrase prompt instead,
+                // which can never succeed once the bootstrap passphrase
+                // keyslot has been removed (this tomb has no passphrase
+                // keyslot at all). Per systemd-cryptenroll(1)'s UNLOCKING
+                // section, unlocking via FIDO2 during an enroll call needs
+                // an *explicit* `--unlock-fido2-device=` path — `auto` is
+                // unsupported for it once `--fido2-device=` is also given,
+                // which it always is here (the new key being enrolled).
+                //
+                // Both roles are resolved by a single point-in-time
+                // enumeration plus explicit user choice (or an explicit CLI
+                // flag), never by diffing two enumerations taken before/after
+                // a device is plugged in — that temporal-diff approach is
+                // what produced the "More than one FIDO device found"/hang
+                // failure this design replaces.
+                let (new_device, existing_device) = resolve_device_selection(&selection, true)?;
+                let existing_device = existing_device
+                    .expect("resolve_device_selection guarantees Some when need_existing is true");
+
+                Command::new("systemd-cryptenroll")
+                    .arg(format!("--fido2-device={new_device}"))
+                    .arg(format!("--unlock-fido2-device={existing_device}"))
+                    .arg(path)
+                    .status()
+            }
+        }
+        .map_err(|e| {
+            DomainError::AdapterFailure(format!("failed to run systemd-cryptenroll: {e}"))
+        })?;
 
         if !status.success() {
             return Err(DomainError::AdapterFailure(
-                "systemd-cryptenroll --fido2-device=auto failed".to_string(),
+                "systemd-cryptenroll failed".to_string(),
             ));
         }
 
-        self.write_fido2_token_metadata(&mapper.source_path, metadata)
+        let new_token_ids = find_systemd_fido2_token_ids(path)?;
+        let mut newly_created: Vec<String> = new_token_ids
+            .difference(&existing_token_ids)
+            .cloned()
+            .collect();
+        if newly_created.len() != 1 {
+            return Err(DomainError::AdapterFailure(format!(
+                "expected exactly one new systemd-fido2 token after enrollment, found {}",
+                newly_created.len()
+            )));
+        }
+        let token_id = newly_created.pop().expect("checked len == 1 above");
+
+        self.write_fido2_token_metadata(path, &token_id, metadata)
     }
 }
 

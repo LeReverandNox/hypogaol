@@ -5,7 +5,7 @@ use crate::domain::keyslot_guard;
 use crate::domain::mapping_name;
 use crate::domain::preflight;
 use crate::domain::types::{CreateTarget, Filesystem, KeyMetadata, KeyslotRef, MapperHandle};
-use crate::ports::fido2_backend::Fido2Backend;
+use crate::ports::fido2_backend::{Fido2Backend, Fido2DeviceSelection};
 use crate::ports::filesystem_backend::FilesystemBackend;
 use crate::ports::luks_backend::LuksBackend;
 
@@ -23,6 +23,7 @@ pub const MIN_TOMB_SIZE_BYTES: u64 = 16 * 1024 * 1024;
 pub fn run(
     target: CreateTarget,
     filesystem: Filesystem,
+    fido2_selection: Fido2DeviceSelection,
     luks: &dyn LuksBackend,
     fido2: &dyn Fido2Backend,
     fs: &dyn FilesystemBackend,
@@ -41,7 +42,8 @@ pub fn run(
             // remove it again before returning, or every future `create` at
             // this same destination would permanently hit `DestinationExists`
             // with no way to recover.
-            let result = bootstrap_and_provision(&path, size, filesystem, luks, fido2, fs);
+            let result =
+                bootstrap_and_provision(&path, size, filesystem, fido2_selection, luks, fido2, fs);
             if result.is_err() {
                 let _ = fs.remove_backing_file(&path);
             }
@@ -94,7 +96,15 @@ pub fn run(
             // No backing file was ever created for a device/partition target,
             // so — unlike the File branch — a failure here must not attempt
             // any file removal.
-            bootstrap_and_provision(&path, resolved_size, filesystem, luks, fido2, fs)
+            bootstrap_and_provision(
+                &path,
+                resolved_size,
+                filesystem,
+                fido2_selection,
+                luks,
+                fido2,
+                fs,
+            )
         }
     }
 }
@@ -103,6 +113,7 @@ fn bootstrap_and_provision(
     path: &Path,
     size: u64,
     filesystem: Filesystem,
+    fido2_selection: Fido2DeviceSelection,
     luks: &dyn LuksBackend,
     fido2: &dyn Fido2Backend,
     fs: &dyn FilesystemBackend,
@@ -114,7 +125,7 @@ fn bootstrap_and_provision(
     // otherwise a mid-flow failure leaks an open `/dev/mapper/vault-*`
     // mapping indefinitely, same as this story's post-review hardware-run fix
     // for the happy path, just extended to the failure paths too.
-    let result = finish_provisioning(&mapper, filesystem, luks, fido2, fs);
+    let result = finish_provisioning(&mapper, filesystem, fido2_selection, luks, fido2, fs);
     match result {
         Ok(()) => luks.close(&mapper),
         Err(err) => {
@@ -127,6 +138,7 @@ fn bootstrap_and_provision(
 fn finish_provisioning(
     mapper: &MapperHandle,
     filesystem: Filesystem,
+    fido2_selection: Fido2DeviceSelection,
     luks: &dyn LuksBackend,
     fido2: &dyn Fido2Backend,
     fs: &dyn FilesystemBackend,
@@ -142,7 +154,7 @@ fn finish_provisioning(
         key_label: "primary".to_string(),
         filesystem,
     };
-    fido2.enroll_fido2_key(mapper, metadata)?;
+    fido2.enroll_fido2_key(mapper, metadata, fido2_selection)?;
 
     fs.mkfs(mapper, filesystem)?;
 
