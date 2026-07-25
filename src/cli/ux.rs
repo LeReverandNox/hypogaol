@@ -68,6 +68,20 @@ pub fn translate(err: &DomainError) -> String {
 /// `src/domain/mapping_name.rs`) and translated as a whole, rather than
 /// chasing a bespoke rewrite of every exact string.
 fn translate_adapter_failure(inner: &str) -> String {
+    // FIDO2 device-enumeration failures (`fido2-token -L`, via
+    // `list_fido2_devices`/`wait_for_enough_fido2_devices`) — shared by
+    // `create`'s bootstrap enroll, `enroll`'s own device-selection, AND
+    // `unlock`'s presence-wait (`LuksBackend::open`), so this gets its own
+    // workflow-neutral message rather than living inside `ENROLLMENT_MARKERS`
+    // below (which would wrongly say "Enrolling..." for a plain `unlock`
+    // failure). Checked first for the same reason `ENROLLMENT_MARKERS` is:
+    // some of these messages don't contain "cryptsetup" at all, but none
+    // should fall through to the generic buckets below either.
+    if inner.contains("fido2-token") {
+        return "Couldn't find your security key. Make sure it's plugged in, then try again."
+            .to_string();
+    }
+
     // FIDO2 enrollment failures (`enroll_fido2_key`'s own body — its
     // transient temp key file, its `systemd-cryptenroll` call, and its token
     // export/import/parse helpers) — checked first since several of these
@@ -75,7 +89,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // failed", or the token-import call's `{cmd:?}` Debug-quoted
     // `"token" "import"`), which would otherwise be misclassified as a
     // bootstrap/open subprocess failure below.
-    const ENROLLMENT_MARKERS: [&str; 11] = [
+    const ENROLLMENT_MARKERS: [&str; 10] = [
         "systemd-cryptenroll",
         "temporary key file",
         "transient bootstrap passphrase",
@@ -86,7 +100,6 @@ fn translate_adapter_failure(inner: &str) -> String {
         "fido2-credential",
         "luksDump",
         "keyslot id",
-        "fido2-token",
     ];
     if ENROLLMENT_MARKERS
         .iter()

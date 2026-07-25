@@ -181,6 +181,18 @@ fn translates_adapter_failure_missing_transient_passphrase_as_enrollment() {
 }
 
 #[test]
+fn translates_adapter_failure_fido2_token_enumeration_as_workflow_neutral() {
+    // `list_fido2_devices`/`wait_for_enough_fido2_devices` are shared by
+    // create's bootstrap enroll, `enroll`'s own device-selection, AND
+    // `unlock`'s presence-wait — this message must not claim "Enrolling..."
+    // since the failure could just as easily come from a plain `unlock`.
+    let err = DomainError::AdapterFailure("fido2-token -L failed: some stderr".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("Enrolling"));
+}
+
+#[test]
 fn translates_adapter_failure_mount_failure() {
     let err = DomainError::AdapterFailure("mount failed: some real stderr".to_string());
     let message = translate(&err);
