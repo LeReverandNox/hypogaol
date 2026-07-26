@@ -4,7 +4,7 @@ baseline_commit: 11723e9307775ffba214e822fc60b6318afa85bf
 
 # Story 3.3: Unlock a Tomb Read-Only
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
