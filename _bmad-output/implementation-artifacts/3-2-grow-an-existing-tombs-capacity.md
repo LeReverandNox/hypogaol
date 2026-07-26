@@ -4,7 +4,7 @@ baseline_commit: fd6b5cf9b843e06dd133b90dab29b52f85c4476b
 
 # Story 3.2: Grow an Existing Tomb's Capacity
 
-Status: review
+Status: done
 
 ## Story
 
