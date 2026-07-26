@@ -140,6 +140,20 @@ fn translate_adapter_failure(inner: &str) -> String {
             .to_string();
     }
 
+    // `resize`'s own success-path close failure
+    // (`domain::workflows::resize::grow_succeeded_close_failed`) — the grow
+    // itself already succeeded by the time this fires, so it needs its own
+    // distinct message rather than the generic `cryptsetup close` bucket
+    // below, which would wrongly suggest the whole resize failed. Checked
+    // before that bucket since the wrapped detail still contains
+    // "cryptsetup close" (review finding, 2026-07-26).
+    if inner.contains("but failed to re-lock afterward") {
+        return "tomb-fido2 grew this tomb successfully, but couldn't re-lock its LUKS2 volume \
+                afterward. Your data and the new capacity are safe — run `close` to finish, or \
+                try `resize` again."
+            .to_string();
+    }
+
     // `close`'s own `luks.close` failures (`cryptsetup close failed: ...`) —
     // checked before the generic `cryptsetup` bucket below for the same
     // "marker bleed" reason as the `luksKillSlot`/`token remove` guard above:
@@ -209,6 +223,18 @@ fn translate_adapter_failure(inner: &str) -> String {
             .to_string();
     }
 
+    // `resize`'s own `growfs`'s `e2fsck` pre-check failures (`e2fsck -f
+    // failed: ...` / `failed to run e2fsck: ...`) — checked before the
+    // generic `mount`/`mkfs` bucket and fallback below since neither string
+    // contains "resize2fs", "mount", or "mkfs" and would otherwise fall all
+    // the way through to the unhelpful generic fallback (marker-bleed
+    // guard; review finding, 2026-07-26).
+    if inner.contains("e2fsck") {
+        return "tomb-fido2 grew this tomb's volume, but couldn't check its filesystem before \
+                growing it to match."
+            .to_string();
+    }
+
     // Mount/filesystem failures (`mkfs`, `mount`, `chmod`, mount-point
     // create/remove).
     if inner.contains("mount") || inner.contains("mkfs") {
@@ -225,11 +251,16 @@ fn translate_adapter_failure(inner: &str) -> String {
     }
 
     // Device/file sizing failures (`blockdev --getsize64`,
-    // `set_backing_file_size`, `remove_backing_file`).
+    // `set_backing_file_size`, `remove_backing_file`, `is_block_device`'s
+    // own stat, and `resize`'s pre-grow symlink/regular-file check — added
+    // for Story 3.2's grow-branch, review finding, 2026-07-26).
     if inner.contains("blockdev")
         || inner.contains("failed to size")
         || inner.contains("failed to create")
         || inner.contains("failed to remove")
+        || inner.contains("failed to stat")
+        || inner.contains("is not a regular file")
+        || inner.contains("failed to open")
     {
         return "tomb-fido2 couldn't determine or set the size needed for this tomb.".to_string();
     }
