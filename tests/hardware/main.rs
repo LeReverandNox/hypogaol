@@ -756,6 +756,7 @@ fn unlock_read_only_rejects_writes_at_both_layers_against_a_device_backed_tomb()
         UnlockCleanup::new(mountpoint.clone(), name).with_loop_device(loop_device.path.clone());
 
     assert_actually_mounted(&device_node, &mountpoint);
+    assert_owned_by_invoking_user(&mountpoint);
 
     let write_result = std::fs::write(mountpoint.join("tomb-fido2-write-attempt.txt"), b"nope");
     assert!(
