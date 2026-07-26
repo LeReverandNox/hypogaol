@@ -4,7 +4,7 @@ baseline_commit: fd6b5cf9b843e06dd133b90dab29b52f85c4476b
 
 # Story 3.2: Grow an Existing Tomb's Capacity
 
-Status: ready-for-dev
+Status: in-progress
 
 ## Story
 
@@ -22,11 +22,11 @@ so that I can increase my storage without recreating the tomb or re-enrolling an
 
 ## Tasks / Subtasks
 
-- [ ] **Task 0 (spike, do this FIRST — de-risks everything below): confirm `cryptsetup resize` works against a FIDO2-token-opened mapping** (AC: #1, #4)
-  - [ ] **Why this matters:** `create`'s own `bootstrap_format_and_open` (`src/adapters/exec/mod.rs:793-914`) already had to work around a real hardware surprise: `cryptsetup resize` normally re-authenticates via the LUKS2 kernel keyring, but that keyring lookup turned out to be scoped such that two separate `sudo cryptsetup` invocations in the same workflow couldn't see each other's key — `resize` fell back to an interactive passphrase prompt against unattached stdin ("Nothing to read on input."), confirmed empirically on real hardware. Create sidesteps this only because it still holds the transient plaintext bootstrap passphrase in scope and pipes it via `--key-file -`.
-  - [ ] This story's `resize` workflow has **no passphrase available at all** — its `LuksBackend::open` call authenticates via the enrolled FIDO2 token (`--token-only`, see `src/adapters/exec/mod.rs:1052` / `unlock.rs`), which never surfaces a plaintext key to `adapters::exec` (AD-3). Whether a subsequent `cryptsetup resize <name>` (no `--key-file`) in the **same process**, right after that FIDO2-token `open`, can reuse the kernel keyring entry the token-based open just populated is **unconfirmed** — do not assume either outcome.
-  - [ ] Spike: on real hardware, `luksOpen --token-only` (or equivalent) a test LUKS2 volume, then immediately run `cryptsetup resize <name>` in the same process/session with no `--key-file`. If it succeeds without re-prompting, `LuksBackend::resize`'s implementation is simple (just `cryptsetup resize <name>`, no size argument needed — the header's segment stays `"dynamic"`, per the empirical finding at `src/adapters/exec/mod.rs:852-861`, and recomputes from the now-larger backing storage). If it does NOT succeed non-interactively, this is a real blocker: FIDO2-token opens don't hand you a passphrase to pipe, so there is no equivalent workaround to create's — flag to the user/architect (Winston) before proceeding with a workaround guess (mirrors the AD-2 "unconfirmed, spike first" precedent and the Story 2.1 architect-consultation precedent, both already established in this codebase).
-  - [ ] Document the spike's outcome in this story's Dev Notes/Completion Notes before writing the real implementation, the same way prior stories recorded their hardware-confirmed quirks inline.
+- [x] **Task 0 (spike, do this FIRST — de-risks everything below): confirm `cryptsetup resize` works against a FIDO2-token-opened mapping** (AC: #1, #4)
+  - [x] **Why this matters:** `create`'s own `bootstrap_format_and_open` (`src/adapters/exec/mod.rs:793-914`) already had to work around a real hardware surprise: `cryptsetup resize` normally re-authenticates via the LUKS2 kernel keyring, but that keyring lookup turned out to be scoped such that two separate `sudo cryptsetup` invocations in the same workflow couldn't see each other's key — `resize` fell back to an interactive passphrase prompt against unattached stdin ("Nothing to read on input."), confirmed empirically on real hardware. Create sidesteps this only because it still holds the transient plaintext bootstrap passphrase in scope and pipes it via `--key-file -`.
+  - [x] This story's `resize` workflow has **no passphrase available at all** — its `LuksBackend::open` call authenticates via the enrolled FIDO2 token (`--token-only`, see `src/adapters/exec/mod.rs:1052` / `unlock.rs`), which never surfaces a plaintext key to `adapters::exec` (AD-3). Whether a subsequent `cryptsetup resize <name>` (no `--key-file`) in the **same process**, right after that FIDO2-token `open`, can reuse the kernel keyring entry the token-based open just populated is **unconfirmed** — do not assume either outcome.
+  - [x] Spike: on real hardware, `luksOpen --token-only` (or equivalent) a test LUKS2 volume, then immediately run `cryptsetup resize <name>` in the same process/session with no `--key-file`. If it succeeds without re-prompting, `LuksBackend::resize`'s implementation is simple (just `cryptsetup resize <name>`, no size argument needed — the header's segment stays `"dynamic"`, per the empirical finding at `src/adapters/exec/mod.rs:852-861`, and recomputes from the now-larger backing storage). If it does NOT succeed non-interactively, this is a real blocker: FIDO2-token opens don't hand you a passphrase to pipe, so there is no equivalent workaround to create's — flag to the user/architect (Winston) before proceeding with a workaround guess (mirrors the AD-2 "unconfirmed, spike first" precedent and the Story 2.1 architect-consultation precedent, both already established in this codebase).
+  - [x] Document the spike's outcome in this story's Dev Notes/Completion Notes before writing the real implementation, the same way prior stories recorded their hardware-confirmed quirks inline.
 
 - [ ] Task 1: Add `LuksBackend::resize` port method (AC: #1, #4)
   - [ ] Add `fn resize(&self, mapper: &MapperHandle) -> Result<(), DomainError>` to `src/ports/luks_backend.rs`. No explicit size parameter — per Task 0's finding, the header's segment sizing is `"dynamic"` (confirmed at create time) and recomputes from the backing file/device's actual current size at resize time, as long as that backing storage was already grown (Task 1 of the domain workflow, see Task 3 below) before this call runs.
@@ -83,6 +83,12 @@ so that I can increase my storage without recreating the tomb or re-enrolling an
   - [ ] This is also where Task 0's spike observation gets a permanent regression test, if the resolution requires anything non-obvious (e.g. an explicit re-authentication step) — don't leave a hardware-confirmed quirk undocumented in code, matching this codebase's established practice (see `bootstrap_format_and_open`'s inline comments).
 
 ## Dev Notes
+
+### Task 0 spike finding (confirmed on real hardware, 2026-07-26)
+
+`cryptsetup resize <name>` with no `--key-file` does **not** reuse the kernel keyring entry a preceding `cryptsetup open --token-only <path> <name>` populated, even though both ran against the same mapping in quick succession — it fell back to an interactive passphrase prompt ("Enter passphrase for..."), confirmed empirically. This is the same keyring-scoping limitation `bootstrap_format_and_open` already worked around for the passphrase case (`src/adapters/exec/mod.rs:863-872`), now confirmed to also apply to a FIDO2-token-based open.
+
+However, `resize` accepts the same `--token-only` flag `open` uses: `cryptsetup resize --token-only <name>` re-authenticates via the enrolled `systemd-fido2` token (re-touch + PIN, same interaction shape as `open`) and succeeds non-interactively w.r.t. any passphrase — confirmed working end-to-end on real hardware (`Enter token PIN:` → touch → `Key slot 1 unlocked. Command successful.`). **This is the mechanism `LuksBackend::resize` must use** — `privileged("cryptsetup").args(["resize", "--token-only"]).arg(&mapper.name)`, invoked with inherited stdio (`.status()`, not `.output()`) so the FIDO2 PIN/touch prompt reaches the real terminal, mirroring `LuksBackend::open`'s existing pattern (`src/adapters/exec/mod.rs:1051-1058`). No `--device-size` argument needed — the header's segment stays `"dynamic"` and recomputes from the now-larger backing storage once `set_backing_file_size`/the raw device has actually grown.
 
 ### Open Design Question: how does `resize` read "current size" for the grow-only check (AC #3)?
 
@@ -152,5 +158,7 @@ Unit tests against the shared fakes in `tests/unit/fakes.rs`, run in default CI.
 ### Debug Log References
 
 ### Completion Notes List
+
+- Task 0 spike (real hardware, 2026-07-26): `cryptsetup resize <name>` alone does not reuse the keyring across a preceding `--token-only` open (falls back to an interactive passphrase prompt, confirmed). `cryptsetup resize --token-only <name>` does work — re-authenticates via the FIDO2 token (touch + PIN) and completes non-interactively w.r.t. passphrase. `LuksBackend::resize` will use this flag. See Dev Notes for full detail.
 
 ### File List
