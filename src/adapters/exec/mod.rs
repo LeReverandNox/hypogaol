@@ -1481,13 +1481,30 @@ impl FilesystemBackend for ExecAdapter {
     fn umount(&self, mapper: &MapperHandle) -> Result<(), DomainError> {
         let device_node = mapper.device_node();
 
+        // Distinct from "not currently mounted" below: no dm-crypt mapping at
+        // all means the tomb was never unlocked, or a prior `close` already
+        // fully completed — neither is "just needs a retry" (review finding,
+        // 2026-07-26).
+        if !device_node.exists() {
+            return Err(DomainError::AdapterFailure(format!(
+                "{} has no active mapping",
+                device_node.display()
+            )));
+        }
+
         let findmnt_output = Command::new("findmnt")
             .args(["-n", "-o", "TARGET"])
             .arg(&device_node)
             .output()
             .map_err(|e| DomainError::AdapterFailure(format!("failed to run findmnt: {e}")))?;
 
+        // Only the first line: a device mounted at more than one target
+        // would otherwise hand `umount` a multi-line argument with an
+        // embedded newline (review finding, 2026-07-26).
         let mountpoint = String::from_utf8_lossy(&findmnt_output.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
             .trim()
             .to_string();
 
@@ -1512,8 +1529,12 @@ impl FilesystemBackend for ExecAdapter {
 
         // Mirrors `mount`'s own cleanup-on-error paths: the mount point
         // directories `create_mount_point` makes are meant to be ephemeral,
-        // not accumulate across unlock/close cycles.
-        let _ = std::fs::remove_dir(&mountpoint);
+        // not accumulate across unlock/close cycles. Guarded to this tool's
+        // own mount root — never rmdir a path `findmnt` happens to report if
+        // it isn't one `mount` created (review finding, 2026-07-26).
+        if mountpoint.starts_with("/run/media/") {
+            let _ = std::fs::remove_dir(&mountpoint);
+        }
 
         Ok(())
     }

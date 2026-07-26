@@ -249,6 +249,41 @@ fn translates_adapter_failure_not_currently_mounted_gets_its_own_distinct_messag
     );
 }
 
+// `"cryptsetup close failed"` contains `"cryptsetup"`, so a `close`-time
+// `luks.close` failure could silently fall into the generic cryptsetup
+// bucket's touch/PIN-entry framing unless matched ahead of it — the same
+// "marker bleed" class as the umount/findmnt guard above (review finding,
+// 2026-07-26).
+#[test]
+fn translates_adapter_failure_luks_close_failure_is_not_swallowed_by_the_generic_cryptsetup_message(
+) {
+    let err = DomainError::AdapterFailure("cryptsetup close failed: device is busy".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(
+        !message.contains("security key"),
+        "close's own luks.close failure was misclassified as the generic cryptsetup message: {message:?}"
+    );
+}
+
+#[test]
+fn translates_adapter_failure_no_active_mapping_gets_its_own_distinct_message() {
+    let err =
+        DomainError::AdapterFailure("/dev/mapper/vault-deadbeef has no active mapping".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("Your tomb unlocked"));
+
+    let not_currently_mounted_err = DomainError::AdapterFailure(
+        "/dev/mapper/vault-deadbeef is not currently mounted".to_string(),
+    );
+    let not_currently_mounted_message = translate(&not_currently_mounted_err);
+    assert_ne!(
+        message, not_currently_mounted_message,
+        "never-unlocked should read distinctly from unmounted-but-still-open"
+    );
+}
+
 #[test]
 fn translates_adapter_failure_mapping_name_canonicalization_failure() {
     let err = DomainError::AdapterFailure(
