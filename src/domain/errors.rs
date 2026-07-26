@@ -35,6 +35,16 @@ pub enum DomainError {
     )]
     DeviceTooSmall { path: PathBuf, size: u64 },
 
+    #[error(
+        "requested size {requested} bytes is not larger than the current size {current_size} bytes for {} — resize is grow-only",
+        .path.display()
+    )]
+    ResizeMustGrow {
+        path: PathBuf,
+        requested: u64,
+        current_size: u64,
+    },
+
     #[error("{0}")]
     AdapterFailure(String),
 

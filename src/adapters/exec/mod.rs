@@ -1069,6 +1069,63 @@ impl LuksBackend for ExecAdapter {
             )))
         }
     }
+
+    fn resize(&self, mapper: &MapperHandle) -> Result<(), DomainError> {
+        // No `--device-size`: the header's segment stays `"dynamic"` and
+        // recomputes from the backing storage's actual current size, which
+        // the caller has already grown by this point (AD-10 ordering).
+        //
+        // `--token-only` is load-bearing, not optional (Task 0 spike,
+        // confirmed on real hardware): a bare `cryptsetup resize <name>`
+        // does NOT reuse the kernel keyring entry a preceding
+        // `open --token-only` populated — it falls back to an interactive
+        // passphrase prompt, which this workflow has no passphrase to
+        // satisfy. `--token-only` instead re-authenticates via the enrolled
+        // FIDO2 token, the same mechanism `open` already uses. Inherited
+        // stdio (`.status()`, not `.output()`) lets that touch/PIN prompt
+        // reach the real terminal, same pattern as `open`.
+        let status = privileged("cryptsetup")
+            .args(["resize", "--token-only"])
+            .arg(&mapper.name)
+            .status()
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!("failed to run cryptsetup resize: {e}"))
+            })?;
+
+        if status.success() {
+            Ok(())
+        } else {
+            Err(DomainError::AdapterFailure(format!(
+                "cryptsetup resize --token-only failed for {}",
+                mapper.name
+            )))
+        }
+    }
+
+    fn read_filesystem(&self, path: &Path) -> Result<Filesystem, DomainError> {
+        let metadata = dump_json_metadata(path)?;
+        let tokens = tokens_object(&metadata)?;
+
+        let filesystem_str = tokens
+            .values()
+            .find(|token| token.get("type").and_then(Value::as_str) == Some("systemd-fido2"))
+            .and_then(|token| token.get("filesystem"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                DomainError::AdapterFailure(format!(
+                    "{} has no systemd-fido2 token with a filesystem field",
+                    path.display()
+                ))
+            })?;
+
+        match filesystem_str {
+            "ext4" => Ok(Filesystem::Ext4),
+            other => Err(DomainError::AdapterFailure(format!(
+                "unrecognized filesystem {other:?} recorded on {}'s systemd-fido2 token",
+                path.display()
+            ))),
+        }
+    }
 }
 
 impl Fido2Backend for ExecAdapter {
@@ -1243,6 +1300,8 @@ impl FilesystemBackend for ExecAdapter {
         for binary in [
             "mkfs.ext4",
             "resize2fs",
+            "e2fsck",
+            "dumpe2fs",
             "blockdev",
             "mount",
             "umount",
@@ -1263,6 +1322,15 @@ impl FilesystemBackend for ExecAdapter {
 
     fn path_exists(&self, path: &Path) -> bool {
         path.exists()
+    }
+
+    fn is_block_device(&self, path: &Path) -> Result<bool, DomainError> {
+        use std::os::unix::fs::FileTypeExt;
+
+        let metadata = std::fs::metadata(path).map_err(|e| {
+            DomainError::AdapterFailure(format!("failed to stat {}: {e}", path.display()))
+        })?;
+        Ok(metadata.file_type().is_block_device())
     }
 
     fn device_capacity(&self, path: &Path) -> Result<u64, DomainError> {
@@ -1292,26 +1360,78 @@ impl FilesystemBackend for ExecAdapter {
     }
 
     fn set_backing_file_size(&self, path: &Path, size: u64) -> Result<(), DomainError> {
-        // `create_new` makes the OS enforce exclusivity: it fails if anything
-        // (a regular file or a symlink, dangling or not) already exists at
-        // `path`, closing the race window between the caller's `path_exists`
-        // check and this call — a plain `File::create` would instead follow
-        // a symlink and silently truncate/write through it (AC #2).
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path)
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::AlreadyExists {
-                    DomainError::DestinationExists(path.to_path_buf())
-                } else {
-                    DomainError::AdapterFailure(format!("failed to create {}: {e}", path.display()))
+        // Branches on whether `path` already exists (Story 3.2, AC #1):
+        // `create`'s call site never hits the grow branch (it already checks
+        // `path_exists` first and refuses if true), so that branch's
+        // behavior is exactly unchanged. `resize`'s call site only ever
+        // hits the grow branch (its target already has a LUKS2 header).
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) => {
+                // Grow an existing file. First confirm it's a plain regular
+                // file, not a symlink — a plain `File::open` would instead
+                // follow a symlink and silently write through it, the same
+                // clobber protection the create branch below gets from
+                // `create_new`, extended to this path too.
+                if !metadata.file_type().is_file() {
+                    return Err(DomainError::AdapterFailure(format!(
+                        "{} is not a regular file — refusing to grow it",
+                        path.display()
+                    )));
                 }
-            })?;
-        file.set_len(size).map_err(|e| {
-            DomainError::AdapterFailure(format!("failed to size {}: {e}", path.display()))
-        })?;
-        Ok(())
+
+                use std::os::unix::fs::OpenOptionsExt;
+                // Linux's `O_NOFOLLOW` (this project only targets Linux, see
+                // Cargo.toml's dist `targets`) — makes the open itself
+                // atomically refuse a symlink, closing the race window
+                // between the `symlink_metadata` check above and this call
+                // (a symlink swapped into place in between would make this
+                // open fail instead of silently following it and writing
+                // through it — review finding, 2026-07-26).
+                const O_NOFOLLOW: i32 = 0o400000;
+                let file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .custom_flags(O_NOFOLLOW)
+                    .open(path)
+                    .map_err(|e| {
+                        DomainError::AdapterFailure(format!(
+                            "failed to open {} for growing: {e}",
+                            path.display()
+                        ))
+                    })?;
+                file.set_len(size).map_err(|e| {
+                    DomainError::AdapterFailure(format!("failed to size {}: {e}", path.display()))
+                })
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // `create_new` makes the OS enforce exclusivity: it fails if
+                // anything (a regular file or a symlink, dangling or not)
+                // already exists at `path`, closing the race window between
+                // the caller's `path_exists` check and this call — a plain
+                // `File::create` would instead follow a symlink and silently
+                // truncate/write through it (AC #2).
+                let file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(path)
+                    .map_err(|e| {
+                        if e.kind() == std::io::ErrorKind::AlreadyExists {
+                            DomainError::DestinationExists(path.to_path_buf())
+                        } else {
+                            DomainError::AdapterFailure(format!(
+                                "failed to create {}: {e}",
+                                path.display()
+                            ))
+                        }
+                    })?;
+                file.set_len(size).map_err(|e| {
+                    DomainError::AdapterFailure(format!("failed to size {}: {e}", path.display()))
+                })
+            }
+            Err(e) => Err(DomainError::AdapterFailure(format!(
+                "failed to stat {}: {e}",
+                path.display()
+            ))),
+        }
     }
 
     fn remove_backing_file(&self, path: &Path) -> Result<(), DomainError> {
@@ -1339,6 +1459,102 @@ impl FilesystemBackend for ExecAdapter {
                         String::from_utf8_lossy(&output.stderr).trim()
                     )))
                 }
+            }
+        }
+    }
+
+    fn growfs(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<(), DomainError> {
+        match fs {
+            Filesystem::Ext4 => {
+                // Confirmed empirically on real hardware: `resize2fs` refuses
+                // to grow an unmounted filesystem that hasn't been checked
+                // ("Please run 'e2fsck -f <device>' first"), even one that
+                // was never actually corrupted — this workflow never mounts
+                // the filesystem (Task 3's doc comment), so it always hits
+                // this. `-p` (preen) auto-fixes non-conflicting problems
+                // without prompting; exit code 1 means "errors corrected" and
+                // is still a success per e2fsck(8) (2+ means something more
+                // serious, e.g. "reboot needed" or "operational error").
+                let fsck_output = privileged("e2fsck")
+                    .args(["-f", "-p"])
+                    .arg(mapper.device_node())
+                    .output()
+                    .map_err(|e| {
+                        DomainError::AdapterFailure(format!("failed to run e2fsck: {e}"))
+                    })?;
+                match fsck_output.status.code() {
+                    Some(0) | Some(1) => {}
+                    _ => {
+                        return Err(DomainError::AdapterFailure(format!(
+                            "e2fsck -f failed: {}",
+                            String::from_utf8_lossy(&fsck_output.stderr).trim()
+                        )));
+                    }
+                }
+
+                // No explicit target size: grows to fill the now-larger
+                // mapping (`resize2fs`'s documented behavior when no size
+                // argument is given). Runs against the unmounted mapper
+                // device node — resize2fs also supports online (mounted)
+                // growth, but this workflow never mounts the filesystem.
+                let output = privileged("resize2fs")
+                    .arg(mapper.device_node())
+                    .output()
+                    .map_err(|e| {
+                        DomainError::AdapterFailure(format!("failed to run resize2fs: {e}"))
+                    })?;
+
+                if output.status.success() {
+                    Ok(())
+                } else {
+                    Err(DomainError::AdapterFailure(format!(
+                        "resize2fs failed: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )))
+                }
+            }
+        }
+    }
+
+    fn filesystem_size(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<u64, DomainError> {
+        match fs {
+            Filesystem::Ext4 => {
+                let output = privileged("dumpe2fs")
+                    .arg("-h")
+                    .arg(mapper.device_node())
+                    .output()
+                    .map_err(|e| {
+                        DomainError::AdapterFailure(format!("failed to run dumpe2fs: {e}"))
+                    })?;
+
+                if !output.status.success() {
+                    return Err(DomainError::AdapterFailure(format!(
+                        "dumpe2fs -h failed: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )));
+                }
+
+                let text = String::from_utf8_lossy(&output.stdout);
+                let block_count: u64 = text
+                    .lines()
+                    .find_map(|line| line.strip_prefix("Block count:"))
+                    .and_then(|value| value.trim().parse().ok())
+                    .ok_or_else(|| {
+                        DomainError::AdapterFailure(
+                            "dumpe2fs -h output missing a parsable Block count".to_string(),
+                        )
+                    })?;
+                let block_size: u64 = text
+                    .lines()
+                    .find_map(|line| line.strip_prefix("Block size:"))
+                    .and_then(|value| value.trim().parse().ok())
+                    .ok_or_else(|| {
+                        DomainError::AdapterFailure(
+                            "dumpe2fs -h output missing a parsable Block size".to_string(),
+                        )
+                    })?;
+
+                Ok(block_count * block_size)
             }
         }
     }
@@ -1628,6 +1844,65 @@ mod tests {
         assert_eq!(
             result,
             ("/dev/hidraw1".to_string(), Some("/dev/hidraw0".to_string()))
+        );
+    }
+
+    struct TempPath(PathBuf);
+
+    impl TempPath {
+        fn unique(name: &str) -> Self {
+            let suffix = random_hex_suffix().expect("failed to generate random suffix");
+            Self(std::env::temp_dir().join(format!("tomb-fido2-unit-test-{name}-{suffix}")))
+        }
+    }
+
+    impl Drop for TempPath {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    #[test]
+    fn set_backing_file_size_creates_a_new_file_when_missing() {
+        let path = TempPath::unique("create-new");
+        let adapter = ExecAdapter::default();
+
+        let result = adapter.set_backing_file_size(&path.0, 4096);
+
+        assert!(result.is_ok(), "expected Ok, got {result:?}");
+        assert_eq!(std::fs::metadata(&path.0).unwrap().len(), 4096);
+    }
+
+    #[test]
+    fn set_backing_file_size_grows_an_existing_file() {
+        let path = TempPath::unique("grow-existing");
+        std::fs::write(&path.0, [0u8; 1024]).expect("failed to write fixture file");
+        let adapter = ExecAdapter::default();
+
+        let result = adapter.set_backing_file_size(&path.0, 8192);
+
+        assert!(result.is_ok(), "expected Ok, got {result:?}");
+        assert_eq!(std::fs::metadata(&path.0).unwrap().len(), 8192);
+    }
+
+    #[test]
+    fn set_backing_file_size_refuses_to_grow_through_a_symlink() {
+        let target = TempPath::unique("symlink-target");
+        std::fs::write(&target.0, [0u8; 1024]).expect("failed to write fixture file");
+        let link = TempPath::unique("symlink-link");
+        std::os::unix::fs::symlink(&target.0, &link.0).expect("failed to create symlink");
+        let adapter = ExecAdapter::default();
+
+        let result = adapter.set_backing_file_size(&link.0, 8192);
+
+        let Err(DomainError::AdapterFailure(message)) = result else {
+            panic!("expected AdapterFailure, got {result:?}");
+        };
+        assert!(message.contains("not a regular file"));
+        assert_eq!(
+            std::fs::metadata(&target.0).unwrap().len(),
+            1024,
+            "the symlink target must be left untouched"
         );
     }
 }

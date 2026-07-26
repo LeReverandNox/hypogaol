@@ -11,6 +11,11 @@ pub trait FilesystemBackend {
     /// True if `path` already exists (AD-9's create-mode refusal check).
     fn path_exists(&self, path: &Path) -> bool;
 
+    /// True if `path` is a raw block device/partition; false if it's a
+    /// regular file (Story 3.2, AC #1/#2's file-vs-device distinction) — a
+    /// pure query, no mutation.
+    fn is_block_device(&self, path: &Path) -> Result<bool, DomainError>;
+
     /// Byte capacity of the block device/partition at `path` (AD-9's
     /// device-mode default-to-full-capacity sizing) — a pure query, no
     /// mutation.
@@ -24,6 +29,25 @@ pub trait FilesystemBackend {
 
     /// Formats the opened mapping with `fs` (v1: `Filesystem::Ext4` only, AD-8).
     fn mkfs(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<(), DomainError>;
+
+    /// Grows `fs` on `mapper`'s already-resized mapping to fill it (v1:
+    /// `Filesystem::Ext4` only, AD-8) — Story 3.2, AC #1/#4. Called after
+    /// `LuksBackend::resize`, so the mapping already reflects the new,
+    /// larger size; no explicit target size is passed.
+    fn growfs(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<(), DomainError>;
+
+    /// The `fs` filesystem's own current size on `mapper`'s active mapping
+    /// (v1: `Filesystem::Ext4` only) — a pure query, no mutation. This is
+    /// deliberately distinct from `device_capacity(&mapper.device_node())`:
+    /// confirmed empirically on real hardware that a LUKS2 mapping's dynamic
+    /// segment always reflects the *full* backing storage on every reopen,
+    /// even for a device-backed tomb created with less than the raw
+    /// device's full capacity (Story 1.6 headroom) — so the mapping's own
+    /// size can never distinguish "this tomb's filesystem currently uses
+    /// less than the raw device" from "it uses all of it." Only the
+    /// filesystem's own superblock (block count × block size) reports the
+    /// tomb's true current provisioned size.
+    fn filesystem_size(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<u64, DomainError>;
 
     /// Best-effort removal of a backing file this adapter created — used to
     /// clean up after a file-backed `create` fails partway through, so a

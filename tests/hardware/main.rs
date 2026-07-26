@@ -4,7 +4,7 @@ use std::process::Command;
 use tomb_fido2::adapters::exec::ExecAdapter;
 use tomb_fido2::domain::mapping_name;
 use tomb_fido2::domain::types::{CreateTarget, Filesystem};
-use tomb_fido2::domain::workflows::{close, create, enroll, revoke, unlock};
+use tomb_fido2::domain::workflows::{close, create, enroll, resize, revoke, unlock};
 use tomb_fido2::ports::fido2_backend::Fido2DeviceSelection;
 use tomb_fido2::ports::luks_backend::LuksBackend;
 
@@ -1135,4 +1135,337 @@ fn close_works_unmodified_against_a_device_backed_tomb() {
         "losetup -d failed: {}",
         String::from_utf8_lossy(&detach.stderr)
     );
+}
+
+/// End-to-end resize verification (Story 3.2, AC #1/#4): create a small
+/// file-backed tomb, write data and close it, resize it larger via this
+/// tool's own `resize::run`, then unlock again and confirm the pre-resize
+/// data survived untouched, the previously enrolled key still works, and
+/// the grown capacity is actually usable — a write comfortably larger than
+/// the original capacity but within the grown one must succeed, proving
+/// `growfs` (not just the LUKS mapping) actually grew.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and a real FIDO2
+/// security key present, ready to be touched and to enter its PIN when
+/// prompted (once for `create`, once for `resize`'s own re-authenticating
+/// `luks.open`+`luks.resize`, once each for the two `unlock::run` calls).
+#[test]
+#[ignore]
+fn resize_grows_a_file_backed_tomb_preserving_data_and_keys() {
+    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-resize");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("tomb.img");
+
+    let adapter = ExecAdapter::default();
+    let initial_size: u64 = 32 * 1024 * 1024;
+    let grown_size: u64 = 96 * 1024 * 1024;
+
+    let target = CreateTarget::File {
+        path: path.clone(),
+        size: initial_size,
+    };
+
+    println!("Creating tomb — touch the key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    println!("Unlocking to write a marker file — touch the key when prompted.");
+    let mountpoint =
+        unlock::run(&path, &adapter, &adapter, &adapter).expect("first unlock::run failed");
+    assert_readable_and_writable(&mountpoint);
+    let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
+
+    // A write close to the pre-grow capacity must still be readable back
+    // after the resize below — proves growth doesn't corrupt or lose
+    // pre-existing data (AC #4).
+    let before_contents = vec![0xABu8; 8 * 1024 * 1024];
+    std::fs::write(mountpoint.join("before-resize.bin"), &before_contents)
+        .expect("failed to write pre-resize file");
+
+    println!("Closing the tomb via close::run before resizing.");
+    let result = close::run(&path, &adapter, &adapter, &adapter);
+    assert!(result.is_ok(), "close::run failed: {result:?}");
+
+    println!("Resizing the tomb — touch the key when prompted (re-authenticates the grow).");
+    let result = resize::run(&path, grown_size, &adapter, &adapter, &adapter);
+    assert!(result.is_ok(), "resize::run failed: {result:?}");
+
+    let backing_len = std::fs::metadata(&path)
+        .expect("failed to stat backing file")
+        .len();
+    assert_eq!(
+        backing_len, grown_size,
+        "expected the backing file to be grown to {grown_size} bytes, got {backing_len}"
+    );
+
+    println!(
+        "Unlocking again to confirm data, key, and new capacity — touch the same key when prompted."
+    );
+    let mountpoint = unlock::run(&path, &adapter, &adapter, &adapter)
+        .expect("unlock::run after resize failed — the previously enrolled key must still work");
+    let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
+    assert_actually_mounted(&device_node, &mountpoint);
+
+    let recovered = std::fs::read(mountpoint.join("before-resize.bin"))
+        .expect("failed to read back the pre-resize marker file after growing");
+    assert_eq!(
+        recovered, before_contents,
+        "pre-resize data must survive the grow untouched (AC #4)"
+    );
+
+    // A write comfortably larger than the ORIGINAL 32M capacity, but well
+    // within the grown 96M one, must now succeed — proves the filesystem
+    // itself was actually grown (growfs), not just the LUKS mapping.
+    let after_contents = vec![0xCDu8; 48 * 1024 * 1024];
+    std::fs::write(mountpoint.join("after-resize.bin"), &after_contents).expect(
+        "writing a file larger than the pre-resize capacity failed — filesystem growth didn't take effect",
+    );
+
+    UnlockCleanup::new(mountpoint, name).run();
+}
+
+/// Covers growing a device-backed tomb into headroom left free at create
+/// time (Story 1.6's `size` < device capacity feature, combined with this
+/// story's resize) — the scenario the Dev Notes' "Open Design Question"
+/// two-tier grow-only check exists specifically to support: the raw loop
+/// device's own geometry must never change, but the tomb's provisioned size
+/// must grow from `requested_size` toward (not exceeding) the loop device's
+/// own `loop_capacity`.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and a real FIDO2
+/// security key present, ready to be touched and to enter its PIN when
+/// prompted (once for `create`, once for `resize`, once for the final
+/// `unlock::run`).
+#[test]
+#[ignore]
+fn resize_grows_a_device_backed_tomb_into_its_own_headroom() {
+    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-resize-device");
+    let backing_file = dir.join("loop-backing.img");
+
+    LoopDevice::detach_stale(&backing_file);
+
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+
+    let loop_capacity: u64 = 96 * 1024 * 1024;
+    let requested_size: u64 = 32 * 1024 * 1024;
+    let grown_size: u64 = 64 * 1024 * 1024;
+
+    {
+        let file = std::fs::File::create(&backing_file).expect("failed to create backing file");
+        file.set_len(loop_capacity)
+            .expect("failed to size backing file");
+    }
+
+    let loop_device = LoopDevice::attach(&backing_file);
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::Device {
+        path: loop_device.path.clone(),
+        size: Some(requested_size),
+        confirmed: true,
+    };
+
+    println!("Creating tomb with headroom — touch the key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    println!("Resizing into the device's headroom — touch the key when prompted.");
+    let result = resize::run(&loop_device.path, grown_size, &adapter, &adapter, &adapter);
+    assert!(result.is_ok(), "resize::run failed: {result:?}");
+
+    // The raw loop device's own geometry must never change (resize never
+    // touches the partition table, AC #2).
+    let capacity_output = Command::new("blockdev")
+        .arg("--getsize64")
+        .arg(&loop_device.path)
+        .output()
+        .expect("failed to run blockdev --getsize64");
+    assert!(
+        capacity_output.status.success(),
+        "blockdev --getsize64 failed"
+    );
+    let capacity: u64 = String::from_utf8_lossy(&capacity_output.stdout)
+        .trim()
+        .parse()
+        .expect("failed to parse blockdev --getsize64 output");
+    assert_eq!(
+        capacity, loop_capacity,
+        "resize must never touch the underlying device's own geometry"
+    );
+
+    println!("Unlocking to confirm the grown capacity is usable — touch the key when prompted.");
+    let mountpoint = unlock::run(&loop_device.path, &adapter, &adapter, &adapter)
+        .expect("unlock::run after resize failed");
+    let name =
+        mapping_name::mapping_name(&loop_device.path).expect("failed to derive mapping name");
+    let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
+    assert_actually_mounted(&device_node, &mountpoint);
+
+    // A write comfortably larger than the original 32M provisioned size,
+    // but within the grown 64M, must succeed.
+    let contents = vec![0xEFu8; 48 * 1024 * 1024];
+    std::fs::write(mountpoint.join("after-resize.bin"), &contents)
+        .expect("writing a file larger than the pre-resize provisioned size failed");
+
+    UnlockCleanup::new(mountpoint, name)
+        .with_loop_device(loop_device.path)
+        .run();
+}
+
+/// The too-small-partition error path (Story 3.2, AC #2): requesting a
+/// resize larger than a device-backed tomb's raw underlying capacity must
+/// be refused clearly, before ever touching the FIDO2 key — this is a
+/// zero-`luks.open` tier-1 rejection, so no touch/PIN prompt should appear
+/// at all for the `resize::run` call itself.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and a real FIDO2
+/// security key present, ready to be touched only for `create::run`'s own
+/// enrollment.
+#[test]
+#[ignore]
+fn resize_rejects_a_request_exceeding_the_raw_devices_capacity() {
+    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-resize-too-small");
+    let backing_file = dir.join("loop-backing.img");
+
+    LoopDevice::detach_stale(&backing_file);
+
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+
+    let loop_capacity: u64 = 64 * 1024 * 1024;
+    {
+        let file = std::fs::File::create(&backing_file).expect("failed to create backing file");
+        file.set_len(loop_capacity)
+            .expect("failed to size backing file");
+    }
+
+    let loop_device = LoopDevice::attach(&backing_file);
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::Device {
+        path: loop_device.path.clone(),
+        size: None,
+        confirmed: true,
+    };
+
+    println!("Creating tomb — touch the key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    println!(
+        "Requesting a resize larger than the raw device's capacity — expecting a clean refusal, no key touch needed."
+    );
+    let result = resize::run(
+        &loop_device.path,
+        loop_capacity + 32 * 1024 * 1024,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(
+        matches!(
+            result,
+            Err(tomb_fido2::domain::errors::DomainError::DeviceSizeExceedsCapacity { .. })
+        ),
+        "expected DomainError::DeviceSizeExceedsCapacity, got {result:?}"
+    );
+
+    let detach = Command::new("sudo")
+        .args(["losetup", "-d"])
+        .arg(&loop_device.path)
+        .output()
+        .expect("failed to run losetup -d");
+    assert!(
+        detach.status.success(),
+        "losetup -d failed: {}",
+        String::from_utf8_lossy(&detach.stderr)
+    );
+}
+
+/// The grow-only rejection path (Story 3.2, AC #3): requesting a size no
+/// larger than the tomb's current size must be refused before touching
+/// anything, leaving the tomb exactly as it was — same backing file size,
+/// still unlockable with the same key.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and a real FIDO2
+/// security key present, ready to be touched for `create::run`'s own
+/// enrollment and for the final confirming `unlock::run` (the rejected
+/// `resize::run` call itself needs no touch — a zero-`luks.open` tier-1
+/// rejection).
+#[test]
+#[ignore]
+fn resize_rejects_a_shrink_request_and_leaves_the_tomb_untouched() {
+    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-resize-grow-only");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("tomb.img");
+
+    let adapter = ExecAdapter::default();
+    let initial_size: u64 = 32 * 1024 * 1024;
+    let target = CreateTarget::File {
+        path: path.clone(),
+        size: initial_size,
+    };
+
+    println!("Creating tomb — touch the key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    println!(
+        "Requesting a same-size resize (grow-only rejection) — expecting a clean refusal, no key touch needed."
+    );
+    let result = resize::run(&path, initial_size, &adapter, &adapter, &adapter);
+    assert!(
+        matches!(
+            result,
+            Err(tomb_fido2::domain::errors::DomainError::ResizeMustGrow { .. })
+        ),
+        "expected DomainError::ResizeMustGrow, got {result:?}"
+    );
+
+    let backing_len = std::fs::metadata(&path)
+        .expect("failed to stat backing file")
+        .len();
+    assert_eq!(
+        backing_len, initial_size,
+        "a rejected resize must not have touched the backing file's size"
+    );
+
+    println!(
+        "Confirming the tomb is still unlockable with the original key — touch it when prompted."
+    );
+    let mountpoint = unlock::run(&path, &adapter, &adapter, &adapter)
+        .expect("unlock::run failed after a refused resize — the rejection must be a no-op");
+    let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
+    UnlockCleanup::new(mountpoint, name).run();
 }

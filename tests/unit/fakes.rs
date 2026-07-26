@@ -30,6 +30,8 @@ pub struct FakeLuksBackend {
     last_open: RefCell<Option<(std::path::PathBuf, String)>>,
     last_removed_keyslot: RefCell<Option<KeyslotRef>>,
     last_close: RefCell<Option<MapperHandle>>,
+    last_resize: RefCell<Option<MapperHandle>>,
+    read_filesystem: Filesystem,
     // Distinct return values for successive `list_fido2_keyslots` calls, so a
     // test can prove a caller re-reads live state on each call rather than
     // reusing an earlier result (AC #3). `None` means "always return
@@ -57,6 +59,8 @@ impl FakeLuksBackend {
             last_open: RefCell::new(None),
             last_removed_keyslot: RefCell::new(None),
             last_close: RefCell::new(None),
+            last_resize: RefCell::new(None),
+            read_filesystem: Filesystem::Ext4,
             keyslots_sequence: RefCell::new(None),
         }
     }
@@ -72,6 +76,8 @@ impl FakeLuksBackend {
             last_open: RefCell::new(None),
             last_removed_keyslot: RefCell::new(None),
             last_close: RefCell::new(None),
+            last_resize: RefCell::new(None),
+            read_filesystem: Filesystem::Ext4,
             keyslots_sequence: RefCell::new(None),
         }
     }
@@ -125,6 +131,20 @@ impl FakeLuksBackend {
     /// name it also passed to `umount`.
     pub fn last_close(&self) -> Option<MapperHandle> {
         self.last_close.borrow().clone()
+    }
+
+    /// The `MapperHandle` most recently passed to `resize` — lets a test
+    /// assert `resize::run` called it against the same mapper `open`
+    /// returned.
+    pub fn last_resize(&self) -> Option<MapperHandle> {
+        self.last_resize.borrow().clone()
+    }
+
+    /// The `Filesystem` `read_filesystem` returns — settable so a test can
+    /// prove `growfs` is called with whatever `read_filesystem` reports.
+    pub fn with_read_filesystem(mut self, filesystem: Filesystem) -> Self {
+        self.read_filesystem = filesystem;
+        self
     }
 
     /// Makes the named port call log itself as usual, then return an
@@ -210,6 +230,18 @@ impl LuksBackend for FakeLuksBackend {
             source_path: path.to_path_buf(),
         })
     }
+
+    fn resize(&self, mapper: &MapperHandle) -> Result<(), DomainError> {
+        self.log.borrow_mut().push("resize".to_string());
+        *self.last_resize.borrow_mut() = Some(mapper.clone());
+        self.fail_if("resize")
+    }
+
+    fn read_filesystem(&self, _path: &Path) -> Result<Filesystem, DomainError> {
+        self.log.borrow_mut().push("read_filesystem".to_string());
+        self.fail_if("read_filesystem")?;
+        Ok(self.read_filesystem)
+    }
 }
 
 pub struct FakeFido2Backend {
@@ -274,11 +306,21 @@ const DEFAULT_DEVICE_CAPACITY: u64 = 1024u64.pow(4);
 pub struct FakeFilesystemBackend {
     prerequisites: Result<(), Vec<String>>,
     path_exists: bool,
+    is_block_device: bool,
     device_capacity: u64,
+    // `filesystem_size`'s return value — deliberately a separate field from
+    // `device_capacity`, not derived from it: `resize::run`'s tier 2 reads
+    // this instead of the mapping's raw size specifically because the two
+    // can differ for a device-backed tomb using Story 1.6 headroom
+    // (confirmed empirically on real hardware — see `filesystem_size`'s own
+    // port doc). Defaults to `device_capacity`'s own value so existing
+    // tests that don't care about the distinction are unaffected.
+    filesystem_size: Option<u64>,
     log: CallLog,
     fail_at: Option<&'static str>,
     umount_not_currently_mounted: bool,
     last_umount: RefCell<Option<MapperHandle>>,
+    last_growfs_filesystem: RefCell<Option<Filesystem>>,
 }
 
 impl FakeFilesystemBackend {
@@ -286,11 +328,14 @@ impl FakeFilesystemBackend {
         Self {
             prerequisites: Ok(()),
             path_exists: false,
+            is_block_device: false,
             device_capacity: DEFAULT_DEVICE_CAPACITY,
+            filesystem_size: None,
             log: new_call_log(),
             fail_at: None,
             umount_not_currently_mounted: false,
             last_umount: RefCell::new(None),
+            last_growfs_filesystem: RefCell::new(None),
         }
     }
 
@@ -298,11 +343,14 @@ impl FakeFilesystemBackend {
         Self {
             prerequisites: Err(missing(missing_deps)),
             path_exists: false,
+            is_block_device: false,
             device_capacity: DEFAULT_DEVICE_CAPACITY,
+            filesystem_size: None,
             log: new_call_log(),
             fail_at: None,
             umount_not_currently_mounted: false,
             last_umount: RefCell::new(None),
+            last_growfs_filesystem: RefCell::new(None),
         }
     }
 
@@ -316,8 +364,20 @@ impl FakeFilesystemBackend {
         self
     }
 
+    pub fn with_is_block_device(mut self, value: bool) -> Self {
+        self.is_block_device = value;
+        self
+    }
+
     pub fn with_device_capacity(mut self, value: u64) -> Self {
         self.device_capacity = value;
+        self
+    }
+
+    /// See `filesystem_size` field doc — sets the value `filesystem_size`
+    /// returns, distinct from `device_capacity`'s own.
+    pub fn with_filesystem_size(mut self, value: u64) -> Self {
+        self.filesystem_size = Some(value);
         self
     }
 
@@ -342,6 +402,13 @@ impl FakeFilesystemBackend {
         self.last_umount.borrow().clone()
     }
 
+    /// The `Filesystem` most recently passed to `growfs` — lets a test prove
+    /// `resize::run` threads `read_filesystem`'s result into `growfs` rather
+    /// than hardcoding a variant.
+    pub fn last_growfs_filesystem(&self) -> Option<Filesystem> {
+        *self.last_growfs_filesystem.borrow()
+    }
+
     fn fail_if(&self, call: &'static str) -> Result<(), DomainError> {
         if self.fail_at == Some(call) {
             Err(DomainError::AdapterFailure(format!("{call} failed (test)")))
@@ -361,6 +428,12 @@ impl FilesystemBackend for FakeFilesystemBackend {
         self.path_exists
     }
 
+    fn is_block_device(&self, _path: &Path) -> Result<bool, DomainError> {
+        self.log.borrow_mut().push("is_block_device".to_string());
+        self.fail_if("is_block_device")?;
+        Ok(self.is_block_device)
+    }
+
     fn device_capacity(&self, _path: &Path) -> Result<u64, DomainError> {
         self.log.borrow_mut().push("device_capacity".to_string());
         self.fail_if("device_capacity")?;
@@ -377,6 +450,18 @@ impl FilesystemBackend for FakeFilesystemBackend {
     fn mkfs(&self, _mapper: &MapperHandle, _fs: Filesystem) -> Result<(), DomainError> {
         self.log.borrow_mut().push("mkfs".to_string());
         self.fail_if("mkfs")
+    }
+
+    fn growfs(&self, _mapper: &MapperHandle, fs: Filesystem) -> Result<(), DomainError> {
+        self.log.borrow_mut().push("growfs".to_string());
+        *self.last_growfs_filesystem.borrow_mut() = Some(fs);
+        self.fail_if("growfs")
+    }
+
+    fn filesystem_size(&self, _mapper: &MapperHandle, _fs: Filesystem) -> Result<u64, DomainError> {
+        self.log.borrow_mut().push("filesystem_size".to_string());
+        self.fail_if("filesystem_size")?;
+        Ok(self.filesystem_size.unwrap_or(self.device_capacity))
     }
 
     fn remove_backing_file(&self, _path: &Path) -> Result<(), DomainError> {

@@ -309,6 +309,127 @@ fn translates_adapter_failure_canonicalization_failure_path_containing_colon_spa
 }
 
 #[test]
+fn translates_resize_must_grow() {
+    let err = DomainError::ResizeMustGrow {
+        path: PathBuf::from("/tmp/my-tomb.img"),
+        requested: 1_000,
+        current_size: 2_000,
+    };
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(message.contains("1000"));
+    assert!(message.contains("2000"));
+    assert!(message.contains("/tmp/my-tomb.img"));
+}
+
+// "cryptsetup resize --token-only failed for ..." and "failed to run
+// cryptsetup resize: ..." both contain the literal substring "cryptsetup",
+// so a resize failure could silently fall into the generic cryptsetup
+// bucket's create/unlock-flavored framing unless matched ahead of it — the
+// same "marker bleed" class the Epic 2 retro flagged (3 real bugs from this
+// pattern so far).
+#[test]
+fn translates_adapter_failure_cryptsetup_resize_failure_gets_its_own_message() {
+    let err = DomainError::AdapterFailure(
+        "cryptsetup resize --token-only failed for vault-abc123".to_string(),
+    );
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("vault-abc123"));
+
+    let err =
+        DomainError::AdapterFailure("failed to run cryptsetup resize: some io error".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+}
+
+// "resize2fs failed: ..." contains neither "mount" nor "mkfs", so without a
+// dedicated branch it would fall all the way through to the unhelpful
+// generic fallback (which leaks the raw technical string) instead of a
+// plain-language message.
+#[test]
+fn translates_adapter_failure_resize2fs_failure_gets_its_own_message() {
+    let err = DomainError::AdapterFailure("resize2fs failed: some stderr".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("some stderr"));
+
+    let err = DomainError::AdapterFailure("failed to run resize2fs: some io error".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("some io error"));
+}
+
+// Neither "e2fsck -f failed: ..." nor "failed to run e2fsck: ..." contains
+// "resize2fs", "mount", or "mkfs", so without a dedicated branch these would
+// fall all the way through to the unhelpful generic fallback (marker-bleed
+// guard, review finding 2026-07-26).
+#[test]
+fn translates_adapter_failure_e2fsck_failure_gets_its_own_message() {
+    let err = DomainError::AdapterFailure("e2fsck -f failed: some stderr".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("some stderr"));
+
+    let err = DomainError::AdapterFailure("failed to run e2fsck: some io error".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("some io error"));
+}
+
+// `resize`'s pre-grow stat/symlink-refusal failures (`is_block_device`'s own
+// stat, and `set_backing_file_size`'s grow-branch checks) previously had no
+// dedicated branch and leaked raw technical detail via the generic fallback
+// (review finding, 2026-07-26).
+#[test]
+fn translates_adapter_failure_resize_pre_grow_checks_as_sizing_failure() {
+    let err =
+        DomainError::AdapterFailure("failed to stat /tmp/my-tomb.img: some io error".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("some io error"));
+
+    let err = DomainError::AdapterFailure(
+        "/tmp/my-tomb.img is not a regular file — refusing to grow it".to_string(),
+    );
+    let message = translate(&err);
+    assert_no_jargon(&message);
+
+    let err = DomainError::AdapterFailure(
+        "failed to open /tmp/my-tomb.img for growing: some io error".to_string(),
+    );
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("some io error"));
+}
+
+// A `luks.close` failure that happens *after* a successful grow must read
+// distinctly from both a plain resize failure and a plain `close` failure —
+// otherwise the user is told resize failed even though their tomb's capacity
+// was already safely increased (review finding, 2026-07-26).
+#[test]
+fn translates_adapter_failure_post_grow_close_failure_is_distinct_from_generic_close_failure() {
+    let err = DomainError::AdapterFailure(
+        "tomb grown to 8192 bytes, but failed to re-lock afterward: cryptsetup close failed: device is busy"
+            .to_string(),
+    );
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(
+        message.contains("grew this tomb successfully"),
+        "message should acknowledge the grow succeeded: {message:?}"
+    );
+
+    let generic_close_err =
+        DomainError::AdapterFailure("cryptsetup close failed: device is busy".to_string());
+    let generic_message = translate(&generic_close_err);
+    assert_ne!(
+        message, generic_message,
+        "a post-grow close failure should read distinctly from a plain close failure"
+    );
+}
+
+#[test]
 fn translates_key_not_found() {
     let err = DomainError::KeyNotFound("nonexistent".to_string());
     let message = translate(&err);

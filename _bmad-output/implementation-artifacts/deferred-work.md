@@ -67,3 +67,10 @@
 - Ambiguous CLI contract for `close`'s `path` argument — a user may reach for the mounted directory or `/dev/mapper/vault-*` node rather than the original backing path, but this mirrors the exact same convention already used by `unlock`/`enroll`/`revoke`, not a new ambiguity.
 - AD-8's spec text says `FilesystemBackend`'s `mount`/`umount` take a `Filesystem` enum parameter, but neither does — pre-existing gap `mount` already had, harmless under v1's ext4-only scope. [src/ports/filesystem_backend.rs]
 - `close` can't run at all if the backing path was deleted while the tomb is still open — `mapping_name`'s `std::fs::canonicalize` requiring the path to exist is shared by every workflow using this helper (`unlock`/`revoke`/`resize`), not introduced by this story. [src/domain/mapping_name.rs]
+
+## Deferred from: code review of 3-2-grow-an-existing-tombs-capacity (2026-07-26)
+
+- Error-path close failure is silently swallowed — `let _ = luks.close(&mapper);` on resize's error path matches the exact pattern already established in `create.rs:132` and `unlock.rs:30`, not introduced by this story. [src/domain/workflows/resize.rs:72]
+- `filesystem_size`'s `dumpe2fs` parsing assumes an English locale — nothing forces `LC_ALL=C` on adapter subprocesses anywhere in this codebase (e.g. the `cryptsetup --help` plugin-path parsing has the same property), not specific to this story. [src/adapters/exec/mod.rs:1528-1546]
+- No unit test exercises the real `ExecAdapter::is_block_device` against an actual block device — consistent with AD-7's established testing standard for every other hardware-dependent adapter method in this codebase; only reachable via manual `#[ignore]`d hardware tests. [src/adapters/exec/mod.rs]
+- Device-backed headroom hardware scenario doesn't assert the filesystem's own size before/after — test-coverage improvement, not a functional defect; manual-only hardware test, not run in CI. [tests/hardware/main.rs]
