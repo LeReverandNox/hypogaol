@@ -63,7 +63,7 @@ development_status:
   epic-2: in-progress
   2-1-enroll-an-additional-fido2-key: done
   2-2-revoke-a-fido2-key-guarded-against-last-keyslot-lockout: done
-  epic-2-retrospective: optional
+  epic-2-retrospective: done
 
   epic-3: backlog
   3-1-close-an-unlocked-tomb: backlog
@@ -75,19 +75,19 @@ action_items:
   - epic: 1
     action: "Fix mount-point ownership: chown to invoking uid/gid before chmod 0700 in FilesystemBackend::mount (currently root-owned, root-only)"
     owner: "Amelia"
-    status: open
+    status: done
   - epic: 1
     action: "Move mount location from /tmp to /run/media/<username>/<tomb-name>, basename-derived with collision-suffix fallback"
     owner: "Amelia"
-    status: open
+    status: done
   - epic: 1
     action: "Change --path from a flag to a positional argument on create file, create device, and unlock"
     owner: "Amelia"
-    status: open
+    status: done
   - epic: 1
     action: "Sync a story's Status header field to done immediately after its PR merges"
     owner: "Amelia"
-    status: open
+    status: done
   - epic: 1
     action: "Document the sudo requirement for device-backed operations in --help/README before Epic 2's revoke/enroll touch real devices"
     owner: "unassigned"
@@ -104,3 +104,11 @@ action_items:
     action: "RESOLVED (Winston, 2026-07-25) — full design recorded in 2-1-enroll-an-additional-fido2-key.md's Dev Notes ('Architect consultation resolved'). Summary: replace enroll_fido2_key's temporal-diff device identification (the race behind the hang/'More than one FIDO device found' failures) with a spatial choice — Fido2Backend::enroll_fido2_key gains a Fido2DeviceSelection{Interactive, Explicit{new, existing: Option<PathBuf>}} param; Interactive waits for enough enumerated devices then prompts explicitly for each needed role (scales to N>2, no elimination shortcut); Explicit adds --fido2-device/--unlock-fido2-device flags to enroll (all-or-nothing, for unattended/scripted use). unlock (LuksBackend::open) separately gets a presence-wait loop only (>=1 device, no picker, no new flag, no signature change — cryptsetup's own credential-based auto already disambiguates fine there; user declined an explicit unlock flag for now). create's bootstrap-enroll call (finish_provisioning, same shared enroll_fido2_key fn) is now explicitly in scope too (user-approved 2026-07-25, deliberately overriding the story's original 'no port/signature changes, don't touch create.rs' constraint): gets the same Interactive single-role treatment (silent auto-pick when exactly one device present, so today's single-key UX is unchanged) plus a new scripted --fido2-device flag on create file/create device (no --unlock-fido2-device there, no existing-key role to fill). No architecture-spine amendment needed. DONE — implemented (commits 999b7ef..25d0fb4) and hardware-verified 2026-07-25, all 6 make test-hardware scenarios passing. Two follow-on test-only fixes were needed along the way (neither was a product bug): the enroll regression test was grepping the wrong luksDump form for its custom token fields, and it needed manual key-swap pauses to actually exercise both keys independently rather than letting cryptsetup's auto-matching silently reuse the same one twice. Full detail in the story file's Dev Notes."
     owner: "Amelia"
     status: done
+  - epic: 2
+    action: "When scoping Story 3.1 (close), explicitly decide the mount-directory rmdir behavior after unmount, rather than letting it fall through unaddressed"
+    owner: "Amelia"
+    status: open
+  - epic: 2
+    action: "When a story adds a new workflow reusing shared adapters::exec error strings, explicitly check for marker-bleed into other workflows' plain-language translations before merge (3 real bugs from this pattern across 2 stories so far)"
+    owner: "Amelia"
+    status: open
