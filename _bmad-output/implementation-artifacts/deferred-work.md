@@ -58,3 +58,12 @@
 - `parse_label` doesn't trim whitespace; a trailing-space label becomes practically unrevocable since lookup is exact-match — pre-existing bug shared with `enroll`, fix would need to touch out-of-scope code. [src/cli/main.rs]
 - Unsanitized `--label` value interpolated into terminal/error output (control-character risk) — pre-existing, low impact for a single-user local CLI. [src/cli/main.rs, src/cli/ux.rs]
 - `run_revoke` calls `preflight::check` before `revoke::run` also calls it internally — double `cryptsetup luksDump` subprocess spawn per invocation — pre-existing pattern shared with `enroll`/`unlock`. [src/cli/main.rs, src/domain/workflows/revoke.rs]
+
+## Deferred from: code review of 3-1-close-an-unlocked-tomb (2026-07-26)
+
+- TOCTOU race between the `findmnt` check and the `umount` call — pre-existing risk pattern shared with `mount`'s own non-atomic multi-step subprocess sequence; low probability, no clean fix without a different unmount mechanism. [src/adapters/exec/mod.rs, `umount`]
+- Silent `rmdir` failure after a successful `umount` is swallowed with no user-facing warning — mirrors the exact same `let _ = std::fs::remove_dir(...)` pattern `mount`'s own cleanup-on-error paths already use; established precedent, not a new inconsistency. [src/adapters/exec/mod.rs, `umount`]
+- No unit test exercises the real `ExecAdapter::umount` subprocess wiring (`findmnt`/`umount`/`rmdir`) — covered only by manual-only `#[ignore]`d hardware tests, consistent with AD-7's established testing standard for every other adapter method in this codebase.
+- Ambiguous CLI contract for `close`'s `path` argument — a user may reach for the mounted directory or `/dev/mapper/vault-*` node rather than the original backing path, but this mirrors the exact same convention already used by `unlock`/`enroll`/`revoke`, not a new ambiguity.
+- AD-8's spec text says `FilesystemBackend`'s `mount`/`umount` take a `Filesystem` enum parameter, but neither does — pre-existing gap `mount` already had, harmless under v1's ext4-only scope. [src/ports/filesystem_backend.rs]
+- `close` can't run at all if the backing path was deleted while the tomb is still open — `mapping_name`'s `std::fs::canonicalize` requiring the path to exist is shared by every workflow using this helper (`unlock`/`revoke`/`resize`), not introduced by this story. [src/domain/mapping_name.rs]
