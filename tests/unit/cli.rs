@@ -97,6 +97,12 @@ fn unlock_help_lists_path_as_positional() {
 }
 
 #[test]
+fn unlock_help_lists_read_only_flag() {
+    let help = help_text(&["tomb-fido2", "unlock", "--help"]);
+    assert!(help.contains("--read-only"));
+}
+
+#[test]
 fn create_file_help_lists_path_as_positional() {
     let help = help_text(&["tomb-fido2", "create", "file", "--help"]);
     assert!(help.contains("<PATH>"));
