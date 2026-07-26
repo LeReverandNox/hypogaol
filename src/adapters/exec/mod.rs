@@ -1349,26 +1349,65 @@ impl FilesystemBackend for ExecAdapter {
     }
 
     fn set_backing_file_size(&self, path: &Path, size: u64) -> Result<(), DomainError> {
-        // `create_new` makes the OS enforce exclusivity: it fails if anything
-        // (a regular file or a symlink, dangling or not) already exists at
-        // `path`, closing the race window between the caller's `path_exists`
-        // check and this call — a plain `File::create` would instead follow
-        // a symlink and silently truncate/write through it (AC #2).
-        let file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(path)
-            .map_err(|e| {
-                if e.kind() == std::io::ErrorKind::AlreadyExists {
-                    DomainError::DestinationExists(path.to_path_buf())
-                } else {
-                    DomainError::AdapterFailure(format!("failed to create {}: {e}", path.display()))
+        // Branches on whether `path` already exists (Story 3.2, AC #1):
+        // `create`'s call site never hits the grow branch (it already checks
+        // `path_exists` first and refuses if true), so that branch's
+        // behavior is exactly unchanged. `resize`'s call site only ever
+        // hits the grow branch (its target already has a LUKS2 header).
+        match std::fs::symlink_metadata(path) {
+            Ok(metadata) => {
+                // Grow an existing file. First confirm it's a plain regular
+                // file, not a symlink — a plain `File::open` would instead
+                // follow a symlink and silently write through it, the same
+                // clobber protection the create branch below gets from
+                // `create_new`, extended to this path too.
+                if !metadata.file_type().is_file() {
+                    return Err(DomainError::AdapterFailure(format!(
+                        "{} is not a regular file — refusing to grow it",
+                        path.display()
+                    )));
                 }
-            })?;
-        file.set_len(size).map_err(|e| {
-            DomainError::AdapterFailure(format!("failed to size {}: {e}", path.display()))
-        })?;
-        Ok(())
+
+                let file = std::fs::OpenOptions::new().write(true).open(path).map_err(|e| {
+                    DomainError::AdapterFailure(format!(
+                        "failed to open {} for growing: {e}",
+                        path.display()
+                    ))
+                })?;
+                file.set_len(size).map_err(|e| {
+                    DomainError::AdapterFailure(format!("failed to size {}: {e}", path.display()))
+                })
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // `create_new` makes the OS enforce exclusivity: it fails if
+                // anything (a regular file or a symlink, dangling or not)
+                // already exists at `path`, closing the race window between
+                // the caller's `path_exists` check and this call — a plain
+                // `File::create` would instead follow a symlink and silently
+                // truncate/write through it (AC #2).
+                let file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(path)
+                    .map_err(|e| {
+                        if e.kind() == std::io::ErrorKind::AlreadyExists {
+                            DomainError::DestinationExists(path.to_path_buf())
+                        } else {
+                            DomainError::AdapterFailure(format!(
+                                "failed to create {}: {e}",
+                                path.display()
+                            ))
+                        }
+                    })?;
+                file.set_len(size).map_err(|e| {
+                    DomainError::AdapterFailure(format!("failed to size {}: {e}", path.display()))
+                })
+            }
+            Err(e) => Err(DomainError::AdapterFailure(format!(
+                "failed to stat {}: {e}",
+                path.display()
+            ))),
+        }
     }
 
     fn remove_backing_file(&self, path: &Path) -> Result<(), DomainError> {
@@ -1712,6 +1751,65 @@ mod tests {
         assert_eq!(
             result,
             ("/dev/hidraw1".to_string(), Some("/dev/hidraw0".to_string()))
+        );
+    }
+
+    struct TempPath(PathBuf);
+
+    impl TempPath {
+        fn unique(name: &str) -> Self {
+            let suffix = random_hex_suffix().expect("failed to generate random suffix");
+            Self(std::env::temp_dir().join(format!("tomb-fido2-unit-test-{name}-{suffix}")))
+        }
+    }
+
+    impl Drop for TempPath {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.0);
+        }
+    }
+
+    #[test]
+    fn set_backing_file_size_creates_a_new_file_when_missing() {
+        let path = TempPath::unique("create-new");
+        let adapter = ExecAdapter::default();
+
+        let result = adapter.set_backing_file_size(&path.0, 4096);
+
+        assert!(result.is_ok(), "expected Ok, got {result:?}");
+        assert_eq!(std::fs::metadata(&path.0).unwrap().len(), 4096);
+    }
+
+    #[test]
+    fn set_backing_file_size_grows_an_existing_file() {
+        let path = TempPath::unique("grow-existing");
+        std::fs::write(&path.0, [0u8; 1024]).expect("failed to write fixture file");
+        let adapter = ExecAdapter::default();
+
+        let result = adapter.set_backing_file_size(&path.0, 8192);
+
+        assert!(result.is_ok(), "expected Ok, got {result:?}");
+        assert_eq!(std::fs::metadata(&path.0).unwrap().len(), 8192);
+    }
+
+    #[test]
+    fn set_backing_file_size_refuses_to_grow_through_a_symlink() {
+        let target = TempPath::unique("symlink-target");
+        std::fs::write(&target.0, [0u8; 1024]).expect("failed to write fixture file");
+        let link = TempPath::unique("symlink-link");
+        std::os::unix::fs::symlink(&target.0, &link.0).expect("failed to create symlink");
+        let adapter = ExecAdapter::default();
+
+        let result = adapter.set_backing_file_size(&link.0, 8192);
+
+        let Err(DomainError::AdapterFailure(message)) = result else {
+            panic!("expected AdapterFailure, got {result:?}");
+        };
+        assert!(message.contains("not a regular file"));
+        assert_eq!(
+            std::fs::metadata(&target.0).unwrap().len(),
+            1024,
+            "the symlink target must be left untouched"
         );
     }
 }
