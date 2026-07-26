@@ -36,6 +36,19 @@ pub trait FilesystemBackend {
     /// larger size; no explicit target size is passed.
     fn growfs(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<(), DomainError>;
 
+    /// The `fs` filesystem's own current size on `mapper`'s active mapping
+    /// (v1: `Filesystem::Ext4` only) — a pure query, no mutation. This is
+    /// deliberately distinct from `device_capacity(&mapper.device_node())`:
+    /// confirmed empirically on real hardware that a LUKS2 mapping's dynamic
+    /// segment always reflects the *full* backing storage on every reopen,
+    /// even for a device-backed tomb created with less than the raw
+    /// device's full capacity (Story 1.6 headroom) — so the mapping's own
+    /// size can never distinguish "this tomb's filesystem currently uses
+    /// less than the raw device" from "it uses all of it." Only the
+    /// filesystem's own superblock (block count × block size) reports the
+    /// tomb's true current provisioned size.
+    fn filesystem_size(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<u64, DomainError>;
+
     /// Best-effort removal of a backing file this adapter created — used to
     /// clean up after a file-backed `create` fails partway through, so a
     /// retry at the same destination isn't permanently blocked.

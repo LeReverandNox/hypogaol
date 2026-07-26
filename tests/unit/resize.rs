@@ -38,7 +38,7 @@ fn file_backed_happy_path_runs_every_port_call_once_in_order() {
     let fs = FakeFilesystemBackend::passing()
         .with_log(log.clone())
         .with_is_block_device(false)
-        .with_live_device_capacity(4096);
+        .with_filesystem_size(4096);
 
     let fixture = RealFixtureFile::create("resize-file-happy-path", &[0u8; 4096]);
 
@@ -49,11 +49,11 @@ fn file_backed_happy_path_runs_every_port_call_once_in_order() {
         *log.borrow(),
         vec![
             "is_block_device".to_string(),
+            "read_filesystem".to_string(),
             "open".to_string(),
-            "device_capacity".to_string(),
+            "filesystem_size".to_string(),
             "set_backing_file_size".to_string(),
             "resize".to_string(),
-            "read_filesystem".to_string(),
             "growfs".to_string(),
             "close".to_string(),
         ]
@@ -75,7 +75,7 @@ fn growfs_receives_whatever_read_filesystem_reports() {
     let fs = FakeFilesystemBackend::passing()
         .with_log(log.clone())
         .with_is_block_device(false)
-        .with_live_device_capacity(4096);
+        .with_filesystem_size(4096);
 
     let fixture = RealFixtureFile::create("resize-growfs-filesystem", &[0u8; 4096]);
 
@@ -94,7 +94,7 @@ fn device_backed_happy_path_never_calls_set_backing_file_size() {
         .with_log(log.clone())
         .with_is_block_device(true)
         .with_device_capacity(1024 * 1024 * 1024)
-        .with_live_device_capacity(4096);
+        .with_filesystem_size(4096);
 
     let fixture = RealFixtureFile::create("resize-device-happy-path", &[0u8; 4096]);
 
@@ -105,11 +105,11 @@ fn device_backed_happy_path_never_calls_set_backing_file_size() {
         *log.borrow(),
         vec![
             "is_block_device".to_string(),
+            "read_filesystem".to_string(),
             "device_capacity".to_string(),
             "open".to_string(),
-            "device_capacity".to_string(),
+            "filesystem_size".to_string(),
             "resize".to_string(),
-            "read_filesystem".to_string(),
             "growfs".to_string(),
             "close".to_string(),
         ]
@@ -143,7 +143,7 @@ fn file_backed_grow_only_rejection_never_calls_open() {
     assert_eq!(current_size, 4096);
     assert_eq!(
         *log.borrow(),
-        vec!["is_block_device".to_string()],
+        vec!["is_block_device".to_string(), "read_filesystem".to_string()],
         "grow-only rejection must not reach luks.open"
     );
 }
@@ -174,7 +174,11 @@ fn device_backed_too_small_partition_rejection_never_calls_open() {
     assert_eq!(capacity, 1024);
     assert_eq!(
         *log.borrow(),
-        vec!["is_block_device".to_string(), "device_capacity".to_string()],
+        vec![
+            "is_block_device".to_string(),
+            "read_filesystem".to_string(),
+            "device_capacity".to_string(),
+        ],
         "too-small-partition rejection must not reach luks.open"
     );
 }
@@ -182,9 +186,11 @@ fn device_backed_too_small_partition_rejection_never_calls_open() {
 // Story 1.6's headroom feature means a device-backed tomb's raw capacity can
 // be larger than its actual current provisioned size — tier 1 alone (which
 // only compares against raw capacity) cannot catch a request that's smaller
-// than the *live* current size, so tier 2 (checked after `open`, against
-// the active mapping) must still reject it, and must close the mapping it
-// just opened rather than leaking it (rollback discipline).
+// than the tomb's *actual* current filesystem size, so tier 2 (checked after
+// `open`, against the filesystem's own superblock — never the raw LUKS
+// mapping, which always reports the full backing storage on reopen) must
+// still reject it, and must close the mapping it just opened rather than
+// leaking it (rollback discipline).
 #[test]
 fn device_backed_headroom_shrink_is_caught_by_tier_two_and_closes_the_mapping() {
     let log = new_call_log();
@@ -194,12 +200,12 @@ fn device_backed_headroom_shrink_is_caught_by_tier_two_and_closes_the_mapping() 
         .with_log(log.clone())
         .with_is_block_device(true)
         .with_device_capacity(1024 * 1024 * 1024) // raw device is huge...
-        .with_live_device_capacity(4096); // ...but this tomb only uses 4096 bytes of it.
+        .with_filesystem_size(4096); // ...but this tomb's filesystem only uses 4096 bytes of it.
 
     let fixture = RealFixtureFile::create("resize-headroom-shrink", &[0u8; 4096]);
 
     // Passes tier 1 (well within raw capacity) but does not actually grow
-    // the tomb's live current size of 4096.
+    // the tomb's live current filesystem size of 4096.
     let result = resize::run(&fixture.0, 4096, &luks, &fido2, &fs);
 
     let Err(DomainError::ResizeMustGrow {
@@ -216,9 +222,10 @@ fn device_backed_headroom_shrink_is_caught_by_tier_two_and_closes_the_mapping() 
         *log.borrow(),
         vec![
             "is_block_device".to_string(),
+            "read_filesystem".to_string(),
             "device_capacity".to_string(),
             "open".to_string(),
-            "device_capacity".to_string(),
+            "filesystem_size".to_string(),
             "close".to_string(),
         ],
         "tier 2's rejection must still close the mapping tier 2 itself just opened"
@@ -233,7 +240,7 @@ fn mid_flow_failure_after_a_successful_resize_still_closes_the_mapping() {
     let fs = FakeFilesystemBackend::passing()
         .with_log(log.clone())
         .with_is_block_device(false)
-        .with_live_device_capacity(4096)
+        .with_filesystem_size(4096)
         .with_failure_at("growfs");
 
     let fixture = RealFixtureFile::create("resize-mid-flow-failure", &[0u8; 4096]);
@@ -245,11 +252,11 @@ fn mid_flow_failure_after_a_successful_resize_still_closes_the_mapping() {
         *log.borrow(),
         vec![
             "is_block_device".to_string(),
+            "read_filesystem".to_string(),
             "open".to_string(),
-            "device_capacity".to_string(),
+            "filesystem_size".to_string(),
             "set_backing_file_size".to_string(),
             "resize".to_string(),
-            "read_filesystem".to_string(),
             "growfs".to_string(),
             "close".to_string(),
         ],

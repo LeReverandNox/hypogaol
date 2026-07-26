@@ -1300,6 +1300,8 @@ impl FilesystemBackend for ExecAdapter {
         for binary in [
             "mkfs.ext4",
             "resize2fs",
+            "e2fsck",
+            "dumpe2fs",
             "blockdev",
             "mount",
             "umount",
@@ -1454,6 +1456,32 @@ impl FilesystemBackend for ExecAdapter {
     fn growfs(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<(), DomainError> {
         match fs {
             Filesystem::Ext4 => {
+                // Confirmed empirically on real hardware: `resize2fs` refuses
+                // to grow an unmounted filesystem that hasn't been checked
+                // ("Please run 'e2fsck -f <device>' first"), even one that
+                // was never actually corrupted — this workflow never mounts
+                // the filesystem (Task 3's doc comment), so it always hits
+                // this. `-p` (preen) auto-fixes non-conflicting problems
+                // without prompting; exit code 1 means "errors corrected" and
+                // is still a success per e2fsck(8) (2+ means something more
+                // serious, e.g. "reboot needed" or "operational error").
+                let fsck_output = privileged("e2fsck")
+                    .args(["-f", "-p"])
+                    .arg(mapper.device_node())
+                    .output()
+                    .map_err(|e| {
+                        DomainError::AdapterFailure(format!("failed to run e2fsck: {e}"))
+                    })?;
+                match fsck_output.status.code() {
+                    Some(0) | Some(1) => {}
+                    _ => {
+                        return Err(DomainError::AdapterFailure(format!(
+                            "e2fsck -f failed: {}",
+                            String::from_utf8_lossy(&fsck_output.stderr).trim()
+                        )));
+                    }
+                }
+
                 // No explicit target size: grows to fill the now-larger
                 // mapping (`resize2fs`'s documented behavior when no size
                 // argument is given). Runs against the unmounted mapper
@@ -1474,6 +1502,49 @@ impl FilesystemBackend for ExecAdapter {
                         String::from_utf8_lossy(&output.stderr).trim()
                     )))
                 }
+            }
+        }
+    }
+
+    fn filesystem_size(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<u64, DomainError> {
+        match fs {
+            Filesystem::Ext4 => {
+                let output = privileged("dumpe2fs")
+                    .arg("-h")
+                    .arg(mapper.device_node())
+                    .output()
+                    .map_err(|e| {
+                        DomainError::AdapterFailure(format!("failed to run dumpe2fs: {e}"))
+                    })?;
+
+                if !output.status.success() {
+                    return Err(DomainError::AdapterFailure(format!(
+                        "dumpe2fs -h failed: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )));
+                }
+
+                let text = String::from_utf8_lossy(&output.stdout);
+                let block_count: u64 = text
+                    .lines()
+                    .find_map(|line| line.strip_prefix("Block count:"))
+                    .and_then(|value| value.trim().parse().ok())
+                    .ok_or_else(|| {
+                        DomainError::AdapterFailure(
+                            "dumpe2fs -h output missing a parsable Block count".to_string(),
+                        )
+                    })?;
+                let block_size: u64 = text
+                    .lines()
+                    .find_map(|line| line.strip_prefix("Block size:"))
+                    .and_then(|value| value.trim().parse().ok())
+                    .ok_or_else(|| {
+                        DomainError::AdapterFailure(
+                            "dumpe2fs -h output missing a parsable Block size".to_string(),
+                        )
+                    })?;
+
+                Ok(block_count * block_size)
             }
         }
     }

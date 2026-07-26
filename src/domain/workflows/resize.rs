@@ -3,7 +3,7 @@ use std::path::Path;
 use crate::domain::errors::DomainError;
 use crate::domain::mapping_name;
 use crate::domain::preflight;
-use crate::domain::types::MapperHandle;
+use crate::domain::types::{Filesystem, MapperHandle};
 use crate::ports::fido2_backend::Fido2Backend;
 use crate::ports::filesystem_backend::FilesystemBackend;
 use crate::ports::luks_backend::LuksBackend;
@@ -28,6 +28,11 @@ pub fn run(
 
     let name = mapping_name::mapping_name(path)?;
     let device_backed = fs.is_block_device(path)?;
+
+    // Read early (Task 5's own note: a read failure here should abort
+    // before anything is touched) — also needed by tier 2 below to know
+    // which tool to query the live filesystem size with.
+    let filesystem = luks.read_filesystem(path)?;
 
     // Tier 1 of the grow-only check (AD-10: rejected "before calling any
     // adapter" for the common/obvious cases) — see this story's Dev Notes
@@ -60,7 +65,7 @@ pub fn run(
     // succeeds, every subsequent exit path must close the mapping — no
     // partial "undo" of a successful set_backing_file_size/resize/growfs
     // step, just close and propagate whichever error occurred.
-    let result = grow_open_mapping(path, new_size, device_backed, &mapper, luks, fs);
+    let result = grow_open_mapping(path, new_size, device_backed, filesystem, &mapper, luks, fs);
     match result {
         Ok(()) => luks.close(&mapper),
         Err(err) => {
@@ -78,18 +83,24 @@ fn grow_open_mapping(
     path: &Path,
     new_size: u64,
     device_backed: bool,
+    filesystem: Filesystem,
     mapper: &MapperHandle,
     luks: &dyn LuksBackend,
     fs: &dyn FilesystemBackend,
 ) -> Result<(), DomainError> {
     // Tier 2 (unavoidable — resize/growfs need the mapping active
     // regardless): re-derives the true current provisioned size from the
-    // active mapping itself — the only way to learn a device-backed tomb's
-    // real current size when it's smaller than the raw device's (Story 1.6
-    // headroom), since nothing about it is ever persisted (AD-2). Runs
-    // after `open` (an authentication/read operation, not a mutation) but
-    // strictly before any mutating call below.
-    let live_current_size = fs.device_capacity(&mapper.device_node())?;
+    // filesystem's own superblock, not the LUKS mapping — confirmed
+    // empirically on real hardware that a LUKS2 mapping's dynamic segment
+    // always reflects the *full* backing storage on reopen, even for a
+    // device-backed tomb using Story 1.6 headroom (a smaller-than-capacity
+    // create-time constraint is never persisted, AD-2), so
+    // `device_capacity(&mapper.device_node())` cannot tell "this tomb
+    // currently uses less than the raw device" from "it uses all of it."
+    // Only the filesystem's own block-count metadata can. Runs after `open`
+    // (an authentication/read operation, not a mutation) but strictly
+    // before any mutating call below.
+    let live_current_size = fs.filesystem_size(mapper, filesystem)?;
     if new_size <= live_current_size {
         return Err(DomainError::ResizeMustGrow {
             path: path.to_path_buf(),
@@ -103,8 +114,6 @@ fn grow_open_mapping(
     }
 
     luks.resize(mapper)?;
-
-    let filesystem = luks.read_filesystem(path)?;
 
     fs.growfs(mapper, filesystem)
 }
