@@ -8,8 +8,8 @@ use crate::ports::filesystem_backend::FilesystemBackend;
 use crate::ports::luks_backend::LuksBackend;
 
 /// `fido2` is unused beyond `preflight::check` — kept in the signature only
-/// for AD-4's uniform three-port preflight gate, same as `close`/`resize`'s
-/// existing stub signatures.
+/// for AD-4's uniform three-port preflight gate, same as every sibling
+/// workflow.
 pub fn run(
     path: &Path,
     luks: &dyn LuksBackend,
