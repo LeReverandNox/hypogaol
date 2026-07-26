@@ -1621,7 +1621,13 @@ impl FilesystemBackend for ExecAdapter {
         // from LUKS2 token metadata unlock has no other reason to read.
         let mut mount_cmd = privileged("mount");
         if read_only {
-            mount_cmd.args(["-o", "ro"]);
+            // `noload`: a read-only `cryptsetup open` also makes the
+            // underlying mapping unwritable, so the kernel can't auto-replay
+            // an unclean ext4 journal (replay itself needs a block-device
+            // write) — without `noload`, `mount -o ro` on a tomb that wasn't
+            // cleanly closed fails outright. `noload` skips replay, which is
+            // exactly the read-only guarantee this flag exists to uphold.
+            mount_cmd.args(["-o", "ro,noload"]);
         }
         let output = match mount_cmd
             .arg(mapper.device_node())
