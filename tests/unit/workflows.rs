@@ -40,6 +40,7 @@ fn unlock_run_stops_at_preflight_before_reaching_its_own_todo() {
 
     let result = unlock::run(
         std::path::Path::new("/tmp/does-not-matter"),
+        false,
         &luks,
         &fido2,
         &fs,

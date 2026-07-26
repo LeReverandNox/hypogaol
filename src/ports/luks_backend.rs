@@ -40,8 +40,9 @@ pub trait LuksBackend {
     /// FIDO2 token, prompting for touch/PIN on the real terminal. Performs no
     /// formatting — unlike `bootstrap_format_and_open`, `path` must already
     /// carry a LUKS2 header. `name` is derived by the caller via the shared
-    /// `mapping_name` helper, never computed here (AD-12).
-    fn open(&self, path: &Path, name: &str) -> Result<MapperHandle, DomainError>;
+    /// `mapping_name` helper, never computed here (AD-12). `read_only` maps
+    /// to `cryptsetup open --readonly` (AD-11).
+    fn open(&self, path: &Path, name: &str, read_only: bool) -> Result<MapperHandle, DomainError>;
 
     /// Grows `mapper`'s already-open LUKS2 mapping to fill its now-larger
     /// backing storage (Story 3.2, AC #1/#4). Takes no explicit size: the

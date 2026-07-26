@@ -12,6 +12,7 @@ use crate::ports::luks_backend::LuksBackend;
 /// workflow.
 pub fn run(
     path: &Path,
+    read_only: bool,
     luks: &dyn LuksBackend,
     fido2: &dyn Fido2Backend,
     fs: &dyn FilesystemBackend,
@@ -19,12 +20,12 @@ pub fn run(
     preflight::check(luks, fido2, fs)?;
 
     let name = mapping_name::mapping_name(path)?;
-    let mapper = luks.open(path, &name)?;
+    let mapper = luks.open(path, &name, read_only)?;
 
     // A successfully opened mapping must not be left dangling if the mount
     // fails (the same close-on-failure discipline Story 1.6's post-review
     // applied to create's own mid-flow failures).
-    match fs.mount(&mapper) {
+    match fs.mount(&mapper, read_only) {
         Ok(mountpoint) => Ok(mountpoint),
         Err(err) => {
             let _ = luks.close(&mapper);

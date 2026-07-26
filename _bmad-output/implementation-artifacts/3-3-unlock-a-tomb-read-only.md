@@ -22,23 +22,23 @@ so that I can inspect its contents without risking any writes, at both the block
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Add `read_only: bool` parameter to `LuksBackend::open` (AC #1, #2)
-  - [ ] In `src/ports/luks_backend.rs:44`, change `fn open(&self, path: &Path, name: &str) -> Result<MapperHandle, DomainError>` to `fn open(&self, path: &Path, name: &str, read_only: bool) -> Result<MapperHandle, DomainError>`. Update the doc comment to note the new parameter maps to `cryptsetup open --readonly` (AD-11).
-  - [ ] Implement in `ExecAdapter::open` (`src/adapters/exec/mod.rs:1035`): when `read_only` is `true`, add `--readonly` to the `cryptsetup open --token-only` args (order doesn't matter to cryptsetup, but keep `--token-only` first for consistency with the existing call). When `false`, behavior is byte-for-byte identical to today.
+- [x] Task 1: Add `read_only: bool` parameter to `LuksBackend::open` (AC #1, #2)
+  - [x] In `src/ports/luks_backend.rs:44`, change `fn open(&self, path: &Path, name: &str) -> Result<MapperHandle, DomainError>` to `fn open(&self, path: &Path, name: &str, read_only: bool) -> Result<MapperHandle, DomainError>`. Update the doc comment to note the new parameter maps to `cryptsetup open --readonly` (AD-11).
+  - [x] Implement in `ExecAdapter::open` (`src/adapters/exec/mod.rs:1035`): when `read_only` is `true`, add `--readonly` to the `cryptsetup open --token-only` args (order doesn't matter to cryptsetup, but keep `--token-only` first for consistency with the existing call). When `false`, behavior is byte-for-byte identical to today.
 
-- [ ] Task 2: Add `read_only: bool` parameter to `FilesystemBackend::mount` (AC #1, #2)
-  - [ ] In `src/ports/filesystem_backend.rs:62`, change `fn mount(&self, mapper: &MapperHandle) -> Result<PathBuf, DomainError>` to `fn mount(&self, mapper: &MapperHandle, read_only: bool) -> Result<PathBuf, DomainError>`. Update the doc comment to note `-o ro` and reference AD-11.
-  - [ ] Implement in `ExecAdapter::mount` (`src/adapters/exec/mod.rs:1562`): when `read_only` is `true`, add `-o ro` to the `mount` invocation at `src/adapters/exec/mod.rs:1622`.
-  - [ ] **Required design decision — read this before touching the chown/chmod block (`src/adapters/exec/mod.rs:1649-1694`):** that block runs `chown`/`chmod 0700` against the just-created mount point, which — once `mount` has succeeded — resolves to the mounted filesystem's own root inode (persisted inside the encrypted volume, not the transient empty directory `create_mount_point` made). Both calls need write access to the filesystem. A filesystem mounted `-o ro` refuses metadata writes, so running `chown`/`chmod` unconditionally after a read-only mount would itself fail (`EROFS`), turning every read-only unlock into a hard error. **Skip the `chown`/`chmod` block entirely when `read_only` is `true`** — return `Ok(mountpoint)` right after the `mount` call succeeds. Document inline why: ownership/permissions on the volume's root inode are whatever a prior *writable* unlock already persisted there (normal unlock chowns to the invoking user on every mount, so any tomb that has ever been unlocked normally already carries correct ownership); a tomb that has *never* been unlocked writably will show root-owned, `mkfs.ext4`-default-mode (`0755`) permissions on its first-ever read-only unlock — world-readable/traversable, so the invoking user can still read (just not chown/chmod it), which is an acceptable, documented limitation rather than a bug. Do not attempt to work around this with a temporary rw-mount-then-remount-ro sequence — that would violate AD-11's "single `read_only` bool, same call, never one without the other" rule and briefly leaves a writable window this story exists to prevent.
+- [x] Task 2: Add `read_only: bool` parameter to `FilesystemBackend::mount` (AC #1, #2)
+  - [x] In `src/ports/filesystem_backend.rs:62`, change `fn mount(&self, mapper: &MapperHandle) -> Result<PathBuf, DomainError>` to `fn mount(&self, mapper: &MapperHandle, read_only: bool) -> Result<PathBuf, DomainError>`. Update the doc comment to note `-o ro` and reference AD-11.
+  - [x] Implement in `ExecAdapter::mount` (`src/adapters/exec/mod.rs:1562`): when `read_only` is `true`, add `-o ro` to the `mount` invocation at `src/adapters/exec/mod.rs:1622`.
+  - [x] **Required design decision — read this before touching the chown/chmod block (`src/adapters/exec/mod.rs:1649-1694`):** that block runs `chown`/`chmod 0700` against the just-created mount point, which — once `mount` has succeeded — resolves to the mounted filesystem's own root inode (persisted inside the encrypted volume, not the transient empty directory `create_mount_point` made). Both calls need write access to the filesystem. A filesystem mounted `-o ro` refuses metadata writes, so running `chown`/`chmod` unconditionally after a read-only mount would itself fail (`EROFS`), turning every read-only unlock into a hard error. **Skip the `chown`/`chmod` block entirely when `read_only` is `true`** — return `Ok(mountpoint)` right after the `mount` call succeeds. Document inline why: ownership/permissions on the volume's root inode are whatever a prior *writable* unlock already persisted there (normal unlock chowns to the invoking user on every mount, so any tomb that has ever been unlocked normally already carries correct ownership); a tomb that has *never* been unlocked writably will show root-owned, `mkfs.ext4`-default-mode (`0755`) permissions on its first-ever read-only unlock — world-readable/traversable, so the invoking user can still read (just not chown/chmod it), which is an acceptable, documented limitation rather than a bug. Do not attempt to work around this with a temporary rw-mount-then-remount-ro sequence — that would violate AD-11's "single `read_only` bool, same call, never one without the other" rule and briefly leaves a writable window this story exists to prevent.
 
-- [ ] Task 3: Thread `read_only` through `domain::workflows::unlock::run` (AC #1, #3, #4, #5)
-  - [ ] In `src/domain/workflows/unlock.rs`, add a `read_only: bool` parameter (mirroring `resize::run`'s `new_size` position — right after `path`): `pub fn run(path: &Path, read_only: bool, luks: &dyn LuksBackend, fido2: &dyn Fido2Backend, fs: &dyn FilesystemBackend) -> Result<PathBuf, DomainError>`.
-  - [ ] Pass `read_only` to both `luks.open(path, &name, read_only)?` and `fs.mount(&mapper, read_only)?` — the same single bool into both calls, per AD-11's letter (AC #1).
-  - [ ] The existing rollback discipline (`src/domain/workflows/unlock.rs:24-33`: `luks.close(&mapper)` if `mount` fails) needs **no logic change** — it already runs on any `mount` error regardless of `read_only`, satisfying AC #3 unmodified. Do not special-case the read-only path here.
-  - [ ] No target-type branching (AC #5) — `unlock::run` already takes one `path` for both file- and device-backed targets and makes no decision based on which; adding `read_only` doesn't change that.
+- [x] Task 3: Thread `read_only` through `domain::workflows::unlock::run` (AC #1, #3, #4, #5)
+  - [x] In `src/domain/workflows/unlock.rs`, add a `read_only: bool` parameter (mirroring `resize::run`'s `new_size` position — right after `path`): `pub fn run(path: &Path, read_only: bool, luks: &dyn LuksBackend, fido2: &dyn Fido2Backend, fs: &dyn FilesystemBackend) -> Result<PathBuf, DomainError>`.
+  - [x] Pass `read_only` to both `luks.open(path, &name, read_only)?` and `fs.mount(&mapper, read_only)?` — the same single bool into both calls, per AD-11's letter (AC #1).
+  - [x] The existing rollback discipline (`src/domain/workflows/unlock.rs:24-33`: `luks.close(&mapper)` if `mount` fails) needs **no logic change** — it already runs on any `mount` error regardless of `read_only`, satisfying AC #3 unmodified. Do not special-case the read-only path here.
+  - [x] No target-type branching (AC #5) — `unlock::run` already takes one `path` for both file- and device-backed targets and makes no decision based on which; adding `read_only` doesn't change that.
 
-- [ ] Task 4: Update `resize::run`'s call site for the new `open` signature (compile fix, no AC — `resize` always needs a writable mapping)
-  - [ ] `src/domain/workflows/resize.rs:74`: change `luks.open(path, &name)?` to `luks.open(path, &name, false)?`. Resize must grow the volume, so it always opens read-write.
+- [x] Task 4: Update `resize::run`'s call site for the new `open` signature (compile fix, no AC — `resize` always needs a writable mapping)
+  - [x] `src/domain/workflows/resize.rs:74`: change `luks.open(path, &name)?` to `luks.open(path, &name, false)?`. Resize must grow the volume, so it always opens read-write.
 
 - [ ] Task 5: Wire the `--read-only` CLI flag (AC #1, #4, #5)
   - [ ] In `src/cli/main.rs`, add a `read_only: bool` field to the `Unlock` variant (`src/cli/main.rs:36-40`) with `#[arg(long)]` — clap 4.6's derive gives a bare `bool` field `ArgAction::SetTrue` automatically, so no explicit `action = ...` is needed, mirroring how every other flag in this file is declared. Field name `read_only` maps to `--read-only` via clap's automatic kebab-case conversion (consistent with `--fido2-device` etc.). Give it a short help string, e.g. "Unlock read-only — refuses all writes at both the block-device and filesystem level".
@@ -120,8 +120,18 @@ Unit tests against the shared fakes in `tests/unit/fakes.rs`, run in default CI.
 
 ### Agent Model Used
 
+Claude Sonnet 5 (claude-sonnet-5)
+
 ### Debug Log References
 
 ### Completion Notes List
 
+- Tasks 1-4: threaded `read_only: bool` through `LuksBackend::open`, `FilesystemBackend::mount`, `unlock::run`, and fixed `resize::run`'s call site. `ExecAdapter::mount` skips the chown/chmod block entirely when `read_only` is true, per the story's documented design decision. `cargo build` passes with the full signature change landed atomically across all callers (a partial version of this change does not compile, since `open`/`mount` are called from both `unlock::run` and `resize::run`).
+
 ### File List
+
+- src/ports/luks_backend.rs
+- src/ports/filesystem_backend.rs
+- src/adapters/exec/mod.rs
+- src/domain/workflows/unlock.rs
+- src/domain/workflows/resize.rs
