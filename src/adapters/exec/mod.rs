@@ -1379,8 +1379,18 @@ impl FilesystemBackend for ExecAdapter {
                     )));
                 }
 
+                use std::os::unix::fs::OpenOptionsExt;
+                // Linux's `O_NOFOLLOW` (this project only targets Linux, see
+                // Cargo.toml's dist `targets`) — makes the open itself
+                // atomically refuse a symlink, closing the race window
+                // between the `symlink_metadata` check above and this call
+                // (a symlink swapped into place in between would make this
+                // open fail instead of silently following it and writing
+                // through it — review finding, 2026-07-26).
+                const O_NOFOLLOW: i32 = 0o400000;
                 let file = std::fs::OpenOptions::new()
                     .write(true)
+                    .custom_flags(O_NOFOLLOW)
                     .open(path)
                     .map_err(|e| {
                         DomainError::AdapterFailure(format!(
