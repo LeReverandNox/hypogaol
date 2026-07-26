@@ -37,6 +37,11 @@ enum Commands {
         /// Path to the existing tomb's backing file or device
         #[arg(allow_hyphen_values = true)]
         path: PathBuf,
+
+        /// Unlock read-only — refuses all writes at both the block-device
+        /// and filesystem level
+        #[arg(long)]
+        read_only: bool,
     },
 
     /// Enroll an additional FIDO2 key on an existing tomb
@@ -297,7 +302,7 @@ fn run_create(
 /// inherited stdio, same accepted limitation as `enroll`'s
 /// `systemd-cryptenroll` prompt, and is left untranslated here (Story 1.8's
 /// job, not this one's).
-fn run_unlock(path: PathBuf) {
+fn run_unlock(path: PathBuf, read_only: bool) {
     let adapter = ExecAdapter::default();
 
     if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
@@ -305,10 +310,24 @@ fn run_unlock(path: PathBuf) {
         std::process::exit(1);
     }
 
-    println!("Touch your security key now (you may also be asked for its PIN).");
+    let intro = "Touch your security key now (you may also be asked for its PIN).";
+    if read_only {
+        println!("{intro} Unlocking read-only — no changes will be saved.");
+    } else {
+        println!("{intro}");
+    }
 
-    match unlock::run(&path, &adapter, &adapter, &adapter) {
-        Ok(mountpoint) => println!("Tomb unlocked and mounted at {}.", mountpoint.display()),
+    match unlock::run(&path, read_only, &adapter, &adapter, &adapter) {
+        Ok(mountpoint) => {
+            if read_only {
+                println!(
+                    "Tomb unlocked (read-only) and mounted at {}.",
+                    mountpoint.display()
+                );
+            } else {
+                println!("Tomb unlocked and mounted at {}.", mountpoint.display());
+            }
+        }
         Err(err) => {
             eprintln!("{}", ux::translate(&err));
             std::process::exit(1);
@@ -492,7 +511,7 @@ pub fn run() {
                 );
             }
         },
-        Commands::Unlock { path } => run_unlock(path),
+        Commands::Unlock { path, read_only } => run_unlock(path, read_only),
         Commands::Enroll {
             path,
             label,
