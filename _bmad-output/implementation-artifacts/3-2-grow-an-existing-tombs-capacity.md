@@ -38,10 +38,10 @@ so that I can increase my storage without recreating the tomb or re-enrolling an
   - [x] Only one `Filesystem` variant exists today (`Ext4`) — parse the stored string back to the enum, returning `DomainError::AdapterFailure` for any unrecognized value (defensive; should never happen given `write_fido2_token_metadata` is the only writer).
   - [x] This can run either before or after `luks.open` — it reads header/token state, not the live mapping, so it does not require the mapping to be open. Prefer running it early (alongside the AC #3 grow-only check) since a read failure here should abort before anything is touched.
 
-- [ ] Task 3: Add `FilesystemBackend::growfs` port method (AC: #1, #4)
-  - [ ] Add `fn growfs(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<(), DomainError>` to `src/ports/filesystem_backend.rs`, mirroring `mkfs`'s shape (match on `fs`, v1 `Ext4`-only per AD-8).
-  - [ ] Implement in `ExecAdapter`: `resize2fs <device_node>` with no explicit size (grows to fill the now-larger mapping) — `privileged("resize2fs")`. `resize2fs` is already in `check_prerequisites`'s binary list (`src/adapters/exec/mod.rs:1245`, added ahead of this story), so no preflight change needed.
-  - [ ] `resize2fs` supports online (mounted) growth for ext4, but this workflow does not mount the filesystem — it operates directly on `mapper.device_node()` while the tomb is unmounted (see Task 4's workflow shape). Confirm this works unmounted on real hardware in Task 8's hardware test (ext4 online-resize is well-supported in both mounted and unmounted states, but verify rather than assume).
+- [x] Task 3: Add `FilesystemBackend::growfs` port method (AC: #1, #4)
+  - [x] Add `fn growfs(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<(), DomainError>` to `src/ports/filesystem_backend.rs`, mirroring `mkfs`'s shape (match on `fs`, v1 `Ext4`-only per AD-8).
+  - [x] Implement in `ExecAdapter`: `resize2fs <device_node>` with no explicit size (grows to fill the now-larger mapping) — `privileged("resize2fs")`. `resize2fs` is already in `check_prerequisites`'s binary list (`src/adapters/exec/mod.rs:1245`, added ahead of this story), so no preflight change needed.
+  - [x] `resize2fs` supports online (mounted) growth for ext4, but this workflow does not mount the filesystem — it operates directly on `mapper.device_node()` while the tomb is unmounted (see Task 4's workflow shape). Confirm this works unmounted on real hardware in Task 8's hardware test (ext4 online-resize is well-supported in both mounted and unmounted states, but verify rather than assume).
 
 - [ ] Task 4: Extend `FilesystemBackend::set_backing_file_size` to also grow an existing file (AC: #1)
   - [ ] **This is a required behavior change, not new code** — AD-10's own architecture text is explicit that resize reuses "the same `set_backing_file_size` primitive create uses" (confirmed in `ARCHITECTURE-SPINE.md`'s file-structure table: `set_backing_file_size(shared by create AD-9 and resize AD-10)`). The current implementation (`src/adapters/exec/mod.rs:1294-1315`) uses `OpenOptions::new().create_new(true)`, which **fails if the file already exists** — the opposite of what resize needs (grow an existing file, refuse if it's missing).
@@ -164,4 +164,5 @@ Unit tests against the shared fakes in `tests/unit/fakes.rs`, run in default CI.
 ### File List
 
 - `src/ports/luks_backend.rs` — added `resize`/`read_filesystem` to `LuksBackend`.
-- `src/adapters/exec/mod.rs` — implemented `resize`/`read_filesystem` in `ExecAdapter`.
+- `src/ports/filesystem_backend.rs` — added `growfs` to `FilesystemBackend`.
+- `src/adapters/exec/mod.rs` — implemented `resize`/`read_filesystem`/`growfs` in `ExecAdapter`.

@@ -1400,6 +1400,33 @@ impl FilesystemBackend for ExecAdapter {
         }
     }
 
+    fn growfs(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<(), DomainError> {
+        match fs {
+            Filesystem::Ext4 => {
+                // No explicit target size: grows to fill the now-larger
+                // mapping (`resize2fs`'s documented behavior when no size
+                // argument is given). Runs against the unmounted mapper
+                // device node — resize2fs also supports online (mounted)
+                // growth, but this workflow never mounts the filesystem.
+                let output = privileged("resize2fs")
+                    .arg(mapper.device_node())
+                    .output()
+                    .map_err(|e| {
+                        DomainError::AdapterFailure(format!("failed to run resize2fs: {e}"))
+                    })?;
+
+                if output.status.success() {
+                    Ok(())
+                } else {
+                    Err(DomainError::AdapterFailure(format!(
+                        "resize2fs failed: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )))
+                }
+            }
+        }
+    }
+
     fn mount(&self, mapper: &MapperHandle) -> Result<PathBuf, DomainError> {
         // Fetched once up front: needed both for the `/run/media/<username>`
         // base directory below and for the mount-point `chown` further down.

@@ -25,6 +25,12 @@ pub trait FilesystemBackend {
     /// Formats the opened mapping with `fs` (v1: `Filesystem::Ext4` only, AD-8).
     fn mkfs(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<(), DomainError>;
 
+    /// Grows `fs` on `mapper`'s already-resized mapping to fill it (v1:
+    /// `Filesystem::Ext4` only, AD-8) — Story 3.2, AC #1/#4. Called after
+    /// `LuksBackend::resize`, so the mapping already reflects the new,
+    /// larger size; no explicit target size is passed.
+    fn growfs(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<(), DomainError>;
+
     /// Best-effort removal of a backing file this adapter created — used to
     /// clean up after a file-backed `create` fails partway through, so a
     /// retry at the same destination isn't permanently blocked.
