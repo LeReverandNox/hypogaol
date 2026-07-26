@@ -35,7 +35,7 @@ fn happy_path_opens_and_mounts_using_the_shared_mapping_name() {
 
     let fixture = RealFixtureFile::create("unlock-happy-path");
 
-    let result = unlock::run(&fixture.0, &luks, &fido2, &fs);
+    let result = unlock::run(&fixture.0, false, &luks, &fido2, &fs);
 
     let expected_name = mapping_name::mapping_name(&fixture.0).unwrap();
     assert_eq!(
@@ -44,7 +44,42 @@ fn happy_path_opens_and_mounts_using_the_shared_mapping_name() {
     );
 
     assert_eq!(*log.borrow(), vec!["open".to_string(), "mount".to_string()]);
-    assert_eq!(luks.last_open(), Some((fixture.0.clone(), expected_name)));
+    assert_eq!(
+        luks.last_open(),
+        Some((fixture.0.clone(), expected_name, false))
+    );
+}
+
+#[test]
+fn read_only_true_is_passed_to_both_open_and_mount() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing().with_log(log.clone());
+
+    let fixture = RealFixtureFile::create("unlock-read-only-true");
+
+    let result = unlock::run(&fixture.0, true, &luks, &fido2, &fs);
+
+    assert!(result.is_ok(), "expected Ok, got {result:?}");
+    assert!(luks.last_open().unwrap().2);
+    assert_eq!(fs.last_mount_read_only(), Some(true));
+}
+
+#[test]
+fn read_only_false_is_passed_to_both_open_and_mount() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing().with_log(log.clone());
+
+    let fixture = RealFixtureFile::create("unlock-read-only-false");
+
+    let result = unlock::run(&fixture.0, false, &luks, &fido2, &fs);
+
+    assert!(result.is_ok(), "expected Ok, got {result:?}");
+    assert!(!luks.last_open().unwrap().2);
+    assert_eq!(fs.last_mount_read_only(), Some(false));
 }
 
 #[test]
@@ -58,7 +93,30 @@ fn mount_failure_closes_the_just_opened_mapping() {
 
     let fixture = RealFixtureFile::create("unlock-mount-failure");
 
-    let result = unlock::run(&fixture.0, &luks, &fido2, &fs);
+    let result = unlock::run(&fixture.0, false, &luks, &fido2, &fs);
+
+    assert!(result.is_err(), "expected Err, got {result:?}");
+    assert_eq!(
+        *log.borrow(),
+        vec!["open".to_string(), "mount".to_string(), "close".to_string()]
+    );
+}
+
+// Regression guard proving AC #3's rollback-on-mount-failure discipline
+// holds identically in the read-only path — the rollback code is
+// unconditional, so no production-code change is needed for this to pass.
+#[test]
+fn read_only_mount_failure_still_closes_the_just_opened_mapping() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_failure_at("mount");
+
+    let fixture = RealFixtureFile::create("unlock-read-only-mount-failure");
+
+    let result = unlock::run(&fixture.0, true, &luks, &fido2, &fs);
 
     assert!(result.is_err(), "expected Err, got {result:?}");
     assert_eq!(

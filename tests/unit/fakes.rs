@@ -27,7 +27,7 @@ pub struct FakeLuksBackend {
     log: CallLog,
     fail_at: Option<&'static str>,
     last_bootstrap_size: RefCell<Option<u64>>,
-    last_open: RefCell<Option<(std::path::PathBuf, String)>>,
+    last_open: RefCell<Option<(std::path::PathBuf, String, bool)>>,
     last_removed_keyslot: RefCell<Option<KeyslotRef>>,
     last_close: RefCell<Option<MapperHandle>>,
     last_resize: RefCell<Option<MapperHandle>>,
@@ -114,9 +114,10 @@ impl FakeLuksBackend {
         *self.last_bootstrap_size.borrow()
     }
 
-    /// The `(path, name)` most recently passed to `open` — lets a test assert
-    /// AC #3's exact derived mapping name without re-deriving it by hand.
-    pub fn last_open(&self) -> Option<(std::path::PathBuf, String)> {
+    /// The `(path, name, read_only)` most recently passed to `open` — lets a
+    /// test assert AC #3's exact derived mapping name, and Story 3.3's
+    /// propagated `read_only` bool, without re-deriving them by hand.
+    pub fn last_open(&self) -> Option<(std::path::PathBuf, String, bool)> {
         self.last_open.borrow().clone()
     }
 
@@ -221,9 +222,9 @@ impl LuksBackend for FakeLuksBackend {
         self.fail_if("close")
     }
 
-    fn open(&self, path: &Path, name: &str) -> Result<MapperHandle, DomainError> {
+    fn open(&self, path: &Path, name: &str, read_only: bool) -> Result<MapperHandle, DomainError> {
         self.log.borrow_mut().push("open".to_string());
-        *self.last_open.borrow_mut() = Some((path.to_path_buf(), name.to_string()));
+        *self.last_open.borrow_mut() = Some((path.to_path_buf(), name.to_string(), read_only));
         self.fail_if("open")?;
         Ok(MapperHandle {
             name: name.to_string(),
@@ -321,6 +322,7 @@ pub struct FakeFilesystemBackend {
     umount_not_currently_mounted: bool,
     last_umount: RefCell<Option<MapperHandle>>,
     last_growfs_filesystem: RefCell<Option<Filesystem>>,
+    last_mount_read_only: RefCell<Option<bool>>,
 }
 
 impl FakeFilesystemBackend {
@@ -336,6 +338,7 @@ impl FakeFilesystemBackend {
             umount_not_currently_mounted: false,
             last_umount: RefCell::new(None),
             last_growfs_filesystem: RefCell::new(None),
+            last_mount_read_only: RefCell::new(None),
         }
     }
 
@@ -351,6 +354,7 @@ impl FakeFilesystemBackend {
             umount_not_currently_mounted: false,
             last_umount: RefCell::new(None),
             last_growfs_filesystem: RefCell::new(None),
+            last_mount_read_only: RefCell::new(None),
         }
     }
 
@@ -407,6 +411,13 @@ impl FakeFilesystemBackend {
     /// than hardcoding a variant.
     pub fn last_growfs_filesystem(&self) -> Option<Filesystem> {
         *self.last_growfs_filesystem.borrow()
+    }
+
+    /// The `read_only` bool most recently passed to `mount` — lets a test
+    /// assert Story 3.3's propagated flag independent of the happy-path
+    /// return value/log.
+    pub fn last_mount_read_only(&self) -> Option<bool> {
+        *self.last_mount_read_only.borrow()
     }
 
     fn fail_if(&self, call: &'static str) -> Result<(), DomainError> {
@@ -471,8 +482,13 @@ impl FilesystemBackend for FakeFilesystemBackend {
         Ok(())
     }
 
-    fn mount(&self, mapper: &MapperHandle) -> Result<std::path::PathBuf, DomainError> {
+    fn mount(
+        &self,
+        mapper: &MapperHandle,
+        read_only: bool,
+    ) -> Result<std::path::PathBuf, DomainError> {
         self.log.borrow_mut().push("mount".to_string());
+        *self.last_mount_read_only.borrow_mut() = Some(read_only);
         self.fail_if("mount")?;
         Ok(std::path::PathBuf::from(format!(
             "/tmp/fake-mount-{}",

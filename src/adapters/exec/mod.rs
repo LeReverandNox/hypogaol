@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::io::{self, Write};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -1032,7 +1033,7 @@ impl LuksBackend for ExecAdapter {
         }
     }
 
-    fn open(&self, path: &Path, name: &str) -> Result<MapperHandle, DomainError> {
+    fn open(&self, path: &Path, name: &str, read_only: bool) -> Result<MapperHandle, DomainError> {
         // Waits until at least one FIDO2 device is enumerated before ever
         // invoking cryptsetup — without this, unlocking with no key plugged
         // in yet failed immediately instead of waiting (deferred-work item).
@@ -1048,14 +1049,14 @@ impl LuksBackend for ExecAdapter {
         // systemd-fido2 plugin's own prompt reach the real terminal, the same
         // pattern `enroll_fido2_key`'s `systemd-cryptenroll` call already
         // uses.
-        let status = privileged("cryptsetup")
-            .args(["open", "--token-only"])
-            .arg(path)
-            .arg(name)
-            .status()
-            .map_err(|e| {
-                DomainError::AdapterFailure(format!("failed to run cryptsetup open: {e}"))
-            })?;
+        let mut cmd = privileged("cryptsetup");
+        cmd.args(["open", "--token-only"]);
+        if read_only {
+            cmd.arg("--readonly");
+        }
+        let status = cmd.arg(path).arg(name).status().map_err(|e| {
+            DomainError::AdapterFailure(format!("failed to run cryptsetup open: {e}"))
+        })?;
 
         if status.success() {
             Ok(MapperHandle {
@@ -1559,7 +1560,7 @@ impl FilesystemBackend for ExecAdapter {
         }
     }
 
-    fn mount(&self, mapper: &MapperHandle) -> Result<PathBuf, DomainError> {
+    fn mount(&self, mapper: &MapperHandle, read_only: bool) -> Result<PathBuf, DomainError> {
         // Fetched once up front: needed both for the `/run/media/<username>`
         // base directory below and for the mount-point `chown` further down.
         let identity = invoking_identity()?;
@@ -1619,7 +1620,17 @@ impl FilesystemBackend for ExecAdapter {
         // No `-t`: let mount auto-detect the filesystem type from the
         // superblock (standard kernel behavior) rather than re-deriving it
         // from LUKS2 token metadata unlock has no other reason to read.
-        let output = match privileged("mount")
+        let mut mount_cmd = privileged("mount");
+        if read_only {
+            // `noload`: a read-only `cryptsetup open` also makes the
+            // underlying mapping unwritable, so the kernel can't auto-replay
+            // an unclean ext4 journal (replay itself needs a block-device
+            // write) — without `noload`, `mount -o ro` on a tomb that wasn't
+            // cleanly closed fails outright. `noload` skips replay, which is
+            // exactly the read-only guarantee this flag exists to uphold.
+            mount_cmd.args(["-o", "ro,noload"]);
+        }
+        let output = match mount_cmd
             .arg(mapper.device_node())
             .arg(&mountpoint)
             .output()
@@ -1639,6 +1650,42 @@ impl FilesystemBackend for ExecAdapter {
                 "mount failed: {}",
                 String::from_utf8_lossy(&output.stderr).trim()
             )));
+        }
+
+        // A read-only mount refuses metadata writes (EROFS), so chown/chmod
+        // below would themselves fail. Ownership/permissions on the volume's
+        // root inode are whatever a prior *writable* unlock already
+        // persisted there — every normal unlock chowns to the invoking user,
+        // so any tomb ever unlocked writably already carries correct
+        // ownership by the time a read-only unlock reaches this point. A
+        // tomb never unlocked writably shows root-owned, mkfs.ext4-default
+        // (0755) permissions on its first-ever read-only unlock —
+        // world-readable/traversable to every local user, not just the
+        // invoking one: an accepted limitation, but one worth surfacing
+        // rather than leaving silent (see the stat check below).
+        if read_only {
+            // Non-mutating: a `stat`, not a write, so it doesn't touch the
+            // read-only guarantee. Warns rather than fails, since this is a
+            // pre-existing exposure this story doesn't introduce and can't
+            // fix without writing to a filesystem it just promised not to.
+            let owned_by_invoking_user = std::fs::metadata(&mountpoint)
+                .ok()
+                .and_then(|meta| {
+                    identity
+                        .uid
+                        .parse::<u32>()
+                        .ok()
+                        .map(|uid| meta.uid() == uid)
+                })
+                .unwrap_or(true);
+            if !owned_by_invoking_user {
+                eprintln!(
+                    "Warning: this tomb has never been unlocked in read-write mode, so its \
+                     contents are still owned by root with default permissions — readable by \
+                     any local user, not just you. Unlock it read-write once to restrict access."
+                );
+            }
+            return Ok(mountpoint);
         }
 
         // The mount point's underlying inode was created by a privileged

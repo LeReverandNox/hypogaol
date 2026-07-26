@@ -59,7 +59,8 @@ pub trait FilesystemBackend {
     /// the superblock. Returns the mount point. The mount point is never
     /// stored or derived from `mapper`'s path (AD-12) — rediscovering it
     /// later is `close`'s job (Story 3.1), via the kernel's own mount table.
-    fn mount(&self, mapper: &MapperHandle) -> Result<PathBuf, DomainError>;
+    /// `read_only` maps to `mount -o ro` (AD-11).
+    fn mount(&self, mapper: &MapperHandle, read_only: bool) -> Result<PathBuf, DomainError>;
 
     /// Unmounts `mapper`'s decrypted device node, resolving the live mount
     /// point itself via the kernel's mount table (AD-12) — takes the mapper,

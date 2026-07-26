@@ -71,7 +71,7 @@ pub fn run(
     // opened at all.
     let filesystem = luks.read_filesystem(path)?;
 
-    let mapper = luks.open(path, &name)?;
+    let mapper = luks.open(path, &name, false)?;
 
     // Rollback discipline (mirrors `unlock::run`/`create::run`): once `open`
     // succeeds, every subsequent exit path must close the mapping — no
