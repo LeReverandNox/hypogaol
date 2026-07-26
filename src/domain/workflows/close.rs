@@ -17,7 +17,10 @@ use crate::ports::luks_backend::LuksBackend;
 /// mount-failure rollback to mirror: `unlock`'s rollback closes a mapping
 /// *it* just opened; `close` opens nothing, so an `umount` failure simply
 /// propagates without calling `luks.close` (AC #1's ordering — never lock a
-/// mapping that may still be busy).
+/// mapping that may still be busy) — except "not currently mounted", which
+/// means a prior `close` already unmounted but failed before reaching
+/// `luks.close`; treating that as done and proceeding makes a retry
+/// self-healing instead of permanently stuck (review finding, 2026-07-26).
 pub fn run(
     path: &Path,
     luks: &dyn LuksBackend,
@@ -32,6 +35,11 @@ pub fn run(
         source_path: path.to_path_buf(),
     };
 
-    fs.umount(&mapper)?;
+    match fs.umount(&mapper) {
+        Ok(()) => {}
+        Err(DomainError::AdapterFailure(msg)) if msg.contains("not currently mounted") => {}
+        Err(err) => return Err(err),
+    }
+
     luks.close(&mapper)
 }

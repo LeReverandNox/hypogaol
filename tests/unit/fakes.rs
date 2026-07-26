@@ -277,6 +277,7 @@ pub struct FakeFilesystemBackend {
     device_capacity: u64,
     log: CallLog,
     fail_at: Option<&'static str>,
+    umount_not_currently_mounted: bool,
     last_umount: RefCell<Option<MapperHandle>>,
 }
 
@@ -288,6 +289,7 @@ impl FakeFilesystemBackend {
             device_capacity: DEFAULT_DEVICE_CAPACITY,
             log: new_call_log(),
             fail_at: None,
+            umount_not_currently_mounted: false,
             last_umount: RefCell::new(None),
         }
     }
@@ -299,6 +301,7 @@ impl FakeFilesystemBackend {
             device_capacity: DEFAULT_DEVICE_CAPACITY,
             log: new_call_log(),
             fail_at: None,
+            umount_not_currently_mounted: false,
             last_umount: RefCell::new(None),
         }
     }
@@ -320,6 +323,15 @@ impl FakeFilesystemBackend {
 
     pub fn with_failure_at(mut self, call: &'static str) -> Self {
         self.fail_at = Some(call);
+        self
+    }
+
+    /// Makes `umount` fail with the same "not currently mounted" marker the
+    /// real `ExecAdapter` produces — distinct from `with_failure_at("umount")`'s
+    /// generic failure, so a test can exercise `close::run`'s idempotent-retry
+    /// path (review finding, 2026-07-26).
+    pub fn with_umount_not_currently_mounted(mut self) -> Self {
+        self.umount_not_currently_mounted = true;
         self
     }
 
@@ -386,6 +398,12 @@ impl FilesystemBackend for FakeFilesystemBackend {
     fn umount(&self, mapper: &MapperHandle) -> Result<(), DomainError> {
         self.log.borrow_mut().push("umount".to_string());
         *self.last_umount.borrow_mut() = Some(mapper.clone());
+        if self.umount_not_currently_mounted {
+            return Err(DomainError::AdapterFailure(format!(
+                "{} is not currently mounted",
+                mapper.name
+            )));
+        }
         self.fail_if("umount")
     }
 }
