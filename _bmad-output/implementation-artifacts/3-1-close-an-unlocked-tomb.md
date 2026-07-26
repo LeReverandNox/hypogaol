@@ -4,7 +4,7 @@ baseline_commit: 08eb4c0a5c56d5d37ae3a885635c00c5b159dbec
 
 # Story 3.1: Close an Unlocked Tomb
 
-Status: in-progress
+Status: review
 
 ## Story
 
@@ -97,6 +97,8 @@ so that its filesystem is unmounted and the LUKS2 volume is re-locked, as the sy
 
 ### Agent Model Used
 
+Amelia (Claude Sonnet 5), via the `bmad-dev-story` workflow.
+
 ### Debug Log References
 
 ### Completion Notes List
@@ -113,12 +115,15 @@ so that its filesystem is unmounted and the LUKS2 volume is re-locked, as the sy
 - `src/ports/filesystem_backend.rs` — added `umount` to `FilesystemBackend` trait.
 - `src/adapters/exec/mod.rs` — implemented `umount`; extended `check_prerequisites` binary list.
 - `src/domain/workflows/close.rs` — replaced `todo!()` stub with real implementation, new `path` parameter.
-- `tests/unit/fakes.rs` — added `umount` to `FakeFilesystemBackend`'s trait impl.
+- `tests/unit/fakes.rs` — added `umount` to `FakeFilesystemBackend`'s trait impl; added `last_umount`/`last_close` capture accessors.
 - `tests/unit/workflows.rs` — updated `close::run` call site for the new `path` parameter.
 - `src/cli/main.rs` — added `Close` subcommand and `run_close`.
 - `src/cli/ux.rs` — new marker-ordered `close`-failure translation branch.
 - `tests/unit/ux.rs` — new tests for the marker-bleed guard and the not-currently-mounted message.
-- `tests/unit/fakes.rs` — added `last_umount`/`last_close` capture accessors.
 - `tests/unit/main.rs` — registered `mod close;`.
 - `tests/unit/close.rs` — new file: unit tests for `close::run`.
 - `tests/hardware/main.rs` — new manual-only scenarios for `close::run` (file-backed and device-backed).
+
+## Change Log
+
+- 2026-07-26: Implemented `close` end-to-end (Tasks 1-7): `FilesystemBackend::umount` port + `ExecAdapter` impl (findmnt-resolved mountpoint, privileged umount, rmdir cleanup — resolves the Epic 2 retro's open mount-directory action item), `domain::workflows::close::run`, the `close` CLI subcommand, a marker-ordered `ux.rs` translation branch guarding against the "marker bleed" bug class the Epic 2 retro flagged (umount/findmnt failures previously would have been misclassified as unlock's mount-failure message), full unit test coverage (`tests/unit/close.rs`), and two manual-only hardware scenarios. `cargo build`/`test`/`clippy`/`fmt` all green (84/84 unit tests).
