@@ -30,6 +30,8 @@ pub struct FakeLuksBackend {
     last_open: RefCell<Option<(std::path::PathBuf, String)>>,
     last_removed_keyslot: RefCell<Option<KeyslotRef>>,
     last_close: RefCell<Option<MapperHandle>>,
+    last_resize: RefCell<Option<MapperHandle>>,
+    read_filesystem: Filesystem,
     // Distinct return values for successive `list_fido2_keyslots` calls, so a
     // test can prove a caller re-reads live state on each call rather than
     // reusing an earlier result (AC #3). `None` means "always return
@@ -57,6 +59,8 @@ impl FakeLuksBackend {
             last_open: RefCell::new(None),
             last_removed_keyslot: RefCell::new(None),
             last_close: RefCell::new(None),
+            last_resize: RefCell::new(None),
+            read_filesystem: Filesystem::Ext4,
             keyslots_sequence: RefCell::new(None),
         }
     }
@@ -72,6 +76,8 @@ impl FakeLuksBackend {
             last_open: RefCell::new(None),
             last_removed_keyslot: RefCell::new(None),
             last_close: RefCell::new(None),
+            last_resize: RefCell::new(None),
+            read_filesystem: Filesystem::Ext4,
             keyslots_sequence: RefCell::new(None),
         }
     }
@@ -125,6 +131,20 @@ impl FakeLuksBackend {
     /// name it also passed to `umount`.
     pub fn last_close(&self) -> Option<MapperHandle> {
         self.last_close.borrow().clone()
+    }
+
+    /// The `MapperHandle` most recently passed to `resize` — lets a test
+    /// assert `resize::run` called it against the same mapper `open`
+    /// returned.
+    pub fn last_resize(&self) -> Option<MapperHandle> {
+        self.last_resize.borrow().clone()
+    }
+
+    /// The `Filesystem` `read_filesystem` returns — settable so a test can
+    /// prove `growfs` is called with whatever `read_filesystem` reports.
+    pub fn with_read_filesystem(mut self, filesystem: Filesystem) -> Self {
+        self.read_filesystem = filesystem;
+        self
     }
 
     /// Makes the named port call log itself as usual, then return an
@@ -209,6 +229,18 @@ impl LuksBackend for FakeLuksBackend {
             name: name.to_string(),
             source_path: path.to_path_buf(),
         })
+    }
+
+    fn resize(&self, mapper: &MapperHandle) -> Result<(), DomainError> {
+        self.log.borrow_mut().push("resize".to_string());
+        *self.last_resize.borrow_mut() = Some(mapper.clone());
+        self.fail_if("resize")
+    }
+
+    fn read_filesystem(&self, _path: &Path) -> Result<Filesystem, DomainError> {
+        self.log.borrow_mut().push("read_filesystem".to_string());
+        self.fail_if("read_filesystem")?;
+        Ok(self.read_filesystem)
     }
 }
 
@@ -377,6 +409,11 @@ impl FilesystemBackend for FakeFilesystemBackend {
     fn mkfs(&self, _mapper: &MapperHandle, _fs: Filesystem) -> Result<(), DomainError> {
         self.log.borrow_mut().push("mkfs".to_string());
         self.fail_if("mkfs")
+    }
+
+    fn growfs(&self, _mapper: &MapperHandle, _fs: Filesystem) -> Result<(), DomainError> {
+        self.log.borrow_mut().push("growfs".to_string());
+        self.fail_if("growfs")
     }
 
     fn remove_backing_file(&self, _path: &Path) -> Result<(), DomainError> {

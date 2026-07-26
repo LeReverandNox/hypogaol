@@ -40,6 +40,15 @@ pub fn translate(err: &DomainError) -> String {
             "{} would only have {size} bytes for a tomb — that's too small to be usable.",
             path.display()
         ),
+        DomainError::ResizeMustGrow {
+            path,
+            requested,
+            current_size,
+        } => format!(
+            "{} is already {current_size} bytes. You asked for {requested} bytes — resize can \
+             only grow a tomb, never shrink it.",
+            path.display()
+        ),
         DomainError::PreflightFailed(missing) => {
             let mut message =
                 String::from("tomb-fido2 can't run yet — a few things are missing:");

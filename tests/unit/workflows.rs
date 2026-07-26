@@ -65,12 +65,18 @@ fn close_run_stops_at_preflight_before_touching_any_port() {
 }
 
 #[test]
-fn resize_run_stops_at_preflight_before_reaching_its_own_todo() {
+fn resize_run_stops_at_preflight_before_touching_any_port() {
     let luks = FakeLuksBackend::failing(&["cryptsetup"]);
     let fido2 = FakeFido2Backend::passing();
     let fs = FakeFilesystemBackend::passing();
 
-    let result = resize::run(&luks, &fido2, &fs);
+    let result = resize::run(
+        std::path::Path::new("/tmp/does-not-matter"),
+        1024,
+        &luks,
+        &fido2,
+        &fs,
+    );
 
     assert!(matches!(result, Err(DomainError::PreflightFailed(_))));
 }
