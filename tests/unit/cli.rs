@@ -146,6 +146,14 @@ fn create_device_help_lists_the_fido2_device_flag() {
 }
 
 #[test]
+fn resize_help_lists_path_as_positional_and_size_as_a_flag() {
+    let help = help_text(&["tomb-fido2", "resize", "--help"]);
+    assert!(help.contains("<PATH>"));
+    assert!(!help.contains("--path"));
+    assert!(help.contains("--size"));
+}
+
+#[test]
 fn enroll_rejects_fido2_device_flag_given_without_its_unlock_pair() {
     let result = Cli::try_parse_from([
         "tomb-fido2",

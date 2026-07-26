@@ -10,6 +10,7 @@ use crate::domain::types::{CreateTarget, Filesystem};
 use crate::domain::workflows::close;
 use crate::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
 use crate::domain::workflows::enroll;
+use crate::domain::workflows::resize;
 use crate::domain::workflows::revoke;
 use crate::domain::workflows::unlock;
 use crate::ports::fido2_backend::Fido2DeviceSelection;
@@ -76,6 +77,18 @@ enum Commands {
         /// Path to the existing tomb's backing file or device
         #[arg(allow_hyphen_values = true)]
         path: PathBuf,
+    },
+
+    /// Grow an existing tomb's volume and filesystem to a larger size
+    Resize {
+        /// Path to the existing tomb's backing file or device
+        #[arg(allow_hyphen_values = true)]
+        path: PathBuf,
+
+        /// New total size for the tomb (e.g. 20G) — must be larger than its
+        /// current size; resize is grow-only
+        #[arg(long, value_parser = parse_size)]
+        size: u64,
     },
 }
 
@@ -413,6 +426,33 @@ fn run_close(path: PathBuf) {
     }
 }
 
+/// Builds the adapter, runs `resize::run`, and reports the result. Mirrors
+/// `run_close`'s shape: preflight check first, then a plain-language intro
+/// (FR5/NFR3) — but unlike `close`, `resize` calls `luks.open` (a real FIDO2
+/// touch), so it also warns about that beforehand, mirroring `run_unlock`'s
+/// own intro line. No confirmation prompt: like `close`, growing is
+/// non-destructive (existing data is preserved, AC #4), so it doesn't fit
+/// the pattern that justifies `create`'s wipe warning or `revoke`'s
+/// irreversible-key warning.
+fn run_resize(path: PathBuf, new_size: u64) {
+    let adapter = ExecAdapter::default();
+
+    if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
+        eprintln!("{}", ux::translate(&err));
+        std::process::exit(1);
+    }
+
+    println!("Growing this tomb. Touch your security key now (you may also be asked for its PIN).");
+
+    match resize::run(&path, new_size, &adapter, &adapter, &adapter) {
+        Ok(()) => println!("Tomb grown to {new_size} bytes."),
+        Err(err) => {
+            eprintln!("{}", ux::translate(&err));
+            std::process::exit(1);
+        }
+    }
+}
+
 pub fn run() {
     let cli = Cli::parse();
 
@@ -464,5 +504,6 @@ pub fn run() {
         }
         Commands::Revoke { path, label } => run_revoke(path, label),
         Commands::Close { path } => run_close(path),
+        Commands::Resize { path, size } => run_resize(path, size),
     }
 }
