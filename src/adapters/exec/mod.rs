@@ -1240,7 +1240,15 @@ impl FilesystemBackend for ExecAdapter {
     fn check_prerequisites(&self) -> Result<(), Vec<String>> {
         let mut missing = Vec::new();
 
-        for binary in ["mkfs.ext4", "resize2fs", "blockdev", "mount", "id"] {
+        for binary in [
+            "mkfs.ext4",
+            "resize2fs",
+            "blockdev",
+            "mount",
+            "umount",
+            "findmnt",
+            "id",
+        ] {
             if !binary_on_path(binary) {
                 missing.push(format!("{binary} binary not found on PATH"));
             }
@@ -1468,6 +1476,46 @@ impl FilesystemBackend for ExecAdapter {
                 )))
             }
         }
+    }
+
+    fn umount(&self, mapper: &MapperHandle) -> Result<(), DomainError> {
+        let device_node = mapper.device_node();
+
+        let findmnt_output = Command::new("findmnt")
+            .args(["-n", "-o", "TARGET"])
+            .arg(&device_node)
+            .output()
+            .map_err(|e| DomainError::AdapterFailure(format!("failed to run findmnt: {e}")))?;
+
+        let mountpoint = String::from_utf8_lossy(&findmnt_output.stdout)
+            .trim()
+            .to_string();
+
+        if !findmnt_output.status.success() || mountpoint.is_empty() {
+            return Err(DomainError::AdapterFailure(format!(
+                "{} is not currently mounted",
+                device_node.display()
+            )));
+        }
+
+        let umount_output = privileged("umount")
+            .arg(&mountpoint)
+            .output()
+            .map_err(|e| DomainError::AdapterFailure(format!("failed to run umount: {e}")))?;
+
+        if !umount_output.status.success() {
+            return Err(DomainError::AdapterFailure(format!(
+                "umount failed: {}",
+                String::from_utf8_lossy(&umount_output.stderr).trim()
+            )));
+        }
+
+        // Mirrors `mount`'s own cleanup-on-error paths: the mount point
+        // directories `create_mount_point` makes are meant to be ephemeral,
+        // not accumulate across unlock/close cycles.
+        let _ = std::fs::remove_dir(&mountpoint);
+
+        Ok(())
     }
 }
 

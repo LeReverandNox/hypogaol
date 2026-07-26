@@ -66,7 +66,7 @@ development_status:
   epic-2-retrospective: done
 
   epic-3: in-progress
-  3-1-close-an-unlocked-tomb: ready-for-dev
+  3-1-close-an-unlocked-tomb: in-progress
   3-2-grow-an-existing-tombs-capacity: backlog
   3-3-unlock-a-tomb-read-only: backlog
   epic-3-retrospective: optional

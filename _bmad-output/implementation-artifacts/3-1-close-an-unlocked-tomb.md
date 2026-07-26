@@ -1,6 +1,10 @@
+---
+baseline_commit: 08eb4c0a5c56d5d37ae3a885635c00c5b159dbec
+---
+
 # Story 3.1: Close an Unlocked Tomb
 
-Status: ready-for-dev
+Status: in-progress
 
 ## Story
 
@@ -18,10 +22,10 @@ so that its filesystem is unmounted and the LUKS2 volume is re-locked, as the sy
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Add `FilesystemBackend::umount` port method (AC: #1, #2, #5)
-  - [ ] Add `fn umount(&self, mapper: &MapperHandle) -> Result<(), DomainError>` to `src/ports/filesystem_backend.rs`. Takes the mapper (device path), **not** a mountpoint — AD-12 is explicit that the mountpoint is never stored or passed in; `umount` resolves it itself.
-  - [ ] Implement in `ExecAdapter` (`src/adapters/exec/mod.rs`): resolve the live mountpoint for `mapper.device_node()` via `findmnt` (e.g. `findmnt -n -o TARGET <device_node>`), then run privileged `umount` against it. If `findmnt` reports nothing, the tomb isn't currently mounted — return a distinct `AdapterFailure` for this (see Task 5's ux guard — this message must not collide with the generic mount-failure bucket).
-  - [ ] **Design decision (resolves the open Epic 2 retro action item — do not leave unaddressed):** after a successful `umount`, remove the now-empty mount-point directory (`std::fs::remove_dir`), mirroring the cleanup-on-failure pattern `FilesystemBackend::mount` already uses on its own error paths (`src/adapters/exec/mod.rs:1405,1413,1433,1441,1457`). Rationale: `mount`'s `create_mount_point` (same file, ~line 163) creates a fresh, uniquely-named directory per unlock with a collision-suffix fallback — these directories are meant to be ephemeral, not accumulate. Without this, re-unlocking the same tomb after a close would permanently fall back to a suffixed directory name (the plain basename never frees up), which is the exact regression the existing hardware test `unlock_falls_back_to_a_suffixed_mount_point_on_a_basename_collision` (`tests/hardware/main.rs:608`) asserts against for the *first* unlock — rmdir-on-close keeps that guarantee true across repeated unlock/close cycles too.
+- [x] Task 1: Add `FilesystemBackend::umount` port method (AC: #1, #2, #5)
+  - [x] Add `fn umount(&self, mapper: &MapperHandle) -> Result<(), DomainError>` to `src/ports/filesystem_backend.rs`. Takes the mapper (device path), **not** a mountpoint — AD-12 is explicit that the mountpoint is never stored or passed in; `umount` resolves it itself.
+  - [x] Implement in `ExecAdapter` (`src/adapters/exec/mod.rs`): resolve the live mountpoint for `mapper.device_node()` via `findmnt` (e.g. `findmnt -n -o TARGET <device_node>`), then run privileged `umount` against it. If `findmnt` reports nothing, the tomb isn't currently mounted — return a distinct `AdapterFailure` for this (see Task 5's ux guard — this message must not collide with the generic mount-failure bucket).
+  - [x] **Design decision (resolves the open Epic 2 retro action item — do not leave unaddressed):** after a successful `umount`, remove the now-empty mount-point directory (`std::fs::remove_dir`), mirroring the cleanup-on-failure pattern `FilesystemBackend::mount` already uses on its own error paths (`src/adapters/exec/mod.rs:1405,1413,1433,1441,1457`). Rationale: `mount`'s `create_mount_point` (same file, ~line 163) creates a fresh, uniquely-named directory per unlock with a collision-suffix fallback — these directories are meant to be ephemeral, not accumulate. Without this, re-unlocking the same tomb after a close would permanently fall back to a suffixed directory name (the plain basename never frees up), which is the exact regression the existing hardware test `unlock_falls_back_to_a_suffixed_mount_point_on_a_basename_collision` (`tests/hardware/main.rs:608`) asserts against for the *first* unlock — rmdir-on-close keeps that guarantee true across repeated unlock/close cycles too.
 
 - [ ] Task 2: Implement `domain::workflows::close::run` (AC: #1, #2, #3, #4, #5)
   - [ ] Replace the `todo!()` stub in `src/domain/workflows/close.rs`. Current stub signature is `run(luks, fido2, fs)` with **no path parameter** — add `path: &Path` as the first argument, mirroring `unlock::run`'s signature shape (`src/domain/workflows/unlock.rs`).
@@ -29,8 +33,8 @@ so that its filesystem is unmounted and the LUKS2 volume is re-locked, as the sy
   - [ ] No target-type branching (AC #5) — same path argument works for loop-file or raw device, exactly like `unlock`/`enroll`/`revoke` already do.
   - [ ] If `umount` fails, return the error immediately without calling `luks.close` — do not attempt to lock a mapping that may still be busy (AC #1's ordering rationale). There is nothing to roll back on this failure path (unlike `unlock`'s mount-failure rollback, which closes a mapping *it* just opened) since `close` never opens anything itself.
 
-- [ ] Task 3: Extend preflight dependency check (AC: #4)
-  - [ ] `FilesystemBackend::check_prerequisites` in `src/adapters/exec/mod.rs` (~line 1243) currently checks `["mkfs.ext4", "resize2fs", "blockdev", "mount", "id"]`. Add `"umount"` and `"findmnt"` — both ship in `util-linux`, the same package already providing `mount`/`blockdev`, so no new external dependency.
+- [x] Task 3: Extend preflight dependency check (AC: #4)
+  - [x] `FilesystemBackend::check_prerequisites` in `src/adapters/exec/mod.rs` (~line 1243) currently checks `["mkfs.ext4", "resize2fs", "blockdev", "mount", "id"]`. Add `"umount"` and `"findmnt"` — both ship in `util-linux`, the same package already providing `mount`/`blockdev`, so no new external dependency.
 
 - [ ] Task 4: Wire the `close` CLI subcommand (AC: #1, #3)
   - [ ] Add a `Close { path: PathBuf }` variant to `Commands` in `src/cli/main.rs`, same `#[arg(allow_hyphen_values = true)]` convention as `Unlock`/`Enroll`/`Revoke`.
@@ -97,4 +101,10 @@ so that its filesystem is unmounted and the LUKS2 volume is re-locked, as the sy
 
 ### Completion Notes List
 
+- Task 1/3: Added `FilesystemBackend::umount` to the port trait and implemented it in `ExecAdapter` (findmnt to resolve the live mountpoint from the mapper device node, privileged `umount`, then best-effort `rmdir` of the now-empty mount point). Extended `check_prerequisites`'s binary list with `umount`/`findmnt`. `cargo build` and full `cargo test` (79 passed) both green; no regressions.
+
 ### File List
+
+- `src/ports/filesystem_backend.rs` — added `umount` to `FilesystemBackend` trait.
+- `src/adapters/exec/mod.rs` — implemented `umount`; extended `check_prerequisites` binary list.
+- `tests/unit/fakes.rs` — added `umount` to `FakeFilesystemBackend`'s trait impl.

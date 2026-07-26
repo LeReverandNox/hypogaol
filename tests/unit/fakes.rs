@@ -361,4 +361,9 @@ impl FilesystemBackend for FakeFilesystemBackend {
             mapper.name
         )))
     }
+
+    fn umount(&self, _mapper: &MapperHandle) -> Result<(), DomainError> {
+        self.log.borrow_mut().push("umount".to_string());
+        self.fail_if("umount")
+    }
 }
