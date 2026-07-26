@@ -105,8 +105,8 @@ fn device_backed_happy_path_never_calls_set_backing_file_size() {
         *log.borrow(),
         vec![
             "is_block_device".to_string(),
-            "read_filesystem".to_string(),
             "device_capacity".to_string(),
+            "read_filesystem".to_string(),
             "open".to_string(),
             "filesystem_size".to_string(),
             "resize".to_string(),
@@ -117,17 +117,50 @@ fn device_backed_happy_path_never_calls_set_backing_file_size() {
 }
 
 #[test]
-fn file_backed_grow_only_rejection_never_calls_open() {
+fn file_backed_true_shrink_is_rejected_by_tier_one_before_any_adapter_call() {
     let log = new_call_log();
     let luks = FakeLuksBackend::passing().with_log(log.clone());
     let fido2 = FakeFido2Backend::passing().with_log(log.clone());
     let fs = FakeFilesystemBackend::passing().with_log(log.clone());
 
-    // Fixture is exactly 4096 bytes; requesting the same size must be
-    // rejected as a no-op-or-shrink (grow-only, AC #3) before `luks.open`
-    // is ever called — tier 1's whole point is a zero-adapter-call reject
-    // for the common case.
-    let fixture = RealFixtureFile::create("resize-grow-only-rejection", &[0u8; 4096]);
+    // Fixture is 4096 bytes; requesting a strictly smaller size is an
+    // unambiguous shrink — tier 1 must reject it with zero adapter calls
+    // (AC #3), never reaching `read_filesystem` or `luks.open`.
+    let fixture = RealFixtureFile::create("resize-true-shrink", &[0u8; 4096]);
+
+    let result = resize::run(&fixture.0, 2048, &luks, &fido2, &fs);
+
+    let Err(DomainError::ResizeMustGrow {
+        requested,
+        current_size,
+        ..
+    }) = result
+    else {
+        panic!("expected ResizeMustGrow, got {result:?}");
+    };
+    assert_eq!(requested, 2048);
+    assert_eq!(current_size, 4096);
+    assert_eq!(
+        *log.borrow(),
+        vec!["is_block_device".to_string()],
+        "a true shrink must be rejected before any adapter call"
+    );
+}
+
+#[test]
+fn file_backed_no_op_same_size_request_is_rejected_by_tier_two() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_filesystem_size(4096);
+
+    // Requesting exactly the current size no longer trips tier 1 (which now
+    // only rejects a strict shrink, so a same-size retry after a prior
+    // partial grow can still reach tier 2) — but tier 2's live filesystem
+    // check still correctly rejects it as a no-op once the mapping is open.
+    let fixture = RealFixtureFile::create("resize-no-op-same-size", &[0u8; 4096]);
 
     let result = resize::run(&fixture.0, 4096, &luks, &fido2, &fs);
 
@@ -143,8 +176,53 @@ fn file_backed_grow_only_rejection_never_calls_open() {
     assert_eq!(current_size, 4096);
     assert_eq!(
         *log.borrow(),
-        vec!["is_block_device".to_string(), "read_filesystem".to_string()],
-        "grow-only rejection must not reach luks.open"
+        vec![
+            "is_block_device".to_string(),
+            "read_filesystem".to_string(),
+            "open".to_string(),
+            "filesystem_size".to_string(),
+            "close".to_string(),
+        ],
+        "tier 2's rejection must still close the mapping it opened"
+    );
+}
+
+// Regression test for a review finding (2026-07-26): a resize call that grew
+// the backing file to `new_size` but then failed before `luks.resize`/
+// `growfs` completed must be retriable with the same `new_size` — tier 1's
+// old `<=` comparison wrongly rejected this identical retry as a false
+// no-op, permanently blocking recovery.
+#[test]
+fn file_backed_retry_after_a_partial_failure_completes_instead_of_being_rejected() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_filesystem_size(4096);
+
+    // The backing file is already 8192 bytes (as if a prior resize call's
+    // `set_backing_file_size` already succeeded), but the live filesystem
+    // is still only 4096 bytes (as if that same prior call then failed
+    // before `growfs` completed).
+    let fixture = RealFixtureFile::create("resize-retry-after-partial-failure", &[0u8; 8192]);
+
+    let result = resize::run(&fixture.0, 8192, &luks, &fido2, &fs);
+
+    assert!(result.is_ok(), "expected Ok, got {result:?}");
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "is_block_device".to_string(),
+            "read_filesystem".to_string(),
+            "open".to_string(),
+            "filesystem_size".to_string(),
+            "set_backing_file_size".to_string(),
+            "resize".to_string(),
+            "growfs".to_string(),
+            "close".to_string(),
+        ],
+        "a retry with an already-grown backing file must still complete the resize"
     );
 }
 
@@ -174,12 +252,8 @@ fn device_backed_too_small_partition_rejection_never_calls_open() {
     assert_eq!(capacity, 1024);
     assert_eq!(
         *log.borrow(),
-        vec![
-            "is_block_device".to_string(),
-            "read_filesystem".to_string(),
-            "device_capacity".to_string(),
-        ],
-        "too-small-partition rejection must not reach luks.open"
+        vec!["is_block_device".to_string(), "device_capacity".to_string()],
+        "too-small-partition rejection must not reach read_filesystem or luks.open"
     );
 }
 
@@ -222,8 +296,8 @@ fn device_backed_headroom_shrink_is_caught_by_tier_two_and_closes_the_mapping() 
         *log.borrow(),
         vec![
             "is_block_device".to_string(),
-            "read_filesystem".to_string(),
             "device_capacity".to_string(),
+            "read_filesystem".to_string(),
             "open".to_string(),
             "filesystem_size".to_string(),
             "close".to_string(),
@@ -261,5 +335,37 @@ fn mid_flow_failure_after_a_successful_resize_still_closes_the_mapping() {
             "close".to_string(),
         ],
         "a failure after a successful resize must still close the mapping"
+    );
+}
+
+// Regression test for a review finding (2026-07-26): a `luks.close` failure
+// *after* a fully successful grow must be distinguishable from a plain
+// resize failure, so the user isn't told resize failed when their tomb's
+// capacity was actually already safely increased.
+#[test]
+fn close_failure_after_a_successful_grow_reports_the_grow_succeeded() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing()
+        .with_log(log.clone())
+        .with_failure_at("close");
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_filesystem_size(4096);
+
+    let fixture = RealFixtureFile::create("resize-close-failure-after-grow", &[0u8; 4096]);
+
+    let result = resize::run(&fixture.0, 8192, &luks, &fido2, &fs);
+
+    let Err(DomainError::AdapterFailure(message)) = result else {
+        panic!("expected AdapterFailure, got {result:?}");
+    };
+    assert!(
+        message.contains("tomb grown to 8192 bytes"),
+        "message should acknowledge the grow succeeded: {message:?}"
+    );
+    assert!(
+        message.contains("failed to re-lock afterward"),
+        "message should distinguish this from a plain resize failure: {message:?}"
     );
 }

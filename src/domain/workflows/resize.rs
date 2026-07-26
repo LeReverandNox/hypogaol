@@ -29,16 +29,14 @@ pub fn run(
     let name = mapping_name::mapping_name(path)?;
     let device_backed = fs.is_block_device(path)?;
 
-    // Read early (Task 5's own note: a read failure here should abort
-    // before anything is touched) — also needed by tier 2 below to know
-    // which tool to query the live filesystem size with.
-    let filesystem = luks.read_filesystem(path)?;
-
     // Tier 1 of the grow-only check (AD-10: rejected "before calling any
     // adapter" for the common/obvious cases) — see this story's Dev Notes
     // "Open Design Question" for why a single pre-open check can't fully
     // enforce AC #3 for a device-backed tomb using Story 1.6's headroom
-    // feature; tier 2 below closes that gap once the mapping is open.
+    // feature; tier 2 below closes that gap once the mapping is open. Runs
+    // before `read_filesystem` below so an obviously-invalid request never
+    // reaches a real adapter call at all (AC #3's literal "before calling
+    // any adapter" — review finding, 2026-07-26).
     if device_backed {
         let capacity = fs.device_capacity(path)?;
         if new_size > capacity {
@@ -49,8 +47,15 @@ pub fn run(
             });
         }
     } else {
+        reject_symlink(path)?;
         let current_len = current_file_len(path)?;
-        if new_size <= current_len {
+        // Strict shrink only, not `<=`: a retry after an earlier resize
+        // already grew the backing file to `new_size` but failed before
+        // `luks.resize`/`growfs` completed must not be rejected here as a
+        // false no-op — tier 2 below re-checks against the filesystem's
+        // own (still-unfinished) size and is the authoritative check for
+        // the equal-size case (review finding, 2026-07-26).
+        if new_size < current_len {
             return Err(DomainError::ResizeMustGrow {
                 path: path.to_path_buf(),
                 requested: new_size,
@@ -58,6 +63,13 @@ pub fn run(
             });
         }
     }
+
+    // Read only now that tier 1 has had its chance to reject — still needed
+    // by tier 2 below, so it must run before `luks.open`. Can run either
+    // before or after `open` (it reads header/token state, not the live
+    // mapping); placed here so a read failure aborts before the mapping is
+    // opened at all.
+    let filesystem = luks.read_filesystem(path)?;
 
     let mapper = luks.open(path, &name)?;
 
@@ -67,12 +79,46 @@ pub fn run(
     // step, just close and propagate whichever error occurred.
     let result = grow_open_mapping(path, new_size, device_backed, filesystem, &mapper, luks, fs);
     match result {
-        Ok(()) => luks.close(&mapper),
+        Ok(()) => luks
+            .close(&mapper)
+            .map_err(|err| grow_succeeded_close_failed(new_size, err)),
         Err(err) => {
             let _ = luks.close(&mapper);
             Err(err)
         }
     }
+}
+
+/// Distinguishes "the grow itself failed" from "the grow succeeded but the
+/// subsequent re-lock didn't" — both would otherwise surface via the same
+/// generic close-failure message, leaving the user thinking growth never
+/// happened when the tomb's capacity was in fact already safely increased
+/// (review finding, 2026-07-26).
+fn grow_succeeded_close_failed(new_size: u64, err: DomainError) -> DomainError {
+    let detail = match err {
+        DomainError::AdapterFailure(inner) => inner,
+        other => format!("{other:?}"),
+    };
+    DomainError::AdapterFailure(format!(
+        "tomb grown to {new_size} bytes, but failed to re-lock afterward: {detail}"
+    ))
+}
+
+/// Refuses a symlinked file-backed target before any hardware interaction —
+/// `set_backing_file_size`'s own symlink guard runs too late to avoid an
+/// otherwise-wasted FIDO2 touch, since it only runs after `luks.open`
+/// (review finding, 2026-07-26).
+fn reject_symlink(path: &Path) -> Result<(), DomainError> {
+    let metadata = std::fs::symlink_metadata(path).map_err(|e| {
+        DomainError::AdapterFailure(format!("failed to stat {}: {e}", path.display()))
+    })?;
+    if !metadata.file_type().is_file() {
+        return Err(DomainError::AdapterFailure(format!(
+            "{} is not a regular file — refusing to grow it",
+            path.display()
+        )));
+    }
+    Ok(())
 }
 
 /// The rest of `resize`'s work once `mapper` is open: tier 2 of the
