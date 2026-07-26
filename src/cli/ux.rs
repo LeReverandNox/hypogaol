@@ -141,6 +141,23 @@ fn translate_adapter_failure(inner: &str) -> String {
             .to_string();
     }
 
+    // `close`'s own `umount` failures (`ExecAdapter::umount`'s `findmnt`/
+    // `umount` calls) — checked before the `mount`/`mkfs` bucket below since
+    // "umount".contains("mount") is true as a plain substring, which would
+    // otherwise misclassify these as unlock's own mount failure (the
+    // "marker bleed" bug class the Epic 2 retro flagged: 3 real bugs from
+    // this pattern already). The "not currently mounted" case (from
+    // `findmnt` finding nothing) gets its own distinct message rather than
+    // reading like a generic close failure.
+    if inner.contains("not currently mounted") {
+        return "This tomb doesn't look like it's currently mounted.".to_string();
+    }
+    if inner.contains("umount") || inner.contains("findmnt") {
+        return "tomb-fido2 couldn't unmount this tomb's filesystem. Make sure nothing is still \
+                using it, then try again."
+            .to_string();
+    }
+
     // Mount/filesystem failures (`mkfs`, `mount`, `chmod`, mount-point
     // create/remove).
     if inner.contains("mount") || inner.contains("mkfs") {

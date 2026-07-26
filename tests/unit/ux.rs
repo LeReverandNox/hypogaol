@@ -207,6 +207,46 @@ fn translates_adapter_failure_sizing_failure() {
     assert_no_jargon(&message);
 }
 
+// `"umount".contains("mount")` is `true` as a plain substring, so a close
+// failure could silently fall into the unlock-flavored "Your tomb unlocked,
+// but tomb-fido2 couldn't mount its filesystem" message unless it's matched
+// ahead of that generic bucket (the "marker bleed" bug class the Epic 2
+// retro flagged).
+#[test]
+fn translates_adapter_failure_umount_failure_is_not_swallowed_by_the_unlock_mount_message() {
+    let err = DomainError::AdapterFailure("umount failed: target is busy".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(
+        !message.contains("Your tomb unlocked"),
+        "close's own umount failure was misclassified as unlock's mount-failure message: {message:?}"
+    );
+}
+
+#[test]
+fn translates_adapter_failure_findmnt_failure_is_not_swallowed_by_the_unlock_mount_message() {
+    let err = DomainError::AdapterFailure("failed to run findmnt: some io error".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("Your tomb unlocked"));
+}
+
+#[test]
+fn translates_adapter_failure_not_currently_mounted_gets_its_own_distinct_message() {
+    let err =
+        DomainError::AdapterFailure("/dev/mapper/vault-deadbeef is not currently mounted".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("Your tomb unlocked"));
+
+    let generic_umount_err = DomainError::AdapterFailure("umount failed: target is busy".to_string());
+    let generic_message = translate(&generic_umount_err);
+    assert_ne!(
+        message, generic_message,
+        "the not-currently-mounted case should read distinctly from a generic umount failure"
+    );
+}
+
 #[test]
 fn translates_adapter_failure_mapping_name_canonicalization_failure() {
     let err = DomainError::AdapterFailure(
