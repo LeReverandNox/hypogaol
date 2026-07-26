@@ -4,7 +4,7 @@ baseline_commit: 11723e9307775ffba214e822fc60b6318afa85bf
 
 # Story 3.3: Unlock a Tomb Read-Only
 
-Status: review
+Status: done
 
 ## Story
 
@@ -64,6 +64,14 @@ so that I can inspect its contents without risking any writes, at both the block
     - **Device-backed read-only, identical command (AC #5):** same shape as the file-backed scenario above but against a `LoopDevice`-backed target (mirror `unlock_works_unmodified_against_a_device_backed_tomb`'s setup, `tests/hardware/main.rs:537-595`) — same `unlock::run(&loop_device.path, true, ...)` call, no different flags/branches, confirming write-rejection and remount-rejection hold identically.
     - **Read-only luksOpen-succeeds-but-mount-fails rollback (AC #3):** this is hard to force organically on real hardware (a read-only `mount -o ro` of a valid, freshly-formatted ext4 filesystem essentially never fails). Rather than contriving a fragile real-hardware failure, rely on the unit-level `read_only_mount_failure_still_closes_the_just_opened_mapping` test (Task 7) for this AC's coverage, and note that explicitly in Completion Notes rather than silently skipping it.
     - **Normal (non-read-only) unlock still allows writes (AC #4):** already covered by the existing `unlock_mounts_a_file_backed_tomb_with_a_readable_writable_filesystem` scenario, which is unaffected by this story (its call site gets `unlock::run(&path, false, ...)`, Task 4's compile-fix equivalent for hardware tests — update all three existing hardware `unlock::run(...)` call sites at `tests/hardware/main.rs:514`, `:577`, and inside `unlock_falls_back_to_a_suffixed_mount_point_on_a_basename_collision` to pass `false` explicitly). No new scenario needed for this AC beyond that signature fix.
+
+### Review Findings
+
+- [x] [Review][Patch] Read-only mount of a never-writably-unlocked tomb may be world-readable to any local user — root-owned `mkfs.ext4` default permissions (assumed `0755`, unverified/unguarded against ambient umask) are left in place because the read-only path skips the chown/chmod-0700 hardening step entirely. The design note frames this as "the invoking user can still read it," but the actual root-inode mode is world-readable/traversable — any local user, not just the invoking user, can read the decrypted contents, defeating the FIDO2 gate the same file's sibling comment (`src/adapters/exec/mod.rs:1694`) explicitly protects against on the normal-mount path. **Resolution (user decision 2026-07-27):** after a successful read-only mount, `stat` the mountpoint (non-mutating, doesn't violate the read-only guarantee); if it isn't owned by the invoking user, print a warning that this tomb has never been unlocked writably and its contents are currently world-readable to other local users. [src/adapters/exec/mod.rs:1648-1660]
+- [x] [Review][Patch] Read-only mount can fail with EROFS on a tomb with an unclean ext4 journal: `cryptsetup --readonly` also makes the underlying dm-crypt mapping read-only, so ext4 can't auto-replay a dirty journal (needs block-device writes), and `mount -o ro` (no `noload`) refuses to mount. Breaks exactly the "inspect after a crash/unclean shutdown" scenario read-only unlock exists to serve; both new hardware scenarios dodge it by writably-unlocking (and thus journal-cleaning) first. Fix: add `noload` to the `-o ro` mount options when `read_only` is true. [src/adapters/exec/mod.rs:1622-1625]
+- [x] [Review][Patch] The read-only hardware scenario for a device-backed tomb never calls `assert_owned_by_invoking_user`, unlike its file-backed sibling — leaves AC #5's "identical command, no branching" unverified on that dimension. [tests/hardware/main.rs — unlock_read_only_rejects_writes_at_both_layers_against_a_device_backed_tomb]
+- [x] [Review][Patch] The new read-only-specific CLI message text (intro "no changes will be saved" suffix, success "(read-only)" marker) has zero test coverage — only `--help` output is checked. [src/cli/main.rs:314-329]
+- [x] [Review][Defer] `luks.close()`'s failure in the mount-failure rollback path is silently discarded (`let _ = luks.close(&mapper)`), so if `mount` fails and the subsequent `close` also fails, the caller never learns a mapping was left dangling — contradicts AC #3's "no dangling open mapper" guarantee. Pre-existing code, unmodified by this diff (applies identically to the non-read-only path already). [src/domain/workflows/unlock.rs:31] — deferred, pre-existing
 
 ## Dev Notes
 

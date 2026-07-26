@@ -74,3 +74,7 @@
 - `filesystem_size`'s `dumpe2fs` parsing assumes an English locale — nothing forces `LC_ALL=C` on adapter subprocesses anywhere in this codebase (e.g. the `cryptsetup --help` plugin-path parsing has the same property), not specific to this story. [src/adapters/exec/mod.rs:1528-1546]
 - No unit test exercises the real `ExecAdapter::is_block_device` against an actual block device — consistent with AD-7's established testing standard for every other hardware-dependent adapter method in this codebase; only reachable via manual `#[ignore]`d hardware tests. [src/adapters/exec/mod.rs]
 - Device-backed headroom hardware scenario doesn't assert the filesystem's own size before/after — test-coverage improvement, not a functional defect; manual-only hardware test, not run in CI. [tests/hardware/main.rs]
+
+## Deferred from: code review of story-3.3 (2026-07-27)
+
+- `luks.close()`'s failure on the mount-failure rollback path is silently discarded (`let _ = luks.close(&mapper);`), so a `mount` failure followed by a `close` failure leaves a dangling mapper with no signal to the caller — same long-standing pattern already noted for `create.rs:132`/`unlock.rs:30` in the 3-2 review and `resize.rs:72`; now also covers the read-only path this story adds, still not introduced by this story. [src/domain/workflows/unlock.rs:31]
