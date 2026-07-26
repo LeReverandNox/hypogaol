@@ -4,7 +4,7 @@ baseline_commit: 08eb4c0a5c56d5d37ae3a885635c00c5b159dbec
 
 # Story 3.1: Close an Unlocked Tomb
 
-Status: review
+Status: done
 
 ## Story
 
