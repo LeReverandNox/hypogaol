@@ -54,7 +54,12 @@ fn close_run_stops_at_preflight_before_reaching_its_own_todo() {
     let fido2 = FakeFido2Backend::passing();
     let fs = FakeFilesystemBackend::passing();
 
-    let result = close::run(&luks, &fido2, &fs);
+    let result = close::run(
+        std::path::Path::new("/tmp/does-not-matter"),
+        &luks,
+        &fido2,
+        &fs,
+    );
 
     assert!(matches!(result, Err(DomainError::PreflightFailed(_))));
 }
