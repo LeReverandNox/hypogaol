@@ -649,7 +649,6 @@ fn unlock_read_only_rejects_writes_at_both_layers_including_remount() {
     let marker = mountpoint.join("tomb-fido2-marker.txt");
     let marker_contents = std::fs::read_to_string(&marker)
         .expect("failed to read back marker written by the writable unlock");
-    UnlockCleanup::new(mountpoint.clone(), name.clone()).run();
 
     let result = close::run(&path, &adapter, &adapter, &adapter);
     assert!(result.is_ok(), "close::run failed: {result:?}");
@@ -745,7 +744,6 @@ fn unlock_read_only_rejects_writes_at_both_layers_against_a_device_backed_tomb()
     let mountpoint = unlock::run(&loop_device.path, false, &adapter, &adapter, &adapter)
         .expect("writable unlock::run failed");
     assert_readable_and_writable(&mountpoint);
-    UnlockCleanup::new(mountpoint.clone(), name.clone()).run();
 
     let result = close::run(&loop_device.path, &adapter, &adapter, &adapter);
     assert!(result.is_ok(), "close::run failed: {result:?}");
