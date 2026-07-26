@@ -29,6 +29,7 @@ pub struct FakeLuksBackend {
     last_bootstrap_size: RefCell<Option<u64>>,
     last_open: RefCell<Option<(std::path::PathBuf, String)>>,
     last_removed_keyslot: RefCell<Option<KeyslotRef>>,
+    last_close: RefCell<Option<MapperHandle>>,
     // Distinct return values for successive `list_fido2_keyslots` calls, so a
     // test can prove a caller re-reads live state on each call rather than
     // reusing an earlier result (AC #3). `None` means "always return
@@ -55,6 +56,7 @@ impl FakeLuksBackend {
             last_bootstrap_size: RefCell::new(None),
             last_open: RefCell::new(None),
             last_removed_keyslot: RefCell::new(None),
+            last_close: RefCell::new(None),
             keyslots_sequence: RefCell::new(None),
         }
     }
@@ -69,6 +71,7 @@ impl FakeLuksBackend {
             last_bootstrap_size: RefCell::new(None),
             last_open: RefCell::new(None),
             last_removed_keyslot: RefCell::new(None),
+            last_close: RefCell::new(None),
             keyslots_sequence: RefCell::new(None),
         }
     }
@@ -115,6 +118,13 @@ impl FakeLuksBackend {
     /// assert *which* keyslot label-to-keyslot resolution actually picked.
     pub fn last_removed_keyslot(&self) -> Option<KeyslotRef> {
         *self.last_removed_keyslot.borrow()
+    }
+
+    /// The `MapperHandle` most recently passed to `close` — lets a test
+    /// assert `close::run` built the mapper from the same derived mapping
+    /// name it also passed to `umount`.
+    pub fn last_close(&self) -> Option<MapperHandle> {
+        self.last_close.borrow().clone()
     }
 
     /// Makes the named port call log itself as usual, then return an
@@ -185,8 +195,9 @@ impl LuksBackend for FakeLuksBackend {
         self.fail_if("remove_key")
     }
 
-    fn close(&self, _mapper: &MapperHandle) -> Result<(), DomainError> {
+    fn close(&self, mapper: &MapperHandle) -> Result<(), DomainError> {
         self.log.borrow_mut().push("close".to_string());
+        *self.last_close.borrow_mut() = Some(mapper.clone());
         self.fail_if("close")
     }
 
@@ -266,6 +277,8 @@ pub struct FakeFilesystemBackend {
     device_capacity: u64,
     log: CallLog,
     fail_at: Option<&'static str>,
+    umount_not_currently_mounted: bool,
+    last_umount: RefCell<Option<MapperHandle>>,
 }
 
 impl FakeFilesystemBackend {
@@ -276,6 +289,8 @@ impl FakeFilesystemBackend {
             device_capacity: DEFAULT_DEVICE_CAPACITY,
             log: new_call_log(),
             fail_at: None,
+            umount_not_currently_mounted: false,
+            last_umount: RefCell::new(None),
         }
     }
 
@@ -286,6 +301,8 @@ impl FakeFilesystemBackend {
             device_capacity: DEFAULT_DEVICE_CAPACITY,
             log: new_call_log(),
             fail_at: None,
+            umount_not_currently_mounted: false,
+            last_umount: RefCell::new(None),
         }
     }
 
@@ -307,6 +324,22 @@ impl FakeFilesystemBackend {
     pub fn with_failure_at(mut self, call: &'static str) -> Self {
         self.fail_at = Some(call);
         self
+    }
+
+    /// Makes `umount` fail with the same "not currently mounted" marker the
+    /// real `ExecAdapter` produces — distinct from `with_failure_at("umount")`'s
+    /// generic failure, so a test can exercise `close::run`'s idempotent-retry
+    /// path (review finding, 2026-07-26).
+    pub fn with_umount_not_currently_mounted(mut self) -> Self {
+        self.umount_not_currently_mounted = true;
+        self
+    }
+
+    /// The `MapperHandle` most recently passed to `umount` — lets a test
+    /// assert `close::run` built the mapper from the same derived mapping
+    /// name it also passed to `close`.
+    pub fn last_umount(&self) -> Option<MapperHandle> {
+        self.last_umount.borrow().clone()
     }
 
     fn fail_if(&self, call: &'static str) -> Result<(), DomainError> {
@@ -360,5 +393,17 @@ impl FilesystemBackend for FakeFilesystemBackend {
             "/tmp/fake-mount-{}",
             mapper.name
         )))
+    }
+
+    fn umount(&self, mapper: &MapperHandle) -> Result<(), DomainError> {
+        self.log.borrow_mut().push("umount".to_string());
+        *self.last_umount.borrow_mut() = Some(mapper.clone());
+        if self.umount_not_currently_mounted {
+            return Err(DomainError::AdapterFailure(format!(
+                "{} is not currently mounted",
+                mapper.name
+            )));
+        }
+        self.fail_if("umount")
     }
 }

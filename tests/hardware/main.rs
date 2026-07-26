@@ -4,7 +4,7 @@ use std::process::Command;
 use tomb_fido2::adapters::exec::ExecAdapter;
 use tomb_fido2::domain::mapping_name;
 use tomb_fido2::domain::types::{CreateTarget, Filesystem};
-use tomb_fido2::domain::workflows::{create, enroll, revoke, unlock};
+use tomb_fido2::domain::workflows::{close, create, enroll, revoke, unlock};
 use tomb_fido2::ports::fido2_backend::Fido2DeviceSelection;
 use tomb_fido2::ports::luks_backend::LuksBackend;
 
@@ -968,4 +968,171 @@ fn revoke_aborts_on_the_last_remaining_key() {
         .expect("unlock::run failed after a refused revoke — the guard must be a no-op on abort");
     let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
     UnlockCleanup::new(mountpoint, name).run();
+}
+
+/// End-to-end close verification (Story 3.1, AC #1/#3): create a real
+/// file-backed tomb, unlock it, then close it via this tool's own
+/// `close::run`, and confirm — independently of this tool's own code — both
+/// halves of AC #3: the mount point is gone (not merely unmounted, so a
+/// repeat unlock reclaims the plain basename rather than falling back to a
+/// collision-suffixed name — the Epic 2 retro action item Task 1's `rmdir`
+/// resolves) and the dm-crypt mapping device node is gone (the volume
+/// requires the FIDO2 key again to unlock). Finishes with a second
+/// `unlock::run` on the same path to prove the tomb is genuinely
+/// re-lockable/re-unlockable, not just superficially torn down.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and a real FIDO2
+/// security key present, ready to be touched and to enter its PIN when
+/// prompted (once for `create`, once for each of the two `unlock::run` calls).
+#[test]
+#[ignore]
+fn close_unmounts_and_relocks_a_file_backed_tomb_allowing_a_clean_repeat_unlock() {
+    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-close");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("tomb.img");
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::File {
+        path: path.clone(),
+        size: 64 * 1024 * 1024,
+    };
+
+    println!("Creating tomb — touch the key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    println!("Unlocking — touch the key when prompted.");
+    let mountpoint =
+        unlock::run(&path, &adapter, &adapter, &adapter).expect("first unlock::run failed");
+    let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
+    let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
+
+    assert_actually_mounted(&device_node, &mountpoint);
+    assert_eq!(
+        mountpoint.file_name().and_then(|n| n.to_str()),
+        Some("tomb"),
+        "the first unlock should claim the plain, unsuffixed basename"
+    );
+
+    println!("Closing the tomb via close::run.");
+    let result = close::run(&path, &adapter, &adapter, &adapter);
+    assert!(result.is_ok(), "close::run failed: {result:?}");
+
+    assert!(
+        std::fs::metadata(&mountpoint).is_err(),
+        "expected the mount-point directory {} to be removed after close, not merely unmounted",
+        mountpoint.display()
+    );
+    assert!(
+        !device_node.exists(),
+        "expected the dm-crypt mapping {} to be gone after close",
+        device_node.display()
+    );
+
+    println!(
+        "Unlocking again with the same key to confirm close left the tomb re-lockable — touch the key when prompted."
+    );
+    let second_mountpoint =
+        unlock::run(&path, &adapter, &adapter, &adapter).expect("second unlock::run failed");
+    assert_eq!(
+        second_mountpoint, mountpoint,
+        "a repeat unlock after close should reclaim the plain basename freed by close's rmdir, not fall back to a suffixed name"
+    );
+    assert_actually_mounted(&device_node, &second_mountpoint);
+
+    UnlockCleanup::new(second_mountpoint, name).run();
+}
+
+/// Covers AC #5 (identical `close::run` call, no branching on target type)
+/// against a real device-backed target instead of a plain file, using the
+/// same `LoopDevice` helper as the device-backed create/unlock hardware
+/// tests above.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and a real FIDO2
+/// security key present, ready to be touched and to enter its PIN when
+/// prompted (once for `create`, once for `unlock`).
+#[test]
+#[ignore]
+fn close_works_unmodified_against_a_device_backed_tomb() {
+    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-close-device");
+    let backing_file = dir.join("loop-backing.img");
+
+    // Must run before the backing file is deleted/recreated below — see
+    // `detach_stale`'s doc comment.
+    LoopDevice::detach_stale(&backing_file);
+
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+
+    let loop_capacity: u64 = 64 * 1024 * 1024;
+    {
+        let file = std::fs::File::create(&backing_file).expect("failed to create backing file");
+        file.set_len(loop_capacity)
+            .expect("failed to size backing file");
+    }
+
+    let loop_device = LoopDevice::attach(&backing_file);
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::Device {
+        path: loop_device.path.clone(),
+        size: None,
+        confirmed: true,
+    };
+
+    println!("Creating tomb — touch the key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    println!("Unlocking — touch the key when prompted.");
+    let mountpoint =
+        unlock::run(&loop_device.path, &adapter, &adapter, &adapter).expect("unlock::run failed");
+    let name =
+        mapping_name::mapping_name(&loop_device.path).expect("failed to derive mapping name");
+    let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
+
+    assert_actually_mounted(&device_node, &mountpoint);
+
+    // Identical close::run call as the file-backed scenario above — no
+    // different flags or behavior branch based on target type (AC #5).
+    println!("Closing the tomb via close::run.");
+    let result = close::run(&loop_device.path, &adapter, &adapter, &adapter);
+    assert!(result.is_ok(), "close::run failed: {result:?}");
+
+    assert!(
+        std::fs::metadata(&mountpoint).is_err(),
+        "expected the mount-point directory {} to be removed after close",
+        mountpoint.display()
+    );
+    assert!(
+        !device_node.exists(),
+        "expected the dm-crypt mapping {} to be gone after close",
+        device_node.display()
+    );
+
+    let detach = Command::new("sudo")
+        .args(["losetup", "-d"])
+        .arg(&loop_device.path)
+        .output()
+        .expect("failed to run losetup -d");
+    assert!(
+        detach.status.success(),
+        "losetup -d failed: {}",
+        String::from_utf8_lossy(&detach.stderr)
+    );
 }

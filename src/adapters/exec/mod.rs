@@ -1240,7 +1240,15 @@ impl FilesystemBackend for ExecAdapter {
     fn check_prerequisites(&self) -> Result<(), Vec<String>> {
         let mut missing = Vec::new();
 
-        for binary in ["mkfs.ext4", "resize2fs", "blockdev", "mount", "id"] {
+        for binary in [
+            "mkfs.ext4",
+            "resize2fs",
+            "blockdev",
+            "mount",
+            "umount",
+            "findmnt",
+            "id",
+        ] {
             if !binary_on_path(binary) {
                 missing.push(format!("{binary} binary not found on PATH"));
             }
@@ -1468,6 +1476,67 @@ impl FilesystemBackend for ExecAdapter {
                 )))
             }
         }
+    }
+
+    fn umount(&self, mapper: &MapperHandle) -> Result<(), DomainError> {
+        let device_node = mapper.device_node();
+
+        // Distinct from "not currently mounted" below: no dm-crypt mapping at
+        // all means the tomb was never unlocked, or a prior `close` already
+        // fully completed — neither is "just needs a retry" (review finding,
+        // 2026-07-26).
+        if !device_node.exists() {
+            return Err(DomainError::AdapterFailure(format!(
+                "{} has no active mapping",
+                device_node.display()
+            )));
+        }
+
+        let findmnt_output = Command::new("findmnt")
+            .args(["-n", "-o", "TARGET"])
+            .arg(&device_node)
+            .output()
+            .map_err(|e| DomainError::AdapterFailure(format!("failed to run findmnt: {e}")))?;
+
+        // Only the first line: a device mounted at more than one target
+        // would otherwise hand `umount` a multi-line argument with an
+        // embedded newline (review finding, 2026-07-26).
+        let mountpoint = String::from_utf8_lossy(&findmnt_output.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+
+        if !findmnt_output.status.success() || mountpoint.is_empty() {
+            return Err(DomainError::AdapterFailure(format!(
+                "{} is not currently mounted",
+                device_node.display()
+            )));
+        }
+
+        let umount_output = privileged("umount")
+            .arg(&mountpoint)
+            .output()
+            .map_err(|e| DomainError::AdapterFailure(format!("failed to run umount: {e}")))?;
+
+        if !umount_output.status.success() {
+            return Err(DomainError::AdapterFailure(format!(
+                "umount failed: {}",
+                String::from_utf8_lossy(&umount_output.stderr).trim()
+            )));
+        }
+
+        // Mirrors `mount`'s own cleanup-on-error paths: the mount point
+        // directories `create_mount_point` makes are meant to be ephemeral,
+        // not accumulate across unlock/close cycles. Guarded to this tool's
+        // own mount root — never rmdir a path `findmnt` happens to report if
+        // it isn't one `mount` created (review finding, 2026-07-26).
+        if mountpoint.starts_with("/run/media/") {
+            let _ = std::fs::remove_dir(&mountpoint);
+        }
+
+        Ok(())
     }
 }
 

@@ -131,6 +131,17 @@ fn translate_adapter_failure(inner: &str) -> String {
             .to_string();
     }
 
+    // `close`'s own `luks.close` failures (`cryptsetup close failed: ...`) —
+    // checked before the generic `cryptsetup` bucket below for the same
+    // "marker bleed" reason as the `luksKillSlot`/`token remove` guard above:
+    // that bucket's touch/PIN-entry framing is meaningless for `close`, which
+    // never touches a FIDO2 key (review finding, 2026-07-26).
+    if inner.contains("cryptsetup close") {
+        return "tomb-fido2 couldn't re-lock this tomb's LUKS2 volume. Make sure nothing is \
+                still using it, then try again."
+            .to_string();
+    }
+
     // `cryptsetup` subprocess failures during create's bootstrap
     // (`luksFormat`/`luksOpen`/`resize`) and unlock's `open` — includes the
     // `{cmd:?}` Debug-format argv dump, the single most jargon-dense string
@@ -138,6 +149,29 @@ fn translate_adapter_failure(inner: &str) -> String {
     if inner.contains("cryptsetup") {
         return "Something went wrong while unlocking or creating your tomb — your security key \
                 or its PIN may not have been accepted in time."
+            .to_string();
+    }
+
+    // `close`'s own `umount` failures (`ExecAdapter::umount`'s `findmnt`/
+    // `umount` calls) — checked before the `mount`/`mkfs` bucket below since
+    // "umount".contains("mount") is true as a plain substring, which would
+    // otherwise misclassify these as unlock's own mount failure (the
+    // "marker bleed" bug class the Epic 2 retro flagged: 3 real bugs from
+    // this pattern already). "No active mapping" (the tomb was never
+    // unlocked, or a prior `close` already fully completed) and "not
+    // currently mounted" (unmounted already, but still open — the
+    // partial-failure retry case `close::run` now recovers from) each get
+    // their own distinct message rather than reading like a generic close
+    // failure (review finding, 2026-07-26).
+    if inner.contains("no active mapping") {
+        return "This tomb doesn't appear to be unlocked right now — run unlock first.".to_string();
+    }
+    if inner.contains("not currently mounted") {
+        return "This tomb doesn't look like it's currently mounted.".to_string();
+    }
+    if inner.contains("umount") || inner.contains("findmnt") {
+        return "tomb-fido2 couldn't unmount this tomb's filesystem. Make sure nothing is still \
+                using it, then try again."
             .to_string();
     }
 

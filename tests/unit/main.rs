@@ -1,4 +1,5 @@
 mod cli;
+mod close;
 mod create;
 mod enroll;
 mod fakes;

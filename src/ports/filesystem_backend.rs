@@ -36,4 +36,12 @@ pub trait FilesystemBackend {
     /// stored or derived from `mapper`'s path (AD-12) — rediscovering it
     /// later is `close`'s job (Story 3.1), via the kernel's own mount table.
     fn mount(&self, mapper: &MapperHandle) -> Result<PathBuf, DomainError>;
+
+    /// Unmounts `mapper`'s decrypted device node, resolving the live mount
+    /// point itself via the kernel's mount table (AD-12) — takes the mapper,
+    /// never a mountpoint, since none is ever stored. Also removes the
+    /// now-empty mount-point directory `mount` created, so a later re-unlock
+    /// of the same tomb gets the plain basename back rather than permanently
+    /// falling back to a collision-suffixed name.
+    fn umount(&self, mapper: &MapperHandle) -> Result<(), DomainError>;
 }
