@@ -7,6 +7,7 @@ use crate::adapters::exec::ExecAdapter;
 use crate::cli::ux;
 use crate::domain::preflight;
 use crate::domain::types::{CreateTarget, Filesystem};
+use crate::domain::workflows::close;
 use crate::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
 use crate::domain::workflows::enroll;
 use crate::domain::workflows::revoke;
@@ -68,6 +69,13 @@ enum Commands {
         /// Label of the enrolled key to revoke
         #[arg(long, value_parser = parse_label)]
         label: String,
+    },
+
+    /// Unmount an unlocked tomb's filesystem and re-lock its LUKS2 volume
+    Close {
+        /// Path to the existing tomb's backing file or device
+        #[arg(allow_hyphen_values = true)]
+        path: PathBuf,
     },
 }
 
@@ -380,6 +388,31 @@ fn run_revoke(path: PathBuf, label: String) {
     }
 }
 
+/// Builds the adapter, runs `close::run`, and reports the result. Mirrors
+/// `run_unlock`'s shape: preflight check first, then a plain-language intro
+/// (FR5/NFR3). No confirmation prompt — unlike `create`'s wipe warning or
+/// `revoke`'s irreversible-key warning, closing is fully reversible (a normal
+/// `unlock` with the same FIDO2 key gets you back in), so it doesn't fit the
+/// pattern that justifies those two interactive gates.
+fn run_close(path: PathBuf) {
+    let adapter = ExecAdapter::default();
+
+    if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
+        eprintln!("{}", ux::translate(&err));
+        std::process::exit(1);
+    }
+
+    println!("Closing this tomb.");
+
+    match close::run(&path, &adapter, &adapter, &adapter) {
+        Ok(()) => println!("Tomb closed."),
+        Err(err) => {
+            eprintln!("{}", ux::translate(&err));
+            std::process::exit(1);
+        }
+    }
+}
+
 pub fn run() {
     let cli = Cli::parse();
 
@@ -430,5 +463,6 @@ pub fn run() {
             run_enroll(path, label, selection);
         }
         Commands::Revoke { path, label } => run_revoke(path, label),
+        Commands::Close { path } => run_close(path),
     }
 }

@@ -36,10 +36,10 @@ so that its filesystem is unmounted and the LUKS2 volume is re-locked, as the sy
 - [x] Task 3: Extend preflight dependency check (AC: #4)
   - [x] `FilesystemBackend::check_prerequisites` in `src/adapters/exec/mod.rs` (~line 1243) currently checks `["mkfs.ext4", "resize2fs", "blockdev", "mount", "id"]`. Add `"umount"` and `"findmnt"` — both ship in `util-linux`, the same package already providing `mount`/`blockdev`, so no new external dependency.
 
-- [ ] Task 4: Wire the `close` CLI subcommand (AC: #1, #3)
-  - [ ] Add a `Close { path: PathBuf }` variant to `Commands` in `src/cli/main.rs`, same `#[arg(allow_hyphen_values = true)]` convention as `Unlock`/`Enroll`/`Revoke`.
-  - [ ] Add a `run_close(path: PathBuf)` function mirroring `run_unlock`'s shape (`src/cli/main.rs:279`): preflight check first, a short plain-language intro line (FR5/NFR3), then call `close::run`, printing a success line on `Ok(())` and `ux::translate`+exit(1) on `Err`. No confirmation prompt — unlike `create`'s wipe warning or `revoke`'s irreversible-key warning, closing is fully reversible (re-unlock with the same FIDO2 key), so it doesn't need one.
-  - [ ] Wire the new match arm in `run()`.
+- [x] Task 4: Wire the `close` CLI subcommand (AC: #1, #3)
+  - [x] Add a `Close { path: PathBuf }` variant to `Commands` in `src/cli/main.rs`, same `#[arg(allow_hyphen_values = true)]` convention as `Unlock`/`Enroll`/`Revoke`.
+  - [x] Add a `run_close(path: PathBuf)` function mirroring `run_unlock`'s shape (`src/cli/main.rs:279`): preflight check first, a short plain-language intro line (FR5/NFR3), then call `close::run`, printing a success line on `Ok(())` and `ux::translate`+exit(1) on `Err`. No confirmation prompt — unlike `create`'s wipe warning or `revoke`'s irreversible-key warning, closing is fully reversible (re-unlock with the same FIDO2 key), so it doesn't need one.
+  - [x] Wire the new match arm in `run()`.
 
 - [ ] Task 5: Plain-language translation for close's failures (AC: none directly — CAP-5/NFR3 quality bar)
   - [ ] **Marker-bleed guard (explicitly flagged by the Epic 2 retro as a recurring bug class — check this before merge, not after):** `src/cli/ux.rs`'s existing generic bucket at `inner.contains("mount") || inner.contains("mkfs")` (line ~146) returns "Your tomb unlocked, but tomb-fido2 couldn't mount its filesystem" — but `"umount".contains("mount")` is `true` as a plain substring, so any of `close`'s new `umount`-related `AdapterFailure` text would silently fall into that *unlock*-flavored message. Add a dedicated check for `close`'s own failures (matching on markers like `"umount"`/`"findmnt"`/`"not currently mounted"` — whatever exact strings the Task 1 adapter code produces) **ordered before** the existing `mount`/`mkfs` bucket, the same way `luksDump`/`fido2-token`/enrollment markers are already ordered ahead of the generic buckets for the same reason.
@@ -103,6 +103,7 @@ so that its filesystem is unmounted and the LUKS2 volume is re-locked, as the sy
 
 - Task 1/3: Added `FilesystemBackend::umount` to the port trait and implemented it in `ExecAdapter` (findmnt to resolve the live mountpoint from the mapper device node, privileged `umount`, then best-effort `rmdir` of the now-empty mount point). Extended `check_prerequisites`'s binary list with `umount`/`findmnt`. `cargo build` and full `cargo test` (79 passed) both green; no regressions.
 - Task 2: Replaced the `close::run` stub with the real implementation — preflight, derive mapping name, build `MapperHandle` directly (no `luks.open`), `fs.umount` then `luks.close`, no rollback on umount failure. Updated the existing preflight stub test's call site for the new `path` parameter. Full `cargo test` (79 passed) still green.
+- Task 4: Wired the `Close { path }` CLI subcommand and `run_close`, mirroring `run_unlock`'s shape (preflight, plain-language intro, success/error reporting) with no confirmation prompt. Full `cargo test` (79 passed) still green.
 
 ### File List
 
@@ -111,3 +112,4 @@ so that its filesystem is unmounted and the LUKS2 volume is re-locked, as the sy
 - `src/domain/workflows/close.rs` — replaced `todo!()` stub with real implementation, new `path` parameter.
 - `tests/unit/fakes.rs` — added `umount` to `FakeFilesystemBackend`'s trait impl.
 - `tests/unit/workflows.rs` — updated `close::run` call site for the new `path` parameter.
+- `src/cli/main.rs` — added `Close` subcommand and `run_close`.
