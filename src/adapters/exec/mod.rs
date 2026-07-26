@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::io::{self, Write};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -1659,9 +1660,31 @@ impl FilesystemBackend for ExecAdapter {
         // ownership by the time a read-only unlock reaches this point. A
         // tomb never unlocked writably shows root-owned, mkfs.ext4-default
         // (0755) permissions on its first-ever read-only unlock —
-        // world-readable/traversable, so the invoking user can still read it
-        // (just not chown/chmod it): an accepted, documented limitation.
+        // world-readable/traversable to every local user, not just the
+        // invoking one: an accepted limitation, but one worth surfacing
+        // rather than leaving silent (see the stat check below).
         if read_only {
+            // Non-mutating: a `stat`, not a write, so it doesn't touch the
+            // read-only guarantee. Warns rather than fails, since this is a
+            // pre-existing exposure this story doesn't introduce and can't
+            // fix without writing to a filesystem it just promised not to.
+            let owned_by_invoking_user = std::fs::metadata(&mountpoint)
+                .ok()
+                .and_then(|meta| {
+                    identity
+                        .uid
+                        .parse::<u32>()
+                        .ok()
+                        .map(|uid| meta.uid() == uid)
+                })
+                .unwrap_or(true);
+            if !owned_by_invoking_user {
+                eprintln!(
+                    "Warning: this tomb has never been unlocked in read-write mode, so its \
+                     contents are still owned by root with default permissions — readable by \
+                     any local user, not just you. Unlock it read-write once to restrict access."
+                );
+            }
             return Ok(mountpoint);
         }
 
