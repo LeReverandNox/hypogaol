@@ -292,6 +292,31 @@ fn run_create(
     println!("Tomb created at {display_path}.");
 }
 
+/// Plain-language intro line printed before `unlock::run` (FR5/NFR3),
+/// pulled out as a pure function so `run_unlock`'s read-only-specific text
+/// is unit-testable without a stdout-capture harness.
+pub fn unlock_intro_message(read_only: bool) -> String {
+    let intro = "Touch your security key now (you may also be asked for its PIN).";
+    if read_only {
+        format!("{intro} Unlocking read-only — no changes will be saved.")
+    } else {
+        intro.to_string()
+    }
+}
+
+/// Plain-language success line printed after a successful `unlock::run`,
+/// pulled out for the same reason as `unlock_intro_message`.
+pub fn unlock_success_message(read_only: bool, mountpoint: &Path) -> String {
+    if read_only {
+        format!(
+            "Tomb unlocked (read-only) and mounted at {}.",
+            mountpoint.display()
+        )
+    } else {
+        format!("Tomb unlocked and mounted at {}.", mountpoint.display())
+    }
+}
+
 /// Builds the adapter, runs `unlock::run`, and reports the result. Checks
 /// preflight first so a missing-dependency error surfaces before the
 /// touch-key prompt below, rather than after it — `unlock::run` re-checks
@@ -310,24 +335,10 @@ fn run_unlock(path: PathBuf, read_only: bool) {
         std::process::exit(1);
     }
 
-    let intro = "Touch your security key now (you may also be asked for its PIN).";
-    if read_only {
-        println!("{intro} Unlocking read-only — no changes will be saved.");
-    } else {
-        println!("{intro}");
-    }
+    println!("{}", unlock_intro_message(read_only));
 
     match unlock::run(&path, read_only, &adapter, &adapter, &adapter) {
-        Ok(mountpoint) => {
-            if read_only {
-                println!(
-                    "Tomb unlocked (read-only) and mounted at {}.",
-                    mountpoint.display()
-                );
-            } else {
-                println!("Tomb unlocked and mounted at {}.", mountpoint.display());
-            }
-        }
+        Ok(mountpoint) => println!("{}", unlock_success_message(read_only, &mountpoint)),
         Err(err) => {
             eprintln!("{}", ux::translate(&err));
             std::process::exit(1);

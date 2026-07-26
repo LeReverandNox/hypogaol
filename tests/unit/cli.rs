@@ -1,5 +1,9 @@
+use std::path::Path;
+
 use clap::Parser;
-use tomb_fido2::cli::main::{confirms_revoke, confirms_wipe, parse_size, Cli};
+use tomb_fido2::cli::main::{
+    confirms_revoke, confirms_wipe, parse_size, unlock_intro_message, unlock_success_message, Cli,
+};
 use tomb_fido2::domain::workflows::create::MIN_TOMB_SIZE_BYTES;
 
 #[test]
@@ -100,6 +104,19 @@ fn unlock_help_lists_path_as_positional() {
 fn unlock_help_lists_read_only_flag() {
     let help = help_text(&["tomb-fido2", "unlock", "--help"]);
     assert!(help.contains("--read-only"));
+}
+
+#[test]
+fn unlock_intro_message_mentions_read_only_when_set() {
+    assert!(unlock_intro_message(true).contains("Unlocking read-only — no changes will be saved."));
+    assert!(!unlock_intro_message(false).contains("read-only"));
+}
+
+#[test]
+fn unlock_success_message_mentions_read_only_when_set() {
+    let mountpoint = Path::new("/run/media/user/vault");
+    assert!(unlock_success_message(true, mountpoint).contains("(read-only)"));
+    assert!(!unlock_success_message(false, mountpoint).contains("(read-only)"));
 }
 
 #[test]
