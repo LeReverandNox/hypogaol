@@ -42,4 +42,24 @@ pub trait LuksBackend {
     /// carry a LUKS2 header. `name` is derived by the caller via the shared
     /// `mapping_name` helper, never computed here (AD-12).
     fn open(&self, path: &Path, name: &str) -> Result<MapperHandle, DomainError>;
+
+    /// Grows `mapper`'s already-open LUKS2 mapping to fill its now-larger
+    /// backing storage (Story 3.2, AC #1/#4). Takes no explicit size: the
+    /// header's segment sizing stays `"dynamic"` (confirmed at create time,
+    /// see `ExecAdapter::bootstrap_format_and_open`'s doc comment) and
+    /// recomputes from the backing file/device's actual current size, as
+    /// long as that backing storage was already grown before this call runs.
+    /// Re-authenticates via the enrolled FIDO2 token, prompting for
+    /// touch/PIN on the real terminal — confirmed on real hardware that a
+    /// bare `resize` does NOT reuse the kernel keyring entry a preceding
+    /// `open` populated, but `resize --token-only` re-touches the token and
+    /// succeeds non-interactively w.r.t. any passphrase (Task 0 spike, see
+    /// this story's Dev Notes).
+    fn resize(&self, mapper: &MapperHandle) -> Result<(), DomainError>;
+
+    /// Reads the `filesystem` field off `path`'s `systemd-fido2` token,
+    /// written once by `create`'s `write_fido2_token_metadata` (Story 3.2,
+    /// AC #5) — never re-asked of the user or sniffed via `blkid`. A pure
+    /// header/token read; does not require the mapping to be open.
+    fn read_filesystem(&self, path: &Path) -> Result<Filesystem, DomainError>;
 }

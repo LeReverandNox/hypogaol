@@ -1069,6 +1069,63 @@ impl LuksBackend for ExecAdapter {
             )))
         }
     }
+
+    fn resize(&self, mapper: &MapperHandle) -> Result<(), DomainError> {
+        // No `--device-size`: the header's segment stays `"dynamic"` and
+        // recomputes from the backing storage's actual current size, which
+        // the caller has already grown by this point (AD-10 ordering).
+        //
+        // `--token-only` is load-bearing, not optional (Task 0 spike,
+        // confirmed on real hardware): a bare `cryptsetup resize <name>`
+        // does NOT reuse the kernel keyring entry a preceding
+        // `open --token-only` populated — it falls back to an interactive
+        // passphrase prompt, which this workflow has no passphrase to
+        // satisfy. `--token-only` instead re-authenticates via the enrolled
+        // FIDO2 token, the same mechanism `open` already uses. Inherited
+        // stdio (`.status()`, not `.output()`) lets that touch/PIN prompt
+        // reach the real terminal, same pattern as `open`.
+        let status = privileged("cryptsetup")
+            .args(["resize", "--token-only"])
+            .arg(&mapper.name)
+            .status()
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!("failed to run cryptsetup resize: {e}"))
+            })?;
+
+        if status.success() {
+            Ok(())
+        } else {
+            Err(DomainError::AdapterFailure(format!(
+                "cryptsetup resize --token-only failed for {}",
+                mapper.name
+            )))
+        }
+    }
+
+    fn read_filesystem(&self, path: &Path) -> Result<Filesystem, DomainError> {
+        let metadata = dump_json_metadata(path)?;
+        let tokens = tokens_object(&metadata)?;
+
+        let filesystem_str = tokens
+            .values()
+            .find(|token| token.get("type").and_then(Value::as_str) == Some("systemd-fido2"))
+            .and_then(|token| token.get("filesystem"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                DomainError::AdapterFailure(format!(
+                    "{} has no systemd-fido2 token with a filesystem field",
+                    path.display()
+                ))
+            })?;
+
+        match filesystem_str {
+            "ext4" => Ok(Filesystem::Ext4),
+            other => Err(DomainError::AdapterFailure(format!(
+                "unrecognized filesystem {other:?} recorded on {}'s systemd-fido2 token",
+                path.display()
+            ))),
+        }
+    }
 }
 
 impl Fido2Backend for ExecAdapter {
