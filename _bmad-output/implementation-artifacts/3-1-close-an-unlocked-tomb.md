@@ -46,10 +46,10 @@ so that its filesystem is unmounted and the LUKS2 volume is re-locked, as the sy
   - [x] Give the "tomb isn't currently mounted" case (from `findmnt` finding nothing) its own clear message distinct from a generic umount failure.
   - [x] `ux::translate`'s `match` is exhaustive over `DomainError` variants (compiler-enforced) — no new variant is needed for this story since `AdapterFailure` covers both new failure shapes; only the `translate_adapter_failure` string-marker logic needs updating.
 
-- [ ] Task 6: Unit tests
-  - [ ] `tests/unit/fakes.rs`: add `umount` to `FilesystemBackend` impl for `FakeFilesystemBackend` (log the call, support `with_failure_at("umount")`, same pattern as its other methods).
-  - [ ] `tests/unit/workflows.rs`: the existing stub test `close_run_stops_at_preflight_before_reaching_its_own_todo` calls `close::run(&luks, &fido2, &fs)` with no path — update the call site for the new `path: &Path` parameter (it will otherwise fail to compile once Task 2 lands).
-  - [ ] Add `tests/unit/close.rs` (register `mod close;` in `tests/unit/main.rs`), mirroring `tests/unit/unlock.rs`'s structure (including its `RealFixtureFile` helper for a real path to canonicalize): happy path asserts call order `["umount", "close"]` and that `mapping_name::mapping_name` derived the same name passed to both port calls; a `with_failure_at("umount")` case asserts `close::run` returns `Err` **without** `luks.close` being called (log should show only `["umount"]`).
+- [x] Task 6: Unit tests
+  - [x] `tests/unit/fakes.rs`: add `umount` to `FilesystemBackend` impl for `FakeFilesystemBackend` (log the call, support `with_failure_at("umount")`, same pattern as its other methods).
+  - [x] `tests/unit/workflows.rs`: the existing stub test `close_run_stops_at_preflight_before_reaching_its_own_todo` calls `close::run(&luks, &fido2, &fs)` with no path — update the call site for the new `path: &Path` parameter (it will otherwise fail to compile once Task 2 lands).
+  - [x] Add `tests/unit/close.rs` (register `mod close;` in `tests/unit/main.rs`), mirroring `tests/unit/unlock.rs`'s structure (including its `RealFixtureFile` helper for a real path to canonicalize): happy path asserts call order `["umount", "close"]` and that `mapping_name::mapping_name` derived the same name passed to both port calls; a `with_failure_at("umount")` case asserts `close::run` returns `Err` **without** `luks.close` being called (log should show only `["umount"]`).
 
 - [ ] Task 7: Hardware tests (manual-only, `make test-hardware`, AD-7 — not run in default CI)
   - [ ] Add scenarios in `tests/hardware/main.rs` verifying: closing an unlocked file-backed tomb unmounts and re-locks it (mount point gone, device node gone, a subsequent `unlock::run` on the same path succeeds again with the *same* FIDO2 key); the identical close command against a device-backed tomb (AC #5); after close, the freed mount-point directory is gone (not just unmounted) so a repeat unlock gets the plain basename back, not a `-<suffix>` fallback.
@@ -105,6 +105,7 @@ so that its filesystem is unmounted and the LUKS2 volume is re-locked, as the sy
 - Task 2: Replaced the `close::run` stub with the real implementation — preflight, derive mapping name, build `MapperHandle` directly (no `luks.open`), `fs.umount` then `luks.close`, no rollback on umount failure. Updated the existing preflight stub test's call site for the new `path` parameter. Full `cargo test` (79 passed) still green.
 - Task 4: Wired the `Close { path }` CLI subcommand and `run_close`, mirroring `run_unlock`'s shape (preflight, plain-language intro, success/error reporting) with no confirmation prompt. Full `cargo test` (79 passed) still green.
 - Task 5: Added a marker-ordered `close`-specific branch in `translate_adapter_failure` (checked before the generic `mount`/`mkfs` bucket) covering `"umount"`/`"findmnt"` markers, with a distinct message for the `"not currently mounted"` case. Added 3 new RED-then-GREEN ux tests proving the marker-bleed guard actually blocks the misclassification (a plain `"umount failed"` string previously fell into unlock's "Your tomb unlocked, but..." message). Full `cargo test` (82 passed) green.
+- Task 6: Added `tests/unit/close.rs` (registered in `tests/unit/main.rs`) mirroring `unlock.rs`'s structure: happy path asserts call order `["umount", "close"]` and that both port calls received the same derived mapping name (added `last_umount`/`last_close` capture accessors to the fakes for this, following the existing `last_open`/`last_removed_keyslot` pattern); a `with_failure_at("umount")` case asserts `close::run` returns `Err` without `luks.close` being called. `cargo fmt`/`cargo clippy --all-targets` clean, full `cargo test` (84 passed) green.
 
 ### File List
 
@@ -116,3 +117,6 @@ so that its filesystem is unmounted and the LUKS2 volume is re-locked, as the sy
 - `src/cli/main.rs` — added `Close` subcommand and `run_close`.
 - `src/cli/ux.rs` — new marker-ordered `close`-failure translation branch.
 - `tests/unit/ux.rs` — new tests for the marker-bleed guard and the not-currently-mounted message.
+- `tests/unit/fakes.rs` — added `last_umount`/`last_close` capture accessors.
+- `tests/unit/main.rs` — registered `mod close;`.
+- `tests/unit/close.rs` — new file: unit tests for `close::run`.
