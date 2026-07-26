@@ -309,6 +309,58 @@ fn translates_adapter_failure_canonicalization_failure_path_containing_colon_spa
 }
 
 #[test]
+fn translates_resize_must_grow() {
+    let err = DomainError::ResizeMustGrow {
+        path: PathBuf::from("/tmp/my-tomb.img"),
+        requested: 1_000,
+        current_size: 2_000,
+    };
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(message.contains("1000"));
+    assert!(message.contains("2000"));
+    assert!(message.contains("/tmp/my-tomb.img"));
+}
+
+// "cryptsetup resize --token-only failed for ..." and "failed to run
+// cryptsetup resize: ..." both contain the literal substring "cryptsetup",
+// so a resize failure could silently fall into the generic cryptsetup
+// bucket's create/unlock-flavored framing unless matched ahead of it — the
+// same "marker bleed" class the Epic 2 retro flagged (3 real bugs from this
+// pattern so far).
+#[test]
+fn translates_adapter_failure_cryptsetup_resize_failure_gets_its_own_message() {
+    let err = DomainError::AdapterFailure(
+        "cryptsetup resize --token-only failed for vault-abc123".to_string(),
+    );
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("vault-abc123"));
+
+    let err =
+        DomainError::AdapterFailure("failed to run cryptsetup resize: some io error".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+}
+
+// "resize2fs failed: ..." contains neither "mount" nor "mkfs", so without a
+// dedicated branch it would fall all the way through to the unhelpful
+// generic fallback (which leaks the raw technical string) instead of a
+// plain-language message.
+#[test]
+fn translates_adapter_failure_resize2fs_failure_gets_its_own_message() {
+    let err = DomainError::AdapterFailure("resize2fs failed: some stderr".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("some stderr"));
+
+    let err = DomainError::AdapterFailure("failed to run resize2fs: some io error".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("some io error"));
+}
+
+#[test]
 fn translates_key_not_found() {
     let err = DomainError::KeyNotFound("nonexistent".to_string());
     let message = translate(&err);

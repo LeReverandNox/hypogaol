@@ -151,6 +151,21 @@ fn translate_adapter_failure(inner: &str) -> String {
             .to_string();
     }
 
+    // `resize`'s own `luks.resize` failures (`cryptsetup resize --token-only
+    // failed for ...` / `failed to run cryptsetup resize: ...`) — checked
+    // before the generic `cryptsetup` bucket below since both of these
+    // messages also contain "cryptsetup" (marker-bleed guard, the same class
+    // of bug the Epic 2 retro flagged: 3 real bugs from this pattern so far).
+    // A resize failure gets its own message rather than that bucket's
+    // create/unlock-flavored framing, even though it's also a touch/PIN
+    // timing issue (this call re-authenticates via the FIDO2 token, Task 0's
+    // spike finding).
+    if inner.contains("cryptsetup resize") {
+        return "tomb-fido2 couldn't resize this tomb's LUKS2 volume — your security key or its \
+                PIN may not have been accepted in time."
+            .to_string();
+    }
+
     // `cryptsetup` subprocess failures during create's bootstrap
     // (`luksFormat`/`luksOpen`/`resize`) and unlock's `open` — includes the
     // `{cmd:?}` Debug-format argv dump, the single most jargon-dense string
@@ -181,6 +196,16 @@ fn translate_adapter_failure(inner: &str) -> String {
     if inner.contains("umount") || inner.contains("findmnt") {
         return "tomb-fido2 couldn't unmount this tomb's filesystem. Make sure nothing is still \
                 using it, then try again."
+            .to_string();
+    }
+
+    // `resize`'s own `fs.growfs` failures (`resize2fs failed: ...` /
+    // `failed to run resize2fs: ...`) — checked before the generic
+    // `mount`/`mkfs` bucket below since "resize2fs" contains neither
+    // "mount" nor "mkfs" and would otherwise fall all the way through to
+    // the unhelpful generic fallback (marker-bleed guard).
+    if inner.contains("resize2fs") {
+        return "tomb-fido2 grew this tomb's volume, but couldn't grow its filesystem to match."
             .to_string();
     }
 

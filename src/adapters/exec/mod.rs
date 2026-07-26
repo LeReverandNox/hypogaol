@@ -1368,12 +1368,15 @@ impl FilesystemBackend for ExecAdapter {
                     )));
                 }
 
-                let file = std::fs::OpenOptions::new().write(true).open(path).map_err(|e| {
-                    DomainError::AdapterFailure(format!(
-                        "failed to open {} for growing: {e}",
-                        path.display()
-                    ))
-                })?;
+                let file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .open(path)
+                    .map_err(|e| {
+                        DomainError::AdapterFailure(format!(
+                            "failed to open {} for growing: {e}",
+                            path.display()
+                        ))
+                    })?;
                 file.set_len(size).map_err(|e| {
                     DomainError::AdapterFailure(format!("failed to size {}: {e}", path.display()))
                 })
