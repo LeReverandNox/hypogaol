@@ -11,6 +11,11 @@ pub trait FilesystemBackend {
     /// True if `path` already exists (AD-9's create-mode refusal check).
     fn path_exists(&self, path: &Path) -> bool;
 
+    /// True if `path` is a raw block device/partition; false if it's a
+    /// regular file (Story 3.2, AC #1/#2's file-vs-device distinction) — a
+    /// pure query, no mutation.
+    fn is_block_device(&self, path: &Path) -> Result<bool, DomainError>;
+
     /// Byte capacity of the block device/partition at `path` (AD-9's
     /// device-mode default-to-full-capacity sizing) — a pure query, no
     /// mutation.

@@ -1322,6 +1322,15 @@ impl FilesystemBackend for ExecAdapter {
         path.exists()
     }
 
+    fn is_block_device(&self, path: &Path) -> Result<bool, DomainError> {
+        use std::os::unix::fs::FileTypeExt;
+
+        let metadata = std::fs::metadata(path).map_err(|e| {
+            DomainError::AdapterFailure(format!("failed to stat {}: {e}", path.display()))
+        })?;
+        Ok(metadata.file_type().is_block_device())
+    }
+
     fn device_capacity(&self, path: &Path) -> Result<u64, DomainError> {
         let output = Command::new("blockdev")
             .arg("--getsize64")

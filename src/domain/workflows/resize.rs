@@ -1,4 +1,3 @@
-use std::os::unix::fs::FileTypeExt;
 use std::path::Path;
 
 use crate::domain::errors::DomainError;
@@ -28,7 +27,7 @@ pub fn run(
     preflight::check(luks, fido2, fs)?;
 
     let name = mapping_name::mapping_name(path)?;
-    let device_backed = is_block_device(path)?;
+    let device_backed = fs.is_block_device(path)?;
 
     // Tier 1 of the grow-only check (AD-10: rejected "before calling any
     // adapter" for the common/obvious cases) — see this story's Dev Notes
@@ -108,18 +107,6 @@ fn grow_open_mapping(
     let filesystem = luks.read_filesystem(path)?;
 
     fs.growfs(mapper, filesystem)
-}
-
-/// True if `path` is a raw block device/partition; false if it's a regular
-/// file. `resize`'s only per-target-type branch (AC #1/#2's file-vs-device
-/// distinction) — everything else in this workflow is identical for both,
-/// consistent with every other workflow's "identical command works
-/// unmodified" convention.
-fn is_block_device(path: &Path) -> Result<bool, DomainError> {
-    let metadata = std::fs::metadata(path).map_err(|e| {
-        DomainError::AdapterFailure(format!("failed to stat {}: {e}", path.display()))
-    })?;
-    Ok(metadata.file_type().is_block_device())
 }
 
 /// A file-backed target's current length via a plain stdlib stat — not even
