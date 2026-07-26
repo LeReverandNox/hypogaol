@@ -49,7 +49,7 @@ fn unlock_run_stops_at_preflight_before_reaching_its_own_todo() {
 }
 
 #[test]
-fn close_run_stops_at_preflight_before_reaching_its_own_todo() {
+fn close_run_stops_at_preflight_before_touching_any_port() {
     let luks = FakeLuksBackend::failing(&["cryptsetup"]);
     let fido2 = FakeFido2Backend::passing();
     let fs = FakeFilesystemBackend::passing();
