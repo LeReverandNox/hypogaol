@@ -183,7 +183,8 @@ pub fn parse_size(input: &str) -> Result<u64, String> {
 
     if bytes < MIN_TOMB_SIZE_BYTES {
         return Err(format!(
-            "size {input:?} is too small (minimum is {MIN_TOMB_SIZE_BYTES} bytes / 16M)"
+            "size {input:?} is too small (minimum is {MIN_TOMB_SIZE_BYTES} bytes / {}M)",
+            MIN_TOMB_SIZE_BYTES / (1024 * 1024)
         ));
     }
 

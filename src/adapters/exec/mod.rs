@@ -1716,6 +1716,29 @@ impl FilesystemBackend for ExecAdapter {
             }
         }
 
+        // `mkfs.ext4` always creates `lost+found` as root:root — the chown
+        // above only covers the mount point's own root inode, not this
+        // pre-existing entry underneath it, so it would otherwise stay
+        // root-owned forever even though everything else in the tomb is now
+        // the invoking user's. Best-effort, not fatal: a tomb whose user has
+        // since deleted `lost+found` (harmless, some people do) shouldn't
+        // block unlock over it, unlike the mount point's own chown above.
+        let lost_and_found = mountpoint.join("lost+found");
+        if lost_and_found.exists() {
+            if let Ok(output) = privileged("chown")
+                .arg(format!("{}:{}", identity.uid, identity.gid))
+                .arg(&lost_and_found)
+                .output()
+            {
+                if !output.status.success() {
+                    eprintln!(
+                        "Warning: couldn't change ownership of this tomb's lost+found directory \
+                         — it will stay root-owned."
+                    );
+                }
+            }
+        }
+
         // Restrict the mount point to the invoking user only. Without this,
         // the mounted filesystem's own root-inode permissions (e.g.
         // mkfs.ext4's default 0755) are what's visible at `mountpoint` — left

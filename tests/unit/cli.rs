@@ -29,8 +29,8 @@ fn accepts_the_minimum_size_exactly() {
 
 #[test]
 fn parses_binary_suffixes_case_insensitively() {
-    assert_eq!(parse_size("16M"), Ok(16 * 1024 * 1024));
-    assert_eq!(parse_size("16m"), Ok(16 * 1024 * 1024));
+    assert_eq!(parse_size("64M"), Ok(64 * 1024 * 1024));
+    assert_eq!(parse_size("64m"), Ok(64 * 1024 * 1024));
     assert_eq!(parse_size("1G"), Ok(1024 * 1024 * 1024));
     assert_eq!(parse_size("1T"), Ok(1024u64.pow(4)));
 }

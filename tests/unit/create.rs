@@ -40,7 +40,7 @@ fn refuses_before_touching_anything_if_destination_already_exists() {
 
     let target = CreateTarget::File {
         path: PathBuf::from("/tmp/already-there"),
-        size: 1024,
+        size: MIN_TOMB_SIZE_BYTES,
     };
 
     let result = create::run(
@@ -65,6 +65,41 @@ fn refuses_before_touching_anything_if_destination_already_exists() {
 }
 
 #[test]
+fn refuses_a_file_backed_size_below_the_minimum_before_touching_any_port() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing().with_log(log.clone());
+
+    let target = CreateTarget::File {
+        path: PathBuf::from("/tmp/way-too-small"),
+        size: MIN_TOMB_SIZE_BYTES - 1,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    match result {
+        Err(DomainError::DeviceTooSmall { path, size }) => {
+            assert_eq!(path, PathBuf::from("/tmp/way-too-small"));
+            assert_eq!(size, MIN_TOMB_SIZE_BYTES - 1);
+        }
+        other => panic!("expected DomainError::DeviceTooSmall, got {other:?}"),
+    }
+
+    // The CLI's own `parse_size` already floor-checks this, but domain must
+    // not rely on it as the only gate (mirroring the Device branch) — no
+    // backing file allocated, no adapter touched.
+    assert_eq!(*log.borrow(), vec!["path_exists".to_string()]);
+}
+
+#[test]
 fn happy_path_runs_every_port_call_once_in_order() {
     let log = new_call_log();
     let luks = FakeLuksBackend::passing().with_log(log.clone());
@@ -74,7 +109,7 @@ fn happy_path_runs_every_port_call_once_in_order() {
     let fixture = RealFixtureFile::create("happy-path");
     let target = CreateTarget::File {
         path: fixture.0.clone(),
-        size: 1024,
+        size: MIN_TOMB_SIZE_BYTES,
     };
 
     let result = create::run(
@@ -120,7 +155,7 @@ fn enroll_failure_closes_the_mapping_and_removes_the_backing_file() {
     let fixture = RealFixtureFile::create("enroll-failure");
     let target = CreateTarget::File {
         path: fixture.0.clone(),
-        size: 1024,
+        size: MIN_TOMB_SIZE_BYTES,
     };
 
     let result = create::run(
@@ -164,7 +199,7 @@ fn mkfs_failure_closes_the_mapping_and_removes_the_backing_file() {
     let fixture = RealFixtureFile::create("mkfs-failure");
     let target = CreateTarget::File {
         path: fixture.0.clone(),
-        size: 1024,
+        size: MIN_TOMB_SIZE_BYTES,
     };
 
     let result = create::run(
@@ -203,7 +238,7 @@ fn bootstrap_format_and_open_failure_removes_the_backing_file_without_closing_a_
     let fixture = RealFixtureFile::create("bootstrap-failure");
     let target = CreateTarget::File {
         path: fixture.0.clone(),
-        size: 1024,
+        size: MIN_TOMB_SIZE_BYTES,
     };
 
     let result = create::run(

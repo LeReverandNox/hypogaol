@@ -18,7 +18,17 @@ const BOOTSTRAP_KEYSLOT: KeyslotRef = KeyslotRef(0);
 /// plus a minimal ext4 filesystem. Enforced here (not just by the CLI's
 /// `parse_size`) because a device-backed create's size can also come from an
 /// unvalidated `device_capacity` reading with no `--size` given.
-pub const MIN_TOMB_SIZE_BYTES: u64 = 16 * 1024 * 1024;
+///
+/// Confirmed empirically (`cryptsetup luksDump`, 2026-07-27): a default LUKS2
+/// header's payload offset is exactly 16 MiB, so a 16 MiB tomb leaves zero
+/// bytes for the filesystem — `luksFormat`/`luksOpen` don't reject this size
+/// outright, they fail later with "too small for activation, there is no
+/// remaining space for data", surfacing to the user as a nonsensical
+/// FIDO2-touch/PIN error (see `cli::ux`'s `cryptsetup` bucket). 32 MiB leaves
+/// a real 16 MiB payload, comfortably above `mkfs.ext4`'s own minimum (2 MiB
+/// avoids even its degraded "too small for a journal" case, also confirmed
+/// empirically).
+pub const MIN_TOMB_SIZE_BYTES: u64 = 32 * 1024 * 1024;
 
 pub fn run(
     target: CreateTarget,
@@ -34,6 +44,14 @@ pub fn run(
         CreateTarget::File { path, size } => {
             if fs.path_exists(&path) {
                 return Err(DomainError::DestinationExists(path));
+            }
+
+            // The CLI's `parse_size` already floor-checks `--size`, but this
+            // is domain's own independent guarantee (mirroring the Device
+            // branch below) rather than a trust that the CLI is the only
+            // caller that will ever construct a `CreateTarget::File`.
+            if size < MIN_TOMB_SIZE_BYTES {
+                return Err(DomainError::DeviceTooSmall { path, size });
             }
 
             fs.set_backing_file_size(&path, size)?;

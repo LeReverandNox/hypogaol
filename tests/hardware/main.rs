@@ -348,6 +348,39 @@ fn assert_owned_by_invoking_user(mountpoint: &std::path::Path) {
     );
 }
 
+/// Confirms `mkfs.ext4`'s auto-created `lost+found` was also handed to the
+/// invoking user, not left root-owned — the mount point's own chown only
+/// covers its own inode, not this pre-existing entry underneath it.
+fn assert_lost_and_found_owned_by_invoking_user(mountpoint: &std::path::Path) {
+    use std::os::unix::fs::MetadataExt;
+
+    let lost_and_found = mountpoint.join("lost+found");
+    let metadata = std::fs::metadata(&lost_and_found)
+        .unwrap_or_else(|e| panic!("failed to stat {}: {e}", lost_and_found.display()));
+
+    let expected_uid: u32 = id_output("-u")
+        .parse()
+        .expect("failed to parse id -u output");
+    let expected_gid: u32 = id_output("-g")
+        .parse()
+        .expect("failed to parse id -g output");
+
+    assert_eq!(
+        metadata.uid(),
+        expected_uid,
+        "{} is owned by uid {}, expected the invoking user's uid {expected_uid} (not root)",
+        lost_and_found.display(),
+        metadata.uid()
+    );
+    assert_eq!(
+        metadata.gid(),
+        expected_gid,
+        "{} is owned by gid {}, expected the invoking user's gid {expected_gid}",
+        lost_and_found.display(),
+        metadata.gid()
+    );
+}
+
 /// Confirms `mountpoint` lives directly under `/run/media/<username>/` and
 /// its basename matches `source_path`'s `file_stem()`, optionally followed
 /// by a `-<suffix>` collision fallback (AC #2).
@@ -521,6 +554,7 @@ fn unlock_mounts_a_file_backed_tomb_with_a_readable_writable_filesystem() {
     assert_actually_mounted(&device_node, &mountpoint);
     assert_readable_and_writable(&mountpoint);
     assert_owned_by_invoking_user(&mountpoint);
+    assert_lost_and_found_owned_by_invoking_user(&mountpoint);
     assert_mountpoint_under_run_media(&mountpoint, &path);
 
     cleanup.run();

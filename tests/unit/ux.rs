@@ -108,6 +108,22 @@ fn translates_adapter_failure_cmd_debug_dump() {
 }
 
 #[test]
+fn translates_adapter_failure_too_small_for_activation_not_as_a_touch_pin_failure() {
+    // This message contains the literal substring "cryptsetup" (via the
+    // `{cmd:?}` argv dump) but must be classified as a sizing problem, not
+    // the generic touch/PIN-timing bucket — proves the too-small-for-
+    // activation marker check runs before the broader "cryptsetup" check.
+    let err = DomainError::AdapterFailure(
+        r#""cryptsetup" "luksOpen" "--key-file" "-" "/tmp/foo" "vault-abc123" failed: Device /tmp/foo is too small for activation, there is no remaining space for data."#
+            .to_string(),
+    );
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("PIN"));
+    assert!(message.to_lowercase().contains("size") || message.to_lowercase().contains("larger"));
+}
+
+#[test]
 fn translates_adapter_failure_cryptsetup_open_failure() {
     let err = DomainError::AdapterFailure(
         "cryptsetup open --token-only failed for /tmp/foo as vault-abc123".to_string(),

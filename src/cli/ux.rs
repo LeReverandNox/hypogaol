@@ -180,6 +180,20 @@ fn translate_adapter_failure(inner: &str) -> String {
             .to_string();
     }
 
+    // `luksOpen`'s own "no remaining space for data" failure — reachable if
+    // `MIN_TOMB_SIZE_BYTES` is ever loosened again without re-verifying it
+    // leaves real payload room behind the LUKS2 header (confirmed
+    // empirically, 2026-07-27: a tomb sized exactly to the header offset
+    // passes size validation but fails here). Checked before the generic
+    // `cryptsetup` bucket below for the same marker-bleed reason as every
+    // other dedicated branch in this function — this is a sizing problem,
+    // not a touch/PIN timing issue.
+    if inner.contains("too small for activation") {
+        return "This tomb's size leaves no room for a filesystem once the encryption header is \
+                accounted for. Choose a larger size and try again."
+            .to_string();
+    }
+
     // `cryptsetup` subprocess failures during create's bootstrap
     // (`luksFormat`/`luksOpen`/`resize`) and unlock's `open` — includes the
     // `{cmd:?}` Debug-format argv dump, the single most jargon-dense string
