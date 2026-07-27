@@ -31,6 +31,12 @@ const BOOTSTRAP_KEYSLOT: KeyslotRef = KeyslotRef(0);
 /// empirically).
 pub const MIN_TOMB_SIZE_BYTES: u64 = 32 * 1024 * 1024;
 
+/// `progress` fires at each real stage boundary, in the real execution order
+/// (AD-19): `AllocatingBackingFile` (File targets only — a Device target
+/// never allocates a backing file, so this stage never fires for it) →
+/// `FormattingLuks2` → `EnrollingFido2Key` → `CreatingFilesystem`. A stage
+/// only fires once its preceding port call has actually succeeded; if any
+/// port call returns `Err`, no later stage in this list fires.
 pub fn run(
     target: CreateTarget,
     filesystem: Filesystem,

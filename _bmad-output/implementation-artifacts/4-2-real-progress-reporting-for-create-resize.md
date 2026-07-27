@@ -93,7 +93,7 @@ so that I have visibility into a long-running operation instead of one message b
 - [x] [Review][Patch] Progress callback panic (e.g. broken stdout pipe) mid-transaction skips explicit mapper cleanup — resolved as: make the two CLI progress closures in `main.rs` panic-proof (non-panicking stdout write) instead of using `println!` [src/cli/main.rs:294, src/cli/main.rs:232]
 - [x] [Review][Patch] No unit test coverage for `translate_create_stage`/`translate_resize_stage` [src/cli/ux.rs:75-97]
 - [x] [Review][Patch] No test proves a stage's progress message doesn't fire for work that never completed — all 4 new tests use only passing fakes [tests/unit/progress.rs]
-- [ ] [Review][Patch] `create::run`/`resize::run` doc comments don't document when/why each stage does or doesn't fire [src/domain/workflows/create.rs:34, src/domain/workflows/resize.rs:21]
+- [x] [Review][Patch] `create::run`/`resize::run` doc comments don't document when/why each stage does or doesn't fire [src/domain/workflows/create.rs:34, src/domain/workflows/resize.rs:21]
 
 ## Dev Notes
 
