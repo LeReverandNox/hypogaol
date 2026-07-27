@@ -61,28 +61,53 @@ fn run_hooks_step(
     luks: &dyn LuksBackend,
     fs: &dyn FilesystemBackend,
 ) -> Result<(), DomainError> {
-    let home = fs.invoking_home_dir()?;
+    // Best-effort — a stray bind mount under `$HOME` is worse than a failed
+    // cleanup attempt being ignored. Shared by every failure path below (not
+    // just a guardrail rejection): any hook-step error after the primary
+    // mount has succeeded must leave nothing dangling (AC #4's framing).
+    let rollback = |applied: &[PathBuf]| {
+        for dest in applied {
+            let _ = fs.unmount_bind_hook_destination(dest);
+        }
+        let _ = fs.umount(mapper);
+        let _ = luks.close(mapper);
+    };
+
+    let home = match fs.invoking_home_dir() {
+        Ok(home) => home,
+        Err(err) => {
+            rollback(&[]);
+            return Err(err);
+        }
+    };
 
     let applied_bind_mounts = apply_bind_hooks(mountpoint, &home, warn, fs);
 
     let exec_hooks_path = mountpoint.join("exec-hooks");
     if fs.path_exists(&exec_hooks_path) {
-        let meta = fs.hook_file_metadata(&exec_hooks_path)?;
-        if let Some(reason) = hooks::exec_hook_rejection(&meta) {
-            // Best-effort — a stray bind mount under `$HOME` is worse than a
-            // failed cleanup attempt being ignored.
-            for dest in &applied_bind_mounts {
-                let _ = fs.unmount_bind_hook_destination(dest);
+        let meta = match fs.hook_file_metadata(&exec_hooks_path) {
+            Ok(meta) => meta,
+            Err(err) => {
+                rollback(&applied_bind_mounts);
+                return Err(err);
             }
-            let _ = fs.umount(mapper);
-            let _ = luks.close(mapper);
+        };
+        if let Some(reason) = hooks::exec_hook_rejection(&meta) {
+            rollback(&applied_bind_mounts);
             return Err(DomainError::HookRejected {
                 path: exec_hooks_path,
                 reason,
             });
         }
 
-        let status = fs.run_hook(&exec_hooks_path, &["open", &mountpoint.to_string_lossy()])?;
+        let status = match fs.run_hook(&exec_hooks_path, &["open", &mountpoint.to_string_lossy()])
+        {
+            Ok(status) => status,
+            Err(err) => {
+                rollback(&applied_bind_mounts);
+                return Err(err);
+            }
+        };
         if !status.success() {
             warn(HookWarning::ExecHookNonZeroExit {
                 path: exec_hooks_path,
