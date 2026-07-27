@@ -1,5 +1,5 @@
 # generated: 2026-07-22
-# last_updated: 2026-07-22
+# last_updated: 2026-07-27
 # project: tomb-fido2
 # project_key: NOKEY
 # tracking_system: file-system
@@ -69,7 +69,7 @@ development_status:
   3-1-close-an-unlocked-tomb: done
   3-2-grow-an-existing-tombs-capacity: done
   3-3-unlock-a-tomb-read-only: done
-  epic-3-retrospective: optional
+  epic-3-retrospective: done
 
 action_items:
   - epic: 1
@@ -107,8 +107,28 @@ action_items:
   - epic: 2
     action: "When scoping Story 3.1 (close), explicitly decide the mount-directory rmdir behavior after unmount, rather than letting it fall through unaddressed"
     owner: "Amelia"
-    status: open
+    status: done
   - epic: 2
     action: "When a story adds a new workflow reusing shared adapters::exec error strings, explicitly check for marker-bleed into other workflows' plain-language translations before merge (3 real bugs from this pattern across 2 stories so far)"
     owner: "Amelia"
+    status: in-progress
+  - epic: 3
+    action: "Document the sudo requirement for device-backed operations in --help/README"
+    owner: "Amelia"
+    status: open
+  - epic: 3
+    action: "Add a LICENSE file and a branch-protection rule requiring CI to pass before merge"
+    owner: "LeReverandNox"
+    status: open
+  - epic: 3
+    action: "Resolve the progress-reporting design question - decide whether to fold into Epic 4 scoping or resolve standalone before Epic 4 starts"
+    owner: "LeReverandNox"
+    status: open
+  - epic: 3
+    action: "Decide once, deliberately, whether the repeatedly-deferred swallowed-luks.close-on-rollback pattern (create.rs, resize.rs, unlock.rs) needs fixing or is fine to leave, instead of a fourth workflow deferring it again unexamined"
+    owner: "Amelia"
+    status: open
+  - epic: 3
+    action: "Exercise release automation end-to-end against a real tag at least once before treating it as production-ready"
+    owner: "LeReverandNox"
     status: open
