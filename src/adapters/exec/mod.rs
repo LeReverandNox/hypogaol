@@ -1152,6 +1152,7 @@ impl Fido2Backend for ExecAdapter {
         mapper: &MapperHandle,
         metadata: KeyMetadata,
         selection: Fido2DeviceSelection,
+        user_verification: bool,
     ) -> Result<(), DomainError> {
         let path = &mapper.source_path;
 
@@ -1218,6 +1219,10 @@ impl Fido2Backend for ExecAdapter {
                 Command::new("systemd-cryptenroll")
                     .arg(format!("--fido2-device={new_device}"))
                     .arg(format!("--unlock-key-file={}", key_file.path.display()))
+                    .arg(format!(
+                        "--fido2-with-user-verification={}",
+                        if user_verification { "yes" } else { "no" }
+                    ))
                     .arg(path)
                     .status()
             }
@@ -1249,6 +1254,10 @@ impl Fido2Backend for ExecAdapter {
                 Command::new("systemd-cryptenroll")
                     .arg(format!("--fido2-device={new_device}"))
                     .arg(format!("--unlock-fido2-device={existing_device}"))
+                    .arg(format!(
+                        "--fido2-with-user-verification={}",
+                        if user_verification { "yes" } else { "no" }
+                    ))
                     .arg(path)
                     .status()
             }
