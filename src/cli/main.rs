@@ -68,7 +68,8 @@ enum Commands {
         unlock_fido2_device: Option<PathBuf>,
 
         /// Require the device's own fingerprint/PIN check at unlock time,
-        /// not touch alone
+        /// not touch alone. Fails enrollment outright if the device has no
+        /// on-device verification method (e.g. no fingerprint sensor)
         #[arg(long)]
         user_verification: bool,
     },
@@ -137,7 +138,8 @@ enum CreateMode {
         fido2_device: Option<PathBuf>,
 
         /// Require the device's own fingerprint/PIN check at unlock time,
-        /// not touch alone
+        /// not touch alone. Fails enrollment outright if the device has no
+        /// on-device verification method (e.g. no fingerprint sensor)
         #[arg(long)]
         user_verification: bool,
     },
@@ -164,7 +166,8 @@ enum CreateMode {
         fido2_device: Option<PathBuf>,
 
         /// Require the device's own fingerprint/PIN check at unlock time,
-        /// not touch alone
+        /// not touch alone. Fails enrollment outright if the device has no
+        /// on-device verification method (e.g. no fingerprint sensor)
         #[arg(long)]
         user_verification: bool,
     },
