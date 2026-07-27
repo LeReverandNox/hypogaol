@@ -556,8 +556,8 @@ fn unlock_mounts_a_file_backed_tomb_with_a_readable_writable_filesystem() {
     );
     assert!(result.is_ok(), "create::run failed: {result:?}");
 
-    let mountpoint =
-        unlock::run(&path, false, &adapter, &adapter, &adapter).expect("unlock::run failed");
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
+        .expect("unlock::run failed");
 
     let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
     let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
@@ -622,8 +622,16 @@ fn unlock_works_unmodified_against_a_device_backed_tomb() {
 
     // Identical unlock::run call as the file-backed scenario above — no
     // different flags or behavior branch based on target type (AC #2).
-    let mountpoint = unlock::run(&loop_device.path, false, &adapter, &adapter, &adapter)
-        .expect("unlock::run failed");
+    let mountpoint = unlock::run(
+        &loop_device.path,
+        false,
+        false,
+        &|_| {},
+        &adapter,
+        &adapter,
+        &adapter,
+    )
+    .expect("unlock::run failed");
 
     let name =
         mapping_name::mapping_name(&loop_device.path).expect("failed to derive mapping name");
@@ -693,18 +701,18 @@ fn unlock_read_only_rejects_writes_at_both_layers_including_remount() {
 
     // Writable unlock first, to establish real chown/chmod ownership on the
     // volume's own root inode before the read-only assertions below.
-    let mountpoint = unlock::run(&path, false, &adapter, &adapter, &adapter)
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("writable unlock::run failed");
     assert_readable_and_writable(&mountpoint);
     let marker = mountpoint.join("tomb-fido2-marker.txt");
     let marker_contents = std::fs::read_to_string(&marker)
         .expect("failed to read back marker written by the writable unlock");
 
-    let result = close::run(&path, &adapter, &adapter, &adapter);
+    let result = close::run(&path, false, &|_| {}, &adapter, &adapter, &adapter);
     assert!(result.is_ok(), "close::run failed: {result:?}");
 
     // Now the read-only unlock under test.
-    let mountpoint = unlock::run(&path, true, &adapter, &adapter, &adapter)
+    let mountpoint = unlock::run(&path, true, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("read-only unlock::run failed");
     let cleanup = UnlockCleanup::new(mountpoint.clone(), name);
 
@@ -793,17 +801,40 @@ fn unlock_read_only_rejects_writes_at_both_layers_against_a_device_backed_tomb()
         mapping_name::mapping_name(&loop_device.path).expect("failed to derive mapping name");
     let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
 
-    let mountpoint = unlock::run(&loop_device.path, false, &adapter, &adapter, &adapter)
-        .expect("writable unlock::run failed");
+    let mountpoint = unlock::run(
+        &loop_device.path,
+        false,
+        false,
+        &|_| {},
+        &adapter,
+        &adapter,
+        &adapter,
+    )
+    .expect("writable unlock::run failed");
     assert_readable_and_writable(&mountpoint);
 
-    let result = close::run(&loop_device.path, &adapter, &adapter, &adapter);
+    let result = close::run(
+        &loop_device.path,
+        false,
+        &|_| {},
+        &adapter,
+        &adapter,
+        &adapter,
+    );
     assert!(result.is_ok(), "close::run failed: {result:?}");
 
     // Identical unlock::run call as the file-backed read-only scenario
     // above — no different flags or behavior branch based on target type.
-    let mountpoint = unlock::run(&loop_device.path, true, &adapter, &adapter, &adapter)
-        .expect("read-only unlock::run failed");
+    let mountpoint = unlock::run(
+        &loop_device.path,
+        true,
+        false,
+        &|_| {},
+        &adapter,
+        &adapter,
+        &adapter,
+    )
+    .expect("read-only unlock::run failed");
     let cleanup =
         UnlockCleanup::new(mountpoint.clone(), name).with_loop_device(loop_device.path.clone());
 
@@ -896,13 +927,13 @@ fn unlock_falls_back_to_a_suffixed_mount_point_on_a_basename_collision() {
         );
     }
 
-    let mountpoint_a = unlock::run(&path_a, false, &adapter, &adapter, &adapter)
+    let mountpoint_a = unlock::run(&path_a, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("unlock::run failed for a");
     let name_a = mapping_name::mapping_name(&path_a).expect("failed to derive mapping name a");
     let device_node_a = PathBuf::from(format!("/dev/mapper/{name_a}"));
     let cleanup_a = UnlockCleanup::new(mountpoint_a.clone(), name_a);
 
-    let mountpoint_b = unlock::run(&path_b, false, &adapter, &adapter, &adapter)
+    let mountpoint_b = unlock::run(&path_b, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("unlock::run failed for b");
     let name_b = mapping_name::mapping_name(&path_b).expect("failed to derive mapping name b");
     let device_node_b = PathBuf::from(format!("/dev/mapper/{name_b}"));
@@ -1063,14 +1094,14 @@ fn enroll_adds_an_independent_second_key_without_corrupting_the_primary() {
     // hence the pauses instructing the tester to swap keys by hand.
     pause("Unplug the SECOND (backup) key now, leaving only the PRIMARY key plugged in.");
     println!("Unlocking with the PRIMARY key — touch it when prompted.");
-    let mountpoint = unlock::run(&path, false, &adapter, &adapter, &adapter)
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("unlock::run with the primary key failed");
     let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
     UnlockCleanup::new(mountpoint, name.clone()).run();
 
     pause("Now unplug the PRIMARY key and plug in ONLY the SECOND (backup) key.");
     println!("Unlocking with the SECOND (backup) key — touch it when prompted.");
-    let mountpoint = unlock::run(&path, false, &adapter, &adapter, &adapter)
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("unlock::run with the second key failed");
     UnlockCleanup::new(mountpoint, name).run();
 }
@@ -1157,7 +1188,7 @@ fn revoke_removes_a_key_without_affecting_others() {
     // The surviving backup key must still unlock the tomb (AC #1's "other
     // enrolled keys still do").
     println!("Unlocking with the surviving BACKUP key — touch it when prompted.");
-    let mountpoint = unlock::run(&path, false, &adapter, &adapter, &adapter)
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("unlock::run with the surviving backup key failed");
     let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
     UnlockCleanup::new(mountpoint, name).run();
@@ -1209,7 +1240,7 @@ fn revoke_aborts_on_the_last_remaining_key() {
     // The volume must remain unlockable (AC #2's explicit "volume remains
     // unlockable") — the refused revoke must not have touched anything.
     println!("Confirming the tomb is still unlockable — touch the key when prompted.");
-    let mountpoint = unlock::run(&path, false, &adapter, &adapter, &adapter)
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("unlock::run failed after a refused revoke — the guard must be a no-op on abort");
     let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
     UnlockCleanup::new(mountpoint, name).run();
@@ -1257,8 +1288,8 @@ fn close_unmounts_and_relocks_a_file_backed_tomb_allowing_a_clean_repeat_unlock(
     assert!(result.is_ok(), "create::run failed: {result:?}");
 
     println!("Unlocking — touch the key when prompted.");
-    let mountpoint =
-        unlock::run(&path, false, &adapter, &adapter, &adapter).expect("first unlock::run failed");
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
+        .expect("first unlock::run failed");
     let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
     let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
 
@@ -1270,7 +1301,7 @@ fn close_unmounts_and_relocks_a_file_backed_tomb_allowing_a_clean_repeat_unlock(
     );
 
     println!("Closing the tomb via close::run.");
-    let result = close::run(&path, &adapter, &adapter, &adapter);
+    let result = close::run(&path, false, &|_| {}, &adapter, &adapter, &adapter);
     assert!(result.is_ok(), "close::run failed: {result:?}");
 
     assert!(
@@ -1287,8 +1318,8 @@ fn close_unmounts_and_relocks_a_file_backed_tomb_allowing_a_clean_repeat_unlock(
     println!(
         "Unlocking again with the same key to confirm close left the tomb re-lockable — touch the key when prompted."
     );
-    let second_mountpoint =
-        unlock::run(&path, false, &adapter, &adapter, &adapter).expect("second unlock::run failed");
+    let second_mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
+        .expect("second unlock::run failed");
     assert_eq!(
         second_mountpoint, mountpoint,
         "a repeat unlock after close should reclaim the plain basename freed by close's rmdir, not fall back to a suffixed name"
@@ -1349,8 +1380,16 @@ fn close_works_unmodified_against_a_device_backed_tomb() {
     assert!(result.is_ok(), "create::run failed: {result:?}");
 
     println!("Unlocking — touch the key when prompted.");
-    let mountpoint = unlock::run(&loop_device.path, false, &adapter, &adapter, &adapter)
-        .expect("unlock::run failed");
+    let mountpoint = unlock::run(
+        &loop_device.path,
+        false,
+        false,
+        &|_| {},
+        &adapter,
+        &adapter,
+        &adapter,
+    )
+    .expect("unlock::run failed");
     let name =
         mapping_name::mapping_name(&loop_device.path).expect("failed to derive mapping name");
     let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
@@ -1360,7 +1399,14 @@ fn close_works_unmodified_against_a_device_backed_tomb() {
     // Identical close::run call as the file-backed scenario above — no
     // different flags or behavior branch based on target type (AC #5).
     println!("Closing the tomb via close::run.");
-    let result = close::run(&loop_device.path, &adapter, &adapter, &adapter);
+    let result = close::run(
+        &loop_device.path,
+        false,
+        &|_| {},
+        &adapter,
+        &adapter,
+        &adapter,
+    );
     assert!(result.is_ok(), "close::run failed: {result:?}");
 
     assert!(
@@ -1429,8 +1475,8 @@ fn resize_grows_a_file_backed_tomb_preserving_data_and_keys() {
     assert!(result.is_ok(), "create::run failed: {result:?}");
 
     println!("Unlocking to write a marker file — touch the key when prompted.");
-    let mountpoint =
-        unlock::run(&path, false, &adapter, &adapter, &adapter).expect("first unlock::run failed");
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
+        .expect("first unlock::run failed");
     assert_readable_and_writable(&mountpoint);
     let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
 
@@ -1442,7 +1488,7 @@ fn resize_grows_a_file_backed_tomb_preserving_data_and_keys() {
         .expect("failed to write pre-resize file");
 
     println!("Closing the tomb via close::run before resizing.");
-    let result = close::run(&path, &adapter, &adapter, &adapter);
+    let result = close::run(&path, false, &|_| {}, &adapter, &adapter, &adapter);
     assert!(result.is_ok(), "close::run failed: {result:?}");
 
     println!("Resizing the tomb — touch the key when prompted (re-authenticates the grow).");
@@ -1467,7 +1513,7 @@ fn resize_grows_a_file_backed_tomb_preserving_data_and_keys() {
     println!(
         "Unlocking again to confirm data, key, and new capacity — touch the same key when prompted."
     );
-    let mountpoint = unlock::run(&path, false, &adapter, &adapter, &adapter)
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("unlock::run after resize failed — the previously enrolled key must still work");
     let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
     assert_actually_mounted(&device_node, &mountpoint);
@@ -1577,8 +1623,16 @@ fn resize_grows_a_device_backed_tomb_into_its_own_headroom() {
     );
 
     println!("Unlocking to confirm the grown capacity is usable — touch the key when prompted.");
-    let mountpoint = unlock::run(&loop_device.path, false, &adapter, &adapter, &adapter)
-        .expect("unlock::run after resize failed");
+    let mountpoint = unlock::run(
+        &loop_device.path,
+        false,
+        false,
+        &|_| {},
+        &adapter,
+        &adapter,
+        &adapter,
+    )
+    .expect("unlock::run after resize failed");
     let name =
         mapping_name::mapping_name(&loop_device.path).expect("failed to derive mapping name");
     let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
@@ -1743,7 +1797,7 @@ fn resize_rejects_a_shrink_request_and_leaves_the_tomb_untouched() {
     println!(
         "Confirming the tomb is still unlockable with the original key — touch it when prompted."
     );
-    let mountpoint = unlock::run(&path, false, &adapter, &adapter, &adapter)
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("unlock::run failed after a refused resize — the rejection must be a no-op");
     let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
     UnlockCleanup::new(mountpoint, name).run();
@@ -1983,7 +2037,7 @@ fn enroll_with_user_verification_on_a_uv_capable_key_disables_client_pin() {
     );
 
     println!("Confirming the tomb still unlocks — verify on-device (fingerprint) when prompted.");
-    let mountpoint = unlock::run(&path, false, &adapter, &adapter, &adapter)
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("unlock::run failed after UV-required enrollment");
     let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
     UnlockCleanup::new(mountpoint, name).run();
@@ -2078,14 +2132,14 @@ fn enroll_with_user_verification_authenticated_by_an_existing_key_succeeds_and_l
 
     pause("Unplug the BACKUP key now, leaving only the PRIMARY key plugged in.");
     println!("Unlocking with the PRIMARY key — touch it when prompted.");
-    let mountpoint = unlock::run(&path, false, &adapter, &adapter, &adapter)
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("unlock::run with the primary key failed");
     let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
     UnlockCleanup::new(mountpoint, name.clone()).run();
 
     pause("Now unplug the PRIMARY key and plug in ONLY the BACKUP key.");
     println!("Unlocking with the BACKUP key — verify on-device (fingerprint) when prompted.");
-    let mountpoint = unlock::run(&path, false, &adapter, &adapter, &adapter)
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("unlock::run with the backup key failed");
     UnlockCleanup::new(mountpoint, name).run();
 }
@@ -2170,7 +2224,7 @@ fn enroll_with_user_verification_on_a_non_uv_capable_key_fails_cleanly() {
     );
 
     println!("Confirming the primary key still unlocks the tomb — touch it when prompted.");
-    let mountpoint = unlock::run(&path, false, &adapter, &adapter, &adapter)
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("unlock::run with the primary key failed after a rejected UV enrollment");
     let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
     UnlockCleanup::new(mountpoint, name).run();
