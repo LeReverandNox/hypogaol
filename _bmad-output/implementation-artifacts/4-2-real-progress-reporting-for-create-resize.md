@@ -4,7 +4,7 @@ baseline_commit: 5afa585bfac5a55a72a2981ab8e3d31c675e67cd
 
 # Story 4.2: Real Progress Reporting for Create & Resize
 
-Status: review
+Status: done
 
 ## Story
 
