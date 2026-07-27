@@ -57,3 +57,17 @@ pub struct KeyslotInfo {
     pub keyslot: KeyslotRef,
     pub key_label: String,
 }
+
+/// `stat`/`lstat` facts about a candidate `exec-hooks` file, gathered by the
+/// adapter (AC #3). The adapter resolves "owned by invoking user or root"
+/// itself, reusing its existing `invoking_identity()` helper — `domain` never
+/// needs to know a raw uid, matching how `mount()` already keeps
+/// `invoking_identity()` adapter-internal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HookFileMeta {
+    pub is_regular_file: bool,
+    pub is_symlink: bool,
+    pub is_executable: bool,
+    pub owned_by_invoking_user_or_root: bool,
+    pub is_world_writable: bool,
+}

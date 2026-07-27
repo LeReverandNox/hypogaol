@@ -1,4 +1,5 @@
 pub mod errors;
+pub mod hooks;
 pub mod keyslot_guard;
 pub mod mapping_name;
 pub mod preflight;
