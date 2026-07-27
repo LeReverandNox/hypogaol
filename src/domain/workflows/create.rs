@@ -40,6 +40,7 @@ pub const MIN_TOMB_SIZE_BYTES: u64 = 32 * 1024 * 1024;
 pub fn run(
     target: CreateTarget,
     filesystem: Filesystem,
+    user_verification: bool,
     fido2_selection: Fido2DeviceSelection,
     progress: &dyn Fn(CreateStage),
     luks: &dyn LuksBackend,
@@ -73,6 +74,7 @@ pub fn run(
                 &path,
                 size,
                 filesystem,
+                user_verification,
                 fido2_selection,
                 progress,
                 luks,
@@ -135,6 +137,7 @@ pub fn run(
                 &path,
                 resolved_size,
                 filesystem,
+                user_verification,
                 fido2_selection,
                 progress,
                 luks,
@@ -149,6 +152,7 @@ fn bootstrap_and_provision(
     path: &Path,
     size: u64,
     filesystem: Filesystem,
+    user_verification: bool,
     fido2_selection: Fido2DeviceSelection,
     progress: &dyn Fn(CreateStage),
     luks: &dyn LuksBackend,
@@ -166,6 +170,7 @@ fn bootstrap_and_provision(
     let result = finish_provisioning(
         &mapper,
         filesystem,
+        user_verification,
         fido2_selection,
         progress,
         luks,
@@ -184,6 +189,7 @@ fn bootstrap_and_provision(
 fn finish_provisioning(
     mapper: &MapperHandle,
     filesystem: Filesystem,
+    user_verification: bool,
     fido2_selection: Fido2DeviceSelection,
     progress: &dyn Fn(CreateStage),
     luks: &dyn LuksBackend,
@@ -202,7 +208,7 @@ fn finish_provisioning(
         filesystem,
     };
     progress(CreateStage::EnrollingFido2Key);
-    fido2.enroll_fido2_key(mapper, metadata, fido2_selection)?;
+    fido2.enroll_fido2_key(mapper, metadata, fido2_selection, user_verification)?;
 
     progress(CreateStage::CreatingFilesystem);
     fs.mkfs(mapper, filesystem)?;
