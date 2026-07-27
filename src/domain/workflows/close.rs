@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use crate::domain::errors::DomainError;
+use crate::domain::hooks::{self, HookWarning};
 use crate::domain::mapping_name;
 use crate::domain::preflight;
 use crate::domain::types::MapperHandle;
@@ -21,8 +22,13 @@ use crate::ports::luks_backend::LuksBackend;
 /// means a prior `close` already unmounted but failed before reaching
 /// `luks.close`; treating that as done and proceeding makes a retry
 /// self-healing instead of permanently stuck (review finding, 2026-07-26).
+///
+/// `close` gains only `skip_hooks: bool`, no read-only-awareness (Dev Notes:
+/// "Resolved: `close` does not need read-only-awareness").
 pub fn run(
     path: &Path,
+    skip_hooks: bool,
+    warn: &dyn Fn(HookWarning),
     luks: &dyn LuksBackend,
     fido2: &dyn Fido2Backend,
     fs: &dyn FilesystemBackend,
@@ -35,6 +41,10 @@ pub fn run(
         source_path: path.to_path_buf(),
     };
 
+    if !skip_hooks {
+        run_hooks_step(&mapper, warn, fs)?;
+    }
+
     match fs.umount(&mapper) {
         Ok(()) => {}
         Err(DomainError::AdapterFailure(msg)) if msg.contains("not currently mounted") => {}
@@ -42,4 +52,86 @@ pub fn run(
     }
 
     luks.close(&mapper)
+}
+
+/// Runs `exec-hooks` (hard-gated) then unmounts every still-mounted
+/// bind-hooks destination (AC #5) — before the primary `umount`/`luks.close`
+/// tail. `close` never opens anything itself, so an exec-hooks rejection has
+/// nothing to roll back: it returns immediately, before touching `umount` or
+/// `luks.close` at all (AC #4's rollback is `unlock`'s concern, not this
+/// one's).
+fn run_hooks_step(
+    mapper: &MapperHandle,
+    warn: &dyn Fn(HookWarning),
+    fs: &dyn FilesystemBackend,
+) -> Result<(), DomainError> {
+    let mountpoint = fs.mount_point_of(mapper)?;
+
+    let tomb_name = mapper
+        .source_path
+        .file_stem()
+        .unwrap_or(mapper.source_path.as_os_str())
+        .to_string_lossy()
+        .into_owned();
+
+    let exec_hooks_path = mountpoint.join("exec-hooks");
+    if fs.path_exists(&exec_hooks_path) {
+        let meta = fs.hook_file_metadata(&exec_hooks_path)?;
+        if let Some(reason) = hooks::exec_hook_rejection(&meta) {
+            return Err(DomainError::HookRejected {
+                path: exec_hooks_path,
+                reason,
+            });
+        }
+
+        let status = fs.run_hook(
+            &exec_hooks_path,
+            &[
+                "close",
+                &mountpoint.to_string_lossy(),
+                &tomb_name,
+                &mapper.source_path.to_string_lossy(),
+                &mapper.device_node().to_string_lossy(),
+            ],
+        )?;
+        if !status.success() {
+            warn(HookWarning::ExecHookNonZeroExit {
+                path: exec_hooks_path,
+                exit_code: status.code(),
+            });
+        }
+    }
+
+    teardown_bind_hooks(&mountpoint, fs);
+
+    Ok(())
+}
+
+/// Re-reads and re-parses `bind-hooks` from the still-live `mountpoint`,
+/// unmounting each resolvable entry's destination. Individual failures are
+/// ignored (an entry already unmounted, or one that fails containment on
+/// re-check, is simply skipped) and never warned about — teardown failures
+/// here are expected/benign, unlike `unlock`'s own bind-hooks warnings.
+fn teardown_bind_hooks(mountpoint: &Path, fs: &dyn FilesystemBackend) {
+    let bind_hooks_path = mountpoint.join("bind-hooks");
+    if !fs.path_exists(&bind_hooks_path) {
+        return;
+    }
+
+    let Ok(content) = std::fs::read_to_string(&bind_hooks_path) else {
+        return;
+    };
+
+    // `resolve_bind_hook_entry` needs a home directory to resolve `dest`
+    // against — `close` has no other reason to know it, so it's fetched
+    // here, scoped to teardown only.
+    let Ok(home) = fs.invoking_home_dir() else {
+        return;
+    };
+
+    for entry in hooks::parse_bind_hooks(&content) {
+        if let Ok((_source, dest)) = hooks::resolve_bind_hook_entry(&entry, mountpoint, &home, fs) {
+            let _ = fs.unmount_bind_hook_destination(&dest);
+        }
+    }
 }
