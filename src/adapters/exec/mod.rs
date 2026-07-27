@@ -658,6 +658,28 @@ fn resolve_device_selection(
     }
 }
 
+/// `--fido2-with-user-verification` is always passed explicitly (AD-16 — see
+/// Task 2's Dev Notes). When `user_verification` is requested, `clientPin` is
+/// explicitly disabled too: `systemd-cryptenroll` defaults `clientPin` to
+/// "yes", and if left enabled it satisfies the FIDO2 "uv" requirement via a
+/// host-typed PIN prompt even on tokens with a fingerprint sensor — which
+/// would defeat the point of asking for on-device verification. Left
+/// untouched (systemd's own "yes" default) when `user_verification` is
+/// `false`, preserving Epic 2's touch-alone behavior unchanged (AC #2). A
+/// token with no fingerprint sensor and no `clientPin` support then has no
+/// way to satisfy "uv" at all — `systemd-cryptenroll` fails enrollment
+/// outright, which is the correct, explicit outcome for that combination.
+fn fido2_verification_args(user_verification: bool) -> Vec<String> {
+    let mut args = vec![format!(
+        "--fido2-with-user-verification={}",
+        if user_verification { "yes" } else { "no" }
+    )];
+    if user_verification {
+        args.push("--fido2-with-client-pin=false".to_string());
+    }
+    args
+}
+
 impl ExecAdapter {
     /// Writes `metadata`'s fields directly onto the `systemd-fido2` token
     /// identified by `token_id` — the caller (`enroll_fido2_key`) has
@@ -1219,10 +1241,7 @@ impl Fido2Backend for ExecAdapter {
                 Command::new("systemd-cryptenroll")
                     .arg(format!("--fido2-device={new_device}"))
                     .arg(format!("--unlock-key-file={}", key_file.path.display()))
-                    .arg(format!(
-                        "--fido2-with-user-verification={}",
-                        if user_verification { "yes" } else { "no" }
-                    ))
+                    .args(fido2_verification_args(user_verification))
                     .arg(path)
                     .status()
             }
@@ -1254,10 +1273,7 @@ impl Fido2Backend for ExecAdapter {
                 Command::new("systemd-cryptenroll")
                     .arg(format!("--fido2-device={new_device}"))
                     .arg(format!("--unlock-fido2-device={existing_device}"))
-                    .arg(format!(
-                        "--fido2-with-user-verification={}",
-                        if user_verification { "yes" } else { "no" }
-                    ))
+                    .args(fido2_verification_args(user_verification))
                     .arg(path)
                     .status()
             }
