@@ -3,6 +3,7 @@ use std::path::Path;
 use crate::domain::errors::DomainError;
 use crate::domain::mapping_name;
 use crate::domain::preflight;
+use crate::domain::progress::ResizeStage;
 use crate::domain::types::{Filesystem, MapperHandle};
 use crate::ports::fido2_backend::Fido2Backend;
 use crate::ports::filesystem_backend::FilesystemBackend;
@@ -20,6 +21,7 @@ use crate::ports::luks_backend::LuksBackend;
 pub fn run(
     path: &Path,
     new_size: u64,
+    progress: &dyn Fn(ResizeStage),
     luks: &dyn LuksBackend,
     fido2: &dyn Fido2Backend,
     fs: &dyn FilesystemBackend,
@@ -77,7 +79,16 @@ pub fn run(
     // succeeds, every subsequent exit path must close the mapping — no
     // partial "undo" of a successful set_backing_file_size/resize/growfs
     // step, just close and propagate whichever error occurred.
-    let result = grow_open_mapping(path, new_size, device_backed, filesystem, &mapper, luks, fs);
+    let result = grow_open_mapping(
+        path,
+        new_size,
+        device_backed,
+        filesystem,
+        progress,
+        &mapper,
+        luks,
+        fs,
+    );
     match result {
         Ok(()) => luks
             .close(&mapper)
@@ -130,6 +141,7 @@ fn grow_open_mapping(
     new_size: u64,
     device_backed: bool,
     filesystem: Filesystem,
+    progress: &dyn Fn(ResizeStage),
     mapper: &MapperHandle,
     luks: &dyn LuksBackend,
     fs: &dyn FilesystemBackend,
@@ -156,11 +168,14 @@ fn grow_open_mapping(
     }
 
     if !device_backed {
+        progress(ResizeStage::GrowingBackingFile);
         fs.set_backing_file_size(path, new_size)?;
     }
 
+    progress(ResizeStage::ResizingLuks2Mapping);
     luks.resize(mapper)?;
 
+    progress(ResizeStage::GrowingFilesystem);
     fs.growfs(mapper, filesystem)
 }
 

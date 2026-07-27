@@ -8,6 +8,12 @@ use tomb_fido2::domain::workflows::{close, create, enroll, info, resize, revoke,
 use tomb_fido2::ports::fido2_backend::Fido2DeviceSelection;
 use tomb_fido2::ports::luks_backend::LuksBackend;
 
+/// No-op progress callback (separate test binary from `tests/unit`, so it
+/// gets its own copy of this helper rather than sharing `tests/unit/fakes.rs`).
+/// Generic over both `CreateStage` and `ResizeStage` via inference at each
+/// call site.
+fn no_progress<S>(_stage: S) {}
+
 /// Attaches a genuine `/dev/loopN` block device backed by a disposable file —
 /// `cryptsetup`/`blockdev` treat it identically to physical storage, so this
 /// exercises the real Device code path without requiring (and risking data
@@ -103,6 +109,7 @@ fn create_a_file_backed_tomb_is_independently_unlockable_via_bare_cryptsetup() {
         target,
         Filesystem::Ext4,
         Fido2DeviceSelection::Interactive,
+        &no_progress,
         &adapter,
         &adapter,
         &adapter,
@@ -183,6 +190,7 @@ fn create_a_device_backed_tomb_leaves_headroom_for_a_later_resize() {
         target,
         Filesystem::Ext4,
         Fido2DeviceSelection::Interactive,
+        &no_progress,
         &adapter,
         &adapter,
         &adapter,
@@ -538,6 +546,7 @@ fn unlock_mounts_a_file_backed_tomb_with_a_readable_writable_filesystem() {
         target,
         Filesystem::Ext4,
         Fido2DeviceSelection::Interactive,
+        &no_progress,
         &adapter,
         &adapter,
         &adapter,
@@ -600,6 +609,7 @@ fn unlock_works_unmodified_against_a_device_backed_tomb() {
         target,
         Filesystem::Ext4,
         Fido2DeviceSelection::Interactive,
+        &no_progress,
         &adapter,
         &adapter,
         &adapter,
@@ -666,6 +676,7 @@ fn unlock_read_only_rejects_writes_at_both_layers_including_remount() {
         target,
         Filesystem::Ext4,
         Fido2DeviceSelection::Interactive,
+        &no_progress,
         &adapter,
         &adapter,
         &adapter,
@@ -765,6 +776,7 @@ fn unlock_read_only_rejects_writes_at_both_layers_against_a_device_backed_tomb()
         target,
         Filesystem::Ext4,
         Fido2DeviceSelection::Interactive,
+        &no_progress,
         &adapter,
         &adapter,
         &adapter,
@@ -865,6 +877,7 @@ fn unlock_falls_back_to_a_suffixed_mount_point_on_a_basename_collision() {
             target,
             Filesystem::Ext4,
             Fido2DeviceSelection::Interactive,
+            &no_progress,
             &adapter,
             &adapter,
             &adapter,
@@ -972,6 +985,7 @@ fn enroll_adds_an_independent_second_key_without_corrupting_the_primary() {
         target,
         Filesystem::Ext4,
         Fido2DeviceSelection::Interactive,
+        &no_progress,
         &adapter,
         &adapter,
         &adapter,
@@ -1086,6 +1100,7 @@ fn revoke_removes_a_key_without_affecting_others() {
         target,
         Filesystem::Ext4,
         Fido2DeviceSelection::Interactive,
+        &no_progress,
         &adapter,
         &adapter,
         &adapter,
@@ -1162,6 +1177,7 @@ fn revoke_aborts_on_the_last_remaining_key() {
         target,
         Filesystem::Ext4,
         Fido2DeviceSelection::Interactive,
+        &no_progress,
         &adapter,
         &adapter,
         &adapter,
@@ -1220,6 +1236,7 @@ fn close_unmounts_and_relocks_a_file_backed_tomb_allowing_a_clean_repeat_unlock(
         target,
         Filesystem::Ext4,
         Fido2DeviceSelection::Interactive,
+        &no_progress,
         &adapter,
         &adapter,
         &adapter,
@@ -1310,6 +1327,7 @@ fn close_works_unmodified_against_a_device_backed_tomb() {
         target,
         Filesystem::Ext4,
         Fido2DeviceSelection::Interactive,
+        &no_progress,
         &adapter,
         &adapter,
         &adapter,
@@ -1388,6 +1406,7 @@ fn resize_grows_a_file_backed_tomb_preserving_data_and_keys() {
         target,
         Filesystem::Ext4,
         Fido2DeviceSelection::Interactive,
+        &no_progress,
         &adapter,
         &adapter,
         &adapter,
@@ -1412,7 +1431,7 @@ fn resize_grows_a_file_backed_tomb_preserving_data_and_keys() {
     assert!(result.is_ok(), "close::run failed: {result:?}");
 
     println!("Resizing the tomb — touch the key when prompted (re-authenticates the grow).");
-    let result = resize::run(&path, grown_size, &adapter, &adapter, &adapter);
+    let result = resize::run(&path, grown_size, &no_progress, &adapter, &adapter, &adapter);
     assert!(result.is_ok(), "resize::run failed: {result:?}");
 
     let backing_len = std::fs::metadata(&path)
@@ -1496,6 +1515,7 @@ fn resize_grows_a_device_backed_tomb_into_its_own_headroom() {
         target,
         Filesystem::Ext4,
         Fido2DeviceSelection::Interactive,
+        &no_progress,
         &adapter,
         &adapter,
         &adapter,
@@ -1503,7 +1523,7 @@ fn resize_grows_a_device_backed_tomb_into_its_own_headroom() {
     assert!(result.is_ok(), "create::run failed: {result:?}");
 
     println!("Resizing into the device's headroom — touch the key when prompted.");
-    let result = resize::run(&loop_device.path, grown_size, &adapter, &adapter, &adapter);
+    let result = resize::run(&loop_device.path, grown_size, &no_progress, &adapter, &adapter, &adapter);
     assert!(result.is_ok(), "resize::run failed: {result:?}");
 
     // The raw loop device's own geometry must never change (resize never
@@ -1586,6 +1606,7 @@ fn resize_rejects_a_request_exceeding_the_raw_devices_capacity() {
         target,
         Filesystem::Ext4,
         Fido2DeviceSelection::Interactive,
+        &no_progress,
         &adapter,
         &adapter,
         &adapter,
@@ -1598,6 +1619,7 @@ fn resize_rejects_a_request_exceeding_the_raw_devices_capacity() {
     let result = resize::run(
         &loop_device.path,
         loop_capacity + 32 * 1024 * 1024,
+        &no_progress,
         &adapter,
         &adapter,
         &adapter,
@@ -1652,6 +1674,7 @@ fn resize_rejects_a_shrink_request_and_leaves_the_tomb_untouched() {
         target,
         Filesystem::Ext4,
         Fido2DeviceSelection::Interactive,
+        &no_progress,
         &adapter,
         &adapter,
         &adapter,
@@ -1661,7 +1684,7 @@ fn resize_rejects_a_shrink_request_and_leaves_the_tomb_untouched() {
     println!(
         "Requesting a same-size resize (grow-only rejection) — expecting a clean refusal, no key touch needed."
     );
-    let result = resize::run(&path, initial_size, &adapter, &adapter, &adapter);
+    let result = resize::run(&path, initial_size, &no_progress, &adapter, &adapter, &adapter);
     assert!(
         matches!(
             result,
@@ -1715,6 +1738,7 @@ fn info_lists_enrolled_keys_without_unlocking() {
         target,
         Filesystem::Ext4,
         Fido2DeviceSelection::Interactive,
+        &no_progress,
         &adapter,
         &adapter,
         &adapter,
@@ -1778,6 +1802,7 @@ fn info_works_unmodified_against_a_device_backed_tomb() {
         target,
         Filesystem::Ext4,
         Fido2DeviceSelection::Interactive,
+        &no_progress,
         &adapter,
         &adapter,
         &adapter,

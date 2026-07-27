@@ -6,6 +6,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use crate::adapters::exec::ExecAdapter;
 use crate::cli::ux;
 use crate::domain::preflight;
+use crate::domain::progress::{CreateStage, ResizeStage};
 use crate::domain::types::{CreateTarget, Filesystem};
 use crate::domain::workflows::close;
 use crate::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
@@ -290,6 +291,7 @@ fn run_create(
         target,
         filesystem,
         fido2_selection,
+        &|stage: CreateStage| println!("{}", ux::translate_create_stage(&stage)),
         &adapter,
         &adapter,
         &adapter,
@@ -483,7 +485,14 @@ fn run_resize(path: PathBuf, new_size: u64) {
 
     println!("Growing this tomb. Touch your security key now (you may also be asked for its PIN).");
 
-    match resize::run(&path, new_size, &adapter, &adapter, &adapter) {
+    match resize::run(
+        &path,
+        new_size,
+        &|stage: ResizeStage| println!("{}", ux::translate_resize_stage(&stage)),
+        &adapter,
+        &adapter,
+        &adapter,
+    ) {
         Ok(()) => println!("Tomb grown to {new_size} bytes."),
         Err(err) => {
             eprintln!("{}", ux::translate(&err));

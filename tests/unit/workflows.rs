@@ -3,7 +3,7 @@ use tomb_fido2::domain::types::{CreateTarget, Filesystem};
 use tomb_fido2::domain::workflows::{close, create, resize, unlock};
 use tomb_fido2::ports::fido2_backend::Fido2DeviceSelection;
 
-use crate::fakes::{FakeFido2Backend, FakeFilesystemBackend, FakeLuksBackend};
+use crate::fakes::{no_progress, FakeFido2Backend, FakeFilesystemBackend, FakeLuksBackend};
 
 // Each workflow's run() calls preflight::check as its first statement. A
 // failing fake must return the preflight error immediately, proving the gate
@@ -24,6 +24,7 @@ fn create_run_stops_at_preflight_before_reaching_its_own_todo() {
         target,
         Filesystem::Ext4,
         Fido2DeviceSelection::Interactive,
+        &no_progress,
         &luks,
         &fido2,
         &fs,
@@ -74,6 +75,7 @@ fn resize_run_stops_at_preflight_before_touching_any_port() {
     let result = resize::run(
         std::path::Path::new("/tmp/does-not-matter"),
         1024,
+        &no_progress,
         &luks,
         &fido2,
         &fs,
