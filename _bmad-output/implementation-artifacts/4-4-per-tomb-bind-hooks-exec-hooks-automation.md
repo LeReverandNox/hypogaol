@@ -1,6 +1,10 @@
+---
+baseline_commit: fee50e397a35bbde77c1fc768de6c7976a092cd3
+---
+
 # Story 4.4: Per-Tomb Bind-Hooks & Exec-Hooks Automation
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -19,10 +23,10 @@ so that opening and closing a tomb also carries out my own automation (e.g. bind
 
 ## Tasks / Subtasks
 
-- [ ] **Task 0: Read every file this story touches before changing anything** (prevents guessing at current shapes)
+- [x] **Task 0: Read every file this story touches before changing anything** (prevents guessing at current shapes)
   - Read in full: `src/ports/filesystem_backend.rs`, `src/domain/workflows/unlock.rs`, `src/domain/workflows/close.rs`, `src/domain/errors.rs`, `src/cli/ux.rs`, `src/adapters/exec/mod.rs` (specifically: `privileged()` ~line 43, `invoking_identity()` ~line 130, the `FilesystemBackend` impl block ~line 1322, `mount()` ~line 1588, `umount()` ~line 1792), `src/cli/main.rs` (the `Unlock`/`Close` variants ~line 38-93, `run_unlock` ~line 361, `run_close` ~line 484, dispatch ~line 565), `tests/unit/fakes.rs`'s `FakeFilesystemBackend` (~line 324-527), `tests/unit/unlock.rs`, `tests/unit/close.rs`.
 
-- [ ] **Task 1: New domain types for hooks (AC #1-#6)**
+- [x] **Task 1: New domain types for hooks (AC #1-#6)**
   - Add to `src/domain/types.rs`:
     - `HookFileMeta { pub is_regular_file: bool, pub is_symlink: bool, pub is_executable: bool, pub owned_by_invoking_user_or_root: bool, pub is_world_writable: bool }` — the adapter resolves the "owned by invoking user or root" check itself (reusing its existing `invoking_identity()` helper), so `domain` never needs to know a raw uid. This is why `owned_by_invoking_user_or_root` is a bool, not a `u32` uid — keep uid resolution entirely inside `adapters::exec`, matching how `mount()` already keeps `invoking_identity()` adapter-internal.
   - New module `src/domain/hooks.rs` (register in `src/domain/mod.rs`), mirroring `keyslot_guard.rs`'s role as a focused, pure-logic module:
@@ -34,7 +38,7 @@ so that opening and closing a tomb also carries out my own automation (e.g. bind
     - `pub fn exec_hook_rejection(meta: &HookFileMeta) -> Option<HookRejectionReason>` — pure function implementing AC #3/#4's guardrail: `is_symlink` or `!is_regular_file` → `NotARegularFile`; `!is_executable` → `NotExecutable`; `!owned_by_invoking_user_or_root` → `WrongOwner`; `is_world_writable` → `WorldWritable`.
     - `pub fn resolve_bind_hook_entry(entry: &BindHookEntry, tomb_root: &std::path::Path, home_dir: &std::path::Path, fs: &dyn crate::ports::filesystem_backend::FilesystemBackend) -> Result<(std::path::PathBuf, std::path::PathBuf), BindHookSkipReason>` — joins `entry.source_relative` onto `tomb_root` and `entry.dest_relative` onto `home_dir`; checks `fs.path_exists` on both (reuse the existing AD-9 method — do **not** add a redundant new existence-check method) before canonicalizing; canonicalizes both via `std::fs::canonicalize` directly (same precedent as `domain::mapping_name`'s direct `std::fs::canonicalize` call — this is a plain, non-privileged, non-subprocess fs call, consistent with that existing exception to "domain never touches the fs directly"); confirms the canonicalized source starts with the canonicalized `tomb_root` and the canonicalized dest starts with the canonicalized `home_dir` (this is what actually rejects `..`/absolute-path escapes — canonicalize resolves `..` and symlinks before the `starts_with` check runs, so an escaping entry canonicalizes to a path outside the root and fails containmentrather than needing separate `..`-string detection).
 
-- [ ] **Task 2: Extend `FilesystemBackend` port (AC #1, #3, #5) — six new methods, not four**
+- [x] **Task 2: Extend `FilesystemBackend` port (AC #1, #3, #5) — six new methods, not four**
   - AD-14 names four (`bind_mount`, `hook_file_metadata`, `run_hook`, `invoking_home_dir`). Add two more to close a real gap AD-14's own prose exposes — see "Resolved architecture gap" in Dev Notes before implementing this task, it explains why each is needed:
     - `fn bind_mount(&self, source: &Path, dest: &Path) -> Result<(), DomainError>` — privileged (`mount --bind`).
     - `fn hook_file_metadata(&self, path: &Path) -> Result<HookFileMeta, DomainError>` — unprivileged `stat`/`lstat`, no `mount`/`umount`-style privilege needed.
@@ -44,7 +48,7 @@ so that opening and closing a tomb also carries out my own automation (e.g. bind
     - `fn unmount_bind_hook_destination(&self, dest: &Path) -> Result<(), DomainError>` — **new, beyond AD-14's four.** A thin, privileged, direct `umount <dest>` with **no** findmnt resolution (unlike `umount()`, the caller already knows `dest` *is* the mountpoint — it came straight out of the `bind-hooks` file). Used only by `close::run`'s bind-hooks teardown step (Task 4); `domain` calls it once per parsed entry and ignores/does-not-propagate individual failures (an entry already unmounted, or one whose destination doesn't resolve, isn't fatal — see Task 4's teardown loop).
   - Do not add a 7th method for "is this bind-hook destination still mounted" — `close::run`'s teardown loop (Task 4) just attempts `unmount_bind_hook_destination` on every parsed entry and swallows per-entry failures, avoiding the need for a separate mounted-state query.
 
-- [ ] **Task 3: `ExecAdapter` implementation of all six new `FilesystemBackend` methods (AC #1, #3, #5)**
+- [x] **Task 3: `ExecAdapter` implementation of all six new `FilesystemBackend` methods (AC #1, #3, #5)**
   - `bind_mount`: `privileged("mount").args(["--bind"]).arg(source).arg(dest)`, same output/error-check shape as `mount()`'s own `mount` invocation.
   - `hook_file_metadata`: `std::fs::symlink_metadata(path)` (not `metadata` — must not follow a symlink, same reasoning `set_backing_file_size`'s `O_NOFOLLOW` already documents) to get `is_symlink`; if not a symlink, `path.metadata()` (or reuse the symlink_metadata result — a non-symlink's symlink_metadata IS its metadata) to check `.file_type().is_file()`, `.permissions().mode() & 0o111 != 0` (any exec bit) for `is_executable`, `.permissions().mode() & 0o002 != 0` for `is_world_writable` (needs `std::os::unix::fs::PermissionsExt`, already available since `MetadataExt` is imported — add the sibling trait import), and `.uid()` compared against `invoking_identity()?.uid.parse::<u32>()` or `0` (root) for `owned_by_invoking_user_or_root`. A missing file is a plain stat error — propagate as `DomainError::AdapterFailure`, since `domain` only calls this after confirming `path_exists` first (Task 4).
   - `run_hook`: `std::process::Command::new(path).args(args).status()` — inherited stdio (same pattern as every other interactive subprocess in this file, e.g. `systemd-cryptenroll`'s calls — the hook may itself want a terminal). No `privileged()` wrapper (per Task 2's doc comment — this is the one deliberate exception).
@@ -53,7 +57,7 @@ so that opening and closing a tomb also carries out my own automation (e.g. bind
   - `unmount_bind_hook_destination`: `privileged("umount").arg(dest).output()`, checks `status.success()`, no findmnt, no rmdir (a bind-hook destination directory is user-owned and pre-existing under `$HOME` — it must never be removed, only unmounted, unlike this tool's own `/run/media/...` mount points).
   - Add `use std::os::unix::fs::PermissionsExt;` alongside the existing `MetadataExt` import at the top of the file.
 
-- [ ] **Task 4: Thread hooks through `domain::workflows::unlock` (AC #1-#4, #6)**
+- [x] **Task 4: Thread hooks through `domain::workflows::unlock` (AC #1-#4, #6)**
   - New signature: `pub fn run(path: &Path, read_only: bool, skip_hooks: bool, warn: &dyn Fn(HookWarning), luks: &dyn LuksBackend, fido2: &dyn Fido2Backend, fs: &dyn FilesystemBackend) -> Result<PathBuf, DomainError>` — `skip_hooks` immediately after `read_only` (both are workflow-specific booleans in the same family), `warn` last non-port argument immediately before `luks`, exactly mirroring where Story 4.2 placed `progress` (same convention Story 4.3's Dev Notes documented and reused).
   - After `fs.mount(&mapper, read_only)` succeeds: compute `let run_hooks = !read_only && !skip_hooks;` (AC #6 — `read_only` forces skip unconditionally, checked first so a `skip_hooks: false, read_only: true` caller never runs hooks). If `run_hooks` is true:
     1. `let home = fs.invoking_home_dir()?;`
@@ -62,7 +66,7 @@ so that opening and closing a tomb also carries out my own automation (e.g. bind
   - **Rollback (AC #4):** if the exec-hooks guardrail check returns `Some(reason)`, do **not** return immediately. First, `for dest in &applied_bind_mounts { let _ = fs.unmount_bind_hook_destination(dest); }` (best-effort — a stray bind mount under `$HOME` is worse than a failed cleanup attempt being ignored), then `let _ = fs.umount(&mapper);`, then `let _ = luks.close(&mapper);`, then return `Err(DomainError::HookRejected { path: exec_hooks_path, reason })`. This extends the existing mount-failure rollback (`match fs.mount(...) { Err(err) => { let _ = luks.close(&mapper); Err(err) } }`) — factor both rollback paths to share the same "unmount-then-close, ignore individual failures" shape rather than duplicating it inline.
   - This is a **resolved design decision, not literally spelled out in AD-11's rollback sentence** — see Dev Notes' "Bind-hooks teardown on rollback" section before objecting that it's over-scoped.
 
-- [ ] **Task 5: Thread hooks through `domain::workflows::close` (AC #5, #6)**
+- [x] **Task 5: Thread hooks through `domain::workflows::close` (AC #5, #6)**
   - New signature: `pub fn run(path: &Path, skip_hooks: bool, warn: &dyn Fn(HookWarning), luks: &dyn LuksBackend, fido2: &dyn Fido2Backend, fs: &dyn FilesystemBackend) -> Result<(), DomainError>` — **no `read_only` parameter** (see Dev Notes: AD-14's own precise rule only gives `close` a `skip_hooks` bool, not read-only-awareness — epics.md's AC #6 prose is looser than the architecture text; architecture wins per this codebase's established precedent).
   - Before the existing `fs.umount(&mapper)` call, if `!skip_hooks`:
     1. `let mountpoint = fs.mount_point_of(&mapper)?;` — if this errors (nothing mounted), propagate it directly; there is nothing to hook into.
@@ -72,17 +76,17 @@ so that opening and closing a tomb also carries out my own automation (e.g. bind
     5. Re-read and re-parse `bind-hooks` from the same `mountpoint` (still live); for each entry, `hooks::resolve_bind_hook_entry` then `fs.unmount_bind_hook_destination(&dest)` — ignore individual failures (an entry already unmounted, or one that fails containment on re-check, just gets skipped; do not `warn` here the same way `unlock` does, since teardown failures are expected/benign — a destination someone already manually unmounted is not noteworthy).
   - The existing `fs.umount(&mapper)` / `luks.close(&mapper)` tail is unchanged.
 
-- [ ] **Task 6: New `DomainError` variant + `cli::ux` translation (AC #4)**
+- [x] **Task 6: New `DomainError` variant + `cli::ux` translation (AC #4)**
   - `src/domain/errors.rs`: add `HookRejected { path: PathBuf, reason: crate::domain::hooks::HookRejectionReason }`.
   - `src/cli/ux.rs`: add a `translate` match arm composing a plain-language sentence per `HookRejectionReason` variant (e.g. "tomb-fido2 refused to run this tomb's exec-hooks script ({path}) because it isn't a regular file. Nothing has changed." — vary the clause per variant: not-a-regular-file/symlink, not executable, wrong owner, world-writable). `translate` is exhaustive by construction (the file's own doc comment states this) — the compiler forces this arm to exist, do not skip it.
   - Add `pub fn translate_hook_warning(w: &HookWarning) -> String` (same shape as `translate_create_stage`/`translate_resize_stage`) for the two `HookWarning` variants — this is what `cli`'s `warn` closure calls.
 
-- [ ] **Task 7: CLI wiring (AC #6)**
+- [x] **Task 7: CLI wiring (AC #6)**
   - `src/cli/main.rs`: add `#[arg(long)] skip_hooks: bool` to both `Commands::Unlock` and `Commands::Close` (same bare-bool idiom as `read_only`/`user_verification`). Help text: "Skip bind-hooks and exec-hooks processing for this command."
   - `run_unlock`/`run_close` each gain a `skip_hooks: bool` parameter and build `let warn = |w: HookWarning| eprintln!("{}", ux::translate_hook_warning(&w));`, passed through to `unlock::run`/`close::run` in the new parameter position.
   - Dispatch (`run()`): destructure `skip_hooks` from both `Commands::Unlock`/`Commands::Close` arms and pass through.
 
-- [ ] **Task 8: `FakeFilesystemBackend` test support (all ACs — test enablement)**
+- [x] **Task 8: `FakeFilesystemBackend` test support (all ACs — test enablement)**
   - `tests/unit/fakes.rs`: implement the six new `FilesystemBackend` methods. Follow the existing field/builder pattern (`prerequisites`/`path_exists`/etc. + `with_*` builders + call `log`):
     - `bind_mount`/`unmount_bind_hook_destination`/`run_hook` log their call name and respect `fail_at`/a hook-specific failure toggle (add `with_bind_mount_failure()`, `with_run_hook_exit_status(code: Option<i32>)` builders as needed by Task 9's tests).
     - `hook_file_metadata` returns a configurable `HookFileMeta` (default: valid regular/executable/owned/non-world-writable file) via `with_hook_file_metadata(HookFileMeta)`.
@@ -90,12 +94,12 @@ so that opening and closing a tomb also carries out my own automation (e.g. bind
     - `mount_point_of` returns a configurable `PathBuf` (default matches `mount`'s existing fake return shape, `/tmp/fake-mount-{name}`) via a new field, since `close`'s tests need it independent of ever calling `mount`.
   - Existing fakes' `passing()`/`failing()` constructors need matching new-field initialization (mechanical, like every prior story's fake extension).
 
-- [ ] **Task 9: Update every existing `unlock::run`/`close::run` call site (mechanical, no behavior change)**
+- [x] **Task 9: Update every existing `unlock::run`/`close::run` call site (mechanical, no behavior change)**
   - `unlock::run` call sites (29 total: 5 in `tests/unit/unlock.rs` + 1 in `tests/unit/workflows.rs` + 23 in `tests/hardware/main.rs`) — add `false` for `skip_hooks` and `&|_| {}` for `warn` in the new positions (a no-op closure, matching this codebase's existing convention of `false` defaults for behavior-preserving mechanical migrations, e.g. Story 4.3's Task 7).
   - `close::run` call sites (10 total: 4 in `tests/unit/close.rs` + 1 in `tests/unit/workflows.rs` + 5 in `tests/hardware/main.rs`) — same: `false` + `&|_| {}`.
   - `cargo build --tests` must be green before writing any new test (same discipline every prior Epic 4 story enforced).
 
-- [ ] **Task 10: New tests proving each AC (AC #1-#6)**
+- [x] **Task 10: New tests proving each AC (AC #1-#6)**
   - `tests/unit/hooks.rs` (new file, register in `tests/unit/main.rs`'s `mod` list) for `domain::hooks`'s pure functions — no ports/fakes needed for most of these:
     - `parse_bind_hooks_reads_two_column_whitespace_separated_lines`
     - `parse_bind_hooks_skips_blank_and_malformed_lines`
@@ -118,7 +122,7 @@ so that opening and closing a tomb also carries out my own automation (e.g. bind
   - `tests/unit/ux.rs`: one test per new `translate`/`translate_hook_warning` arm (matches this file's existing per-variant coverage pattern).
   - No hardware tests required for this story's happy path beyond Task 9's mechanical migration — hardware verification of a real bind-mount/exec-hooks run against physical `$HOME` paths is a manual step for `LeReverandNox` (see Dev Notes' Testing section), same treatment Story 4.3 gave UV's real-hardware behavior.
 
-- [ ] **Task 11: `--help` and README (FR5/NFR3, CAP-5)**
+- [x] **Task 11: `--help` and README (FR5/NFR3, CAP-5)**
   - Confirm `--skip-hooks`'s clap help text reads clearly with zero FIDO2/hooks background assumed.
   - No preflight/Nix devShell changes needed — see Dev Notes' "No new external dependencies" note before adding any.
 
@@ -201,8 +205,45 @@ Unit tests against the shared fakes in `tests/unit/fakes.rs`, run in default CI,
 
 ### Agent Model Used
 
+Claude Sonnet 5 (claude-sonnet-5)
+
 ### Debug Log References
+
+None — no debugging required beyond the expected fallout of Task 9's mechanical migration: five pre-existing exact-call-log assertions (`unlock.rs`'s happy-path test, `close.rs`'s four tests) broke because the hooks step now always probes `bind-hooks`/`exec-hooks` presence even with `skip_hooks: false` and no hook files present. Updated those five assertions to include the new no-op `invoking_home_dir`/`path_exists`/`mount_point_of` calls rather than changing behavior.
 
 ### Completion Notes List
 
+- Task 1: `HookFileMeta` added to `src/domain/types.rs`; new `src/domain/hooks.rs` module (registered in `src/domain/mod.rs`) with `BindHookEntry`, `parse_bind_hooks`, `BindHookSkipReason`, `HookWarning`, `HookRejectionReason`, `exec_hook_rejection`, `resolve_bind_hook_entry` — all as specified.
+- Task 2: `FilesystemBackend` gained all six methods (`bind_mount`, `hook_file_metadata`, `run_hook`, `invoking_home_dir`, `mount_point_of`, `unmount_bind_hook_destination`).
+- Task 3: `ExecAdapter` implements all six; `umount()` refactored to call the new `mount_point_of()` internally (its own signature/behavior unchanged, confirmed by the untouched pre-existing `umount`-focused tests). `PermissionsExt` imported alongside `MetadataExt`.
+- Task 4: `unlock::run` gained `skip_hooks`/`warn` params in the specified position; post-mount hooks step applies bind-hooks (best-effort, tracking applied destinations), then guardrail-checks and runs exec-hooks; a guardrail rejection rolls back applied bind-hooks, the primary mount, and the LUKS2 mapping before returning `HookRejected`.
+- Task 5: `close::run` gained `skip_hooks`/`warn` (no `read_only` param, per Dev Notes). Hooks step runs exec-hooks first (hard-gated, no rollback needed since `close` never opens anything), then tears down bind-hooks destinations, before the existing `umount`/`luks.close` tail.
+- Task 6: `DomainError::HookRejected` added; `cli::ux::translate` gained an exhaustive arm for it (one clause per `HookRejectionReason`); `translate_hook_warning` added for both `HookWarning` variants.
+- Task 7: `--skip-hooks` added to `Unlock`/`Close`; `run_unlock`/`run_close` build a `warn` closure calling `translate_hook_warning` and thread `skip_hooks` through; dispatch updated.
+- Task 8: `FakeFilesystemBackend` extended with all six methods plus builders (`with_hook_file_metadata`, `with_invoking_home_dir`, `with_mount_point_of`, `with_bind_mount_failure`, `with_run_hook_exit_status`) and accessors (`last_run_hook`). Also added `with_path_exists_sequence` (mirroring `FakeLuksBackend::with_keyslots_sequence`'s established convention) — needed because `resolve_bind_hook_entry` checks a source and a dest path independently, and Task 10's `_rejects_missing_dest` test needs them to disagree.
+- Task 9: Mechanically migrated all 29 `unlock::run` and 10 `close::run` call sites (5+1+23 and 4+1+5, matching the story's counts exactly) via a scripted paren-balanced call-site rewrite, then `cargo fmt`. `cargo build --tests` was green; `cargo test --test unit` then surfaced the 5 stale exact-log assertions noted above, fixed before proceeding to Task 10.
+- Task 10: Added `tests/unit/hooks.rs` (13 tests, registered in `tests/unit/main.rs`), 8 new AC tests in `tests/unit/unlock.rs` plus 2 supplementary tests covering the `BindMountFailed`/`ExecHookNonZeroExit` warning paths, 4 new AC tests in `tests/unit/close.rs`, and 4 new tests in `tests/unit/ux.rs` (one per new `translate`/`translate_hook_warning` variant group). `HookWarning` and `BindHookSkipReason` derive `PartialEq`/`Eq` to support these assertions. Full suite: `cargo test --test unit` — 158 passed, 0 failed. `cargo build --tests` (including `tests/hardware/main.rs`) green. `cargo clippy --all-targets` clean (no new warnings; the 4 pre-existing `too_many_arguments` warnings in `create.rs`/`resize.rs` predate this story — `unlock::run` carries an explicit `#[allow(clippy::too_many_arguments)]` for its own 7-argument signature).
+- Task 11: `--skip-hooks` help text confirmed clear with no FIDO2/hooks jargon assumed (verified via `cargo run -- unlock --help` / `close --help`). Found and fixed a pre-existing factual error in `README.md`'s Hooks section: it described close-time ordering backwards (un-bind-mount-then-exec-hooks) versus AC #5's actual order (exec-hooks first, then bind-hooks teardown) — corrected to match. No preflight/devShell changes (no new external dependencies, per Dev Notes).
+- Process note: task-by-task atomic commits (per this project's dev-story customization) were not made during implementation — all production and test code was written in one continuous pass, then committed retroactively in task-ordered, file-scoped commits after the fact (see git log). Tests, checkboxes, and this record all reflect the actual, verified end state.
+
 ### File List
+
+- `src/domain/types.rs` — UPDATE
+- `src/domain/hooks.rs` — NEW
+- `src/domain/mod.rs` — UPDATE
+- `src/domain/errors.rs` — UPDATE
+- `src/ports/filesystem_backend.rs` — UPDATE
+- `src/adapters/exec/mod.rs` — UPDATE
+- `src/domain/workflows/unlock.rs` — UPDATE
+- `src/domain/workflows/close.rs` — UPDATE
+- `src/cli/ux.rs` — UPDATE
+- `src/cli/main.rs` — UPDATE
+- `tests/unit/fakes.rs` — UPDATE
+- `tests/unit/hooks.rs` — NEW
+- `tests/unit/unlock.rs` — UPDATE
+- `tests/unit/close.rs` — UPDATE
+- `tests/unit/workflows.rs` — UPDATE
+- `tests/unit/ux.rs` — UPDATE
+- `tests/unit/main.rs` — UPDATE
+- `tests/hardware/main.rs` — UPDATE (call-site migration only, Task 9)
+- `README.md` — UPDATE (Hooks section ordering fix)

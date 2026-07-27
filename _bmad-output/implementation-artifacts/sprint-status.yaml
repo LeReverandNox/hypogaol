@@ -75,7 +75,7 @@ development_status:
   4-1-view-a-tombs-enrolled-keys-info: done
   4-2-real-progress-reporting-for-create-resize: done
   4-3-enroll-a-fido2-key-with-user-verification: done
-  4-4-per-tomb-bind-hooks-exec-hooks-automation: ready-for-dev
+  4-4-per-tomb-bind-hooks-exec-hooks-automation: in-progress
   4-5-close-every-open-tomb-close-all: backlog
   4-6-emergency-slam: backlog
   epic-4-retrospective: optional
