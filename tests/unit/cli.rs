@@ -84,6 +84,7 @@ fn top_level_help_lists_all_subcommands() {
     assert!(help.contains("unlock"));
     assert!(help.contains("enroll"));
     assert!(help.contains("revoke"));
+    assert!(help.contains("info"));
 }
 
 #[test]
@@ -147,6 +148,13 @@ fn revoke_help_lists_path_as_positional_and_label_as_a_flag() {
     assert!(help.contains("<PATH>"));
     assert!(!help.contains("--path"));
     assert!(help.contains("--label"));
+}
+
+#[test]
+fn info_help_lists_path_as_positional() {
+    let help = help_text(&["tomb-fido2", "info", "--help"]);
+    assert!(help.contains("<PATH>"));
+    assert!(!help.contains("--path"));
 }
 
 #[test]

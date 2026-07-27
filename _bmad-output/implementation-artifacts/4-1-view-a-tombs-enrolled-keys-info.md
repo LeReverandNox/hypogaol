@@ -37,12 +37,12 @@ so that I can check what's enrolled without unlocking the tomb.
   - [x] This story introduces no new `AdapterFailure` string shape — a failed `cryptsetup luksDump` on a non-existent or non-LUKS2 path already falls through `dump_json_metadata`'s existing error path (reused unmodified by `list_fido2_keyslots`) into the existing dedicated `"luksDump"` bucket in `src/cli/ux.rs:102` (shared with `enroll`/`revoke`, not the generic `"cryptsetup"` bucket). Confirmed by inspection: every `dump_json_metadata` error string (`src/adapters/exec/mod.rs:324-343`) contains the literal substring `"luksDump"`, so no new branch is needed.
   - [x] Do not add a new `DomainError` variant for this story — `info::run` has no new failure mode beyond preflight failure and whatever `list_fido2_keyslots` already returns (both already-typed).
 
-- [ ] Task 4: Unit tests (AC #1, #2)
-  - [ ] New `tests/unit/info.rs`, registered in `tests/unit/main.rs:1-13` (alphabetically before `keyslot_guard`). Mirror `tests/unit/revoke.rs`'s fakes-based style:
+- [x] Task 4: Unit tests (AC #1, #2)
+  - [x] New `tests/unit/info.rs`, registered in `tests/unit/main.rs:1-13` (alphabetically before `keyslot_guard`). Mirror `tests/unit/revoke.rs`'s fakes-based style:
     - `preflight_failure_short_circuits_before_any_port_call`: same shape as `revoke.rs:10-33` — a failing `FakeFido2Backend`, assert `Err(DomainError::PreflightFailed(_))` and an empty call log (no `list_fido2_keyslots` call).
     - `happy_path_returns_every_enrolled_keyslots_label`: `FakeLuksBackend::passing().with_keyslots(vec![...two entries...])`, assert `info::run(...)` returns `Ok(keyslots)` equal to that same vec, and the call log is exactly `["list_fido2_keyslots"]` — no `open`/`remove_key`/other port calls (locks in AC #1's "no unlock/open call" at the fakes level, and that info makes exactly one port call, unlike revoke's two).
-    - `empty_tomb_returns_an_empty_list`: `FakeLuksBackend::passing()` with no keyslots configured (defaults to empty) — assert `Ok(vec![])` rather than an error; info is a pure read with no last-keyslot-style guard of its own.
-  - [ ] `tests/unit/cli.rs`: add `info_help_lists_path_as_positional` following `revoke_help_lists_path_as_positional_and_label_as_a_flag`'s shape (`tests/unit/cli.rs:145-150`) — assert `help_text(&["tomb-fido2", "info", "--help"])` contains `"<PATH>"` and not `"--path"`. Add `top_level_help_lists_all_subcommands` coverage for `"info"` too (`tests/unit/cli.rs:80-87` currently only checks `create`/`unlock`/`enroll`/`revoke` — extend the same assertion list rather than adding a duplicate test).
+    - `empty_tomb_returns_an_empty_list`: `FakeLuksBackend::passing()` **corrected** — `passing()` actually seeds one default `"primary"` keyslot (`tests/unit/fakes.rs:51-54`), not none, so this test uses `.with_keyslots(vec![])` explicitly to get a genuinely empty tomb — assert `Ok(vec![])` rather than an error; info is a pure read with no last-keyslot-style guard of its own.
+  - [x] `tests/unit/cli.rs`: add `info_help_lists_path_as_positional` following `revoke_help_lists_path_as_positional_and_label_as_a_flag`'s shape (`tests/unit/cli.rs:145-150`) — assert `help_text(&["tomb-fido2", "info", "--help"])` contains `"<PATH>"` and not `"--path"`. Add `top_level_help_lists_all_subcommands` coverage for `"info"` too (`tests/unit/cli.rs:80-87` currently only checks `create`/`unlock`/`enroll`/`revoke` — extend the same assertion list rather than adding a duplicate test).
 
 - [ ] Task 5: Hardware tests (manual-only, `make test-hardware`, AD-7 — not run in default CI)
   - [ ] In `tests/hardware/main.rs`, add `info_lists_enrolled_keys_without_unlocking`: `create::run` a file-backed tomb (touch the key when prompted, mirroring `revoke_removes_a_key_without_affecting_others`'s setup at `tests/hardware/main.rs:1070-1093`), then call `info::run(&path, &adapter, &adapter, &adapter)` **without any preceding `unlock::run`/mount** — assert `Ok(keyslots)` with exactly one entry whose `key_label` is `"primary"`. This is the concrete proof of AC #1's "without performing any unlock/open call": if `info::run` accidentally required an open mapping, this test would hang waiting for a touch prompt that never comes, or fail outright since nothing was ever mounted.
@@ -105,9 +105,13 @@ Unit tests against the shared fakes in `tests/unit/fakes.rs` (no fake changes ne
 - Task 1: Added `domain::workflows::info::run`, mirroring `revoke.rs`'s preflight-then-`list_fido2_keyslots` shape. No new port method, type, or `DomainError` variant. Registered `pub mod info;` in `workflows/mod.rs`. `cargo build` passes.
 - Task 2: Wired `Commands::Info { path }` and `run_info`, mirroring `run_close`'s preflight-then-call-then-report shape. Output prints only `key_label` per keyslot (AC #2), no target-type branching (AC #3). `cargo build` passes.
 - Task 3: Verified by inspection (no code change) — `dump_json_metadata`'s error strings all contain `"luksDump"`, already routed by the existing dedicated bucket in `src/cli/ux.rs:102`; no marker-bleed risk introduced.
+- Task 4: Added `tests/unit/info.rs` (3 tests) and `info_help_lists_path_as_positional` + extended `top_level_help_lists_all_subcommands` in `tests/unit/cli.rs`. Corrected the story's `empty_tomb_returns_an_empty_list` assumption: `FakeLuksBackend::passing()` seeds a default `"primary"` keyslot (`tests/unit/fakes.rs:51-54`), so the test calls `.with_keyslots(vec![])` explicitly rather than relying on a default that isn't actually empty. `cargo test` — 126 passed, 0 failed, 16 ignored (hardware). `cargo clippy --all-targets` — no issues.
 
 ### File List
 
 - src/domain/workflows/info.rs (NEW)
 - src/domain/workflows/mod.rs (UPDATE)
 - src/cli/main.rs (UPDATE)
+- tests/unit/info.rs (NEW)
+- tests/unit/main.rs (UPDATE)
+- tests/unit/cli.rs (UPDATE)
