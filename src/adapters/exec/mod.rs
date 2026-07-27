@@ -1916,7 +1916,13 @@ impl FilesystemBackend for ExecAdapter {
             )));
         }
 
+        // Only the first line, same guard as `mount_point_of` a few lines
+        // below: a passwd entry with an embedded newline shouldn't corrupt
+        // the parsed field.
         String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
             .trim()
             .split(':')
             .nth(5)
