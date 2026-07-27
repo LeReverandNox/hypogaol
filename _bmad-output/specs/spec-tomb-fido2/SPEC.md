@@ -1,7 +1,7 @@
 ---
 id: SPEC-tomb-fido2
-companions: []
-sources: [../../brainstorming/brainstorm-tomb-fido2-2026-07-21/brainstorm-intent.md]
+companions: [hooks.md]
+sources: [../../brainstorming/brainstorm-tomb-fido2-2026-07-21/brainstorm-intent.md, ../../brainstorming/brainstorm-tomb-fido2-2026-07-27/brainstorm-intent-epic4.md]
 ---
 
 > **Canonical contract.** This SPEC and the files in `companions:` are the complete, preservation-validated contract for what to build, test, and validate. Source documents listed in frontmatter are for traceability only — consult them only if you need narrative rationale or prose color this contract intentionally omits.
@@ -29,7 +29,7 @@ This tool exists to serve one job: store rarely-accessed, highly sensitive mater
   - **success:** After revocation, the removed key no longer unlocks the volume, while other enrolled keys still do. Attempting to revoke the last remaining valid keyslot is blocked with a clear explanation, and the volume remains unlockable.
 
 - **CAP-4**
-  - **intent:** User drives creation, unlock, enrollment, revocation, closing, resizing, and dependency checking through one unified CLI, replacing direct use of `cryptsetup`, `fido2-token`, `systemd-cryptenroll`, `mkfs`, and `mount`/`umount`.
+  - **intent:** User drives creation, unlock, enrollment (including user-verification), revocation, closing (single or all), the slam emergency close, resizing, info/key inspection, and dependency checking through one unified CLI, replacing direct use of `cryptsetup`, `fido2-token`, `systemd-cryptenroll`, `mkfs`, and `mount`/`umount`.
   - **success:** No workflow in v1 scope requires the user to invoke the underlying tools directly.
 
 - **CAP-5**
@@ -60,6 +60,30 @@ This tool exists to serve one job: store rarely-accessed, highly sensitive mater
   - **intent:** User can unlock and mount an existing tomb in read-only mode, so the LUKS2/dm-crypt mapping itself refuses writes at the block-device level, not merely the filesystem mount.
   - **success:** When read-only mode is requested, both the underlying mapper device and the mounted filesystem reject write attempts (including a later remount attempt), while a normal (non-read-only) unlock continues to allow writes as before.
 
+- **CAP-12**
+  - **intent:** User can view technical info about a tomb, including its currently enrolled FIDO2 keys with their labels, through one info command, without needing to unlock it first.
+  - **success:** Running the info command against a tomb shows all currently enrolled FIDO2 keys with their labels, and this works without running unlock first.
+
+- **CAP-13**
+  - **intent:** User can enroll a FIDO2 key with user-verification (fingerprint/PIN) required instead of touch-only presence, both at tomb creation's bootstrap enrollment and via the standalone enroll command.
+  - **success:** A key enrolled with user-verification requires the device's own fingerprint/PIN check to unlock the tomb, not just a touch; a key enrolled without it continues to unlock with touch alone, unchanged.
+
+- **CAP-14**
+  - **intent:** User can close every currently-open/unlocked tomb in one command.
+  - **success:** After running close-all, no tomb-fido2-managed mapping remains open, and each affected tomb's volume requires a FIDO2 key to unlock again — the same end-state as running close once per open tomb.
+
+- **CAP-15**
+  - **intent:** User can run an emergency command that closes every open tomb and forcibly clears any process holding a mount busy, firing immediately with no confirmation prompt.
+  - **success:** Slam closes every open tomb; for any mount blocked by a busy process it escalates signals (TERM, then HUP, then KILL) against the processes holding that mount, pausing briefly between rounds and stopping once none remain, and it never pauses for confirmation before acting.
+
+- **CAP-16**
+  - **intent:** User can define per-tomb bind-hooks (auto bind-mount tomb-internal paths onto `$HOME`-relative paths on open) and an exec-hooks executable (run as the invoking user at open/close), similar to dyne/tomb's model but not necessarily an exact port, with an option to skip hook processing for a given invocation. Mechanism detail in `hooks.md`.
+  - **success:** On open, each valid bind-hooks mapping is bind-mounted and exec-hooks (if present) runs with `open` plus the mountpoint as arguments; on close, exec-hooks runs with `close` plus the mountpoint, tomb name, loopback device, and mapper device as arguments; a bind-hooks entry that fails the path-containment or existence checks is skipped with a warning, not silently applied; invoking with the skip option runs neither mechanism.
+
+- **CAP-17**
+  - **intent:** User gets real step-by-step progress messages during create and resize, naming each real stage as it begins and completes, replacing the Story 1.5 stopgap of one message before and one after the whole operation.
+  - **success:** Running create or resize prints a distinct message for each real stage of that operation in order (e.g. allocating, formatting as LUKS2, creating the filesystem, enrolling the FIDO2 key for create; resizing the LUKS2 mapping, growing the filesystem for resize), not just a single start/end message.
+
 ## Constraints
 
 - Standard, low-level, well-tested primitives only — LUKS/dm-crypt + FIDO2 hmac-secret. No proprietary formats, no single-vendor-maintained crypto.
@@ -78,6 +102,11 @@ This tool exists to serve one job: store rarely-accessed, highly sensitive mater
 - Create refuses outright rather than overwriting: a file-backed destination that already exists, or a device-backed target that already carries a LUKS2 header, both abort the operation before any formatting happens.
 - Device-backed create is inherently higher-risk than file-backed (the wrong device vs. a typo'd file path) — the tool must show an explicit warning describing the impending wipe and data loss and require the user's explicit confirmation before formatting any device target, even when no existing LUKS2 header was detected.
 - The name `tomb-fido2` is a placeholder, not final branding — a permanent name is still pending. CLI/binary name, package/module name, user-facing strings, and on-disk metadata field names must not hardcode it or assume its permanence, so a future rename requires no redesign.
+- UV enrollment (CAP-13) is a stronger verification mode of the existing FIDO2 mechanism, not a new auth path — does not violate the no-fallback-auth-paths constraint above.
+- Close-all/slam (CAP-14/15) must discover open tombs by live-querying system state only, never a stored registry or lock file — no side-channel state, consistent with this SPEC's break-glass and no-proprietary-state posture elsewhere.
+- Slam (CAP-15) fires with no confirmation prompt, by design — its emergency/panic-button framing takes priority over this SPEC's general pattern of confirming irreversible actions (create's wipe warning, revoke's last-keyslot guard).
+- Hooks (CAP-16) introduce a new risk category — arbitrary user-authored code execution — this SPEC has not previously reasoned about. Hooks run only at open/close (not create/resize/read-only-unlock); exec-hooks always runs as the invoking user, never with elevated privilege, regardless of what privilege the lifecycle step itself needed; hook files live per-tomb in the tomb's own root; exec-hooks must be a regular file (not a symlink) with the executable bit set, owned by the invoking user or root, and not world-writable; bind-hooks entries must resolve within the tomb root (source) and within `$HOME` (destination), rejecting path traversal; an invocation-level option to skip hook processing entirely must exist.
+- Create and resize must report distinct named-stage progress messages as each real stage occurs (CAP-17), not merely a single message before and after the whole operation.
 
 ## Non-goals
 
@@ -87,8 +116,10 @@ This tool exists to serve one job: store rarely-accessed, highly sensitive mater
 
 ## Success signal
 
-A user who has never touched the tool before can, in a real crisis, unlock and mount a LUKS2 volume (loop-file or raw partition) using only a physical FIDO2 key and the tool's own prompts — no external notes, no web search — then close it again when done. Independently, with the tool's own binary assumed gone, the same volume can still be unlocked, mounted, and closed by following the README's break-glass procedure using only stock `cryptsetup`, `mount`/`umount`, and `fido2-token`. Before any of that, the same user can create a brand-new tomb from scratch — either by giving a destination path and size and letting the tool allocate the backing file (refusing if that path already exists), or by pointing at a raw device/partition and optionally reserving free space for later growth (refusing if it already carries a LUKS2 header, and otherwise only after confirming an explicit wipe warning) — choosing a filesystem, formatting it, and enrolling their first FIDO2 key, entirely through the tool, and later grow it as their storage needs increase.
+A user who has never touched the tool before can, in a real crisis, unlock and mount a LUKS2 volume (loop-file or raw partition) using only a physical FIDO2 key and the tool's own prompts — no external notes, no web search — then close it again when done. Independently, with the tool's own binary assumed gone, the same volume can still be unlocked, mounted, and closed by following the README's break-glass procedure using only stock `cryptsetup`, `mount`/`umount`, and `fido2-token`. Before any of that, the same user can create a brand-new tomb from scratch — either by giving a destination path and size and letting the tool allocate the backing file (refusing if that path already exists), or by pointing at a raw device/partition and optionally reserving free space for later growth (refusing if it already carries a LUKS2 header, and otherwise only after confirming an explicit wipe warning) — choosing a filesystem, formatting it, and enrolling their first FIDO2 key, entirely through the tool, watching each real stage of creation reported as it happens, and later grow it the same way. At any point they can inspect a tomb's enrolled keys without unlocking it, enroll a key that additionally demands its own fingerprint/PIN check, walk away from every open tomb at once with a single command, or — in a genuine emergency — force every tomb closed and clear whatever is blocking unmount, immediately and without being asked to confirm. If they've set up bind- or exec-hooks on a tomb, opening and closing it also carries out that per-tomb automation, or skips it entirely when told to.
 
 ## Assumptions
 
 - The Should-Have items from the source brainstorm (break-glass README procedure, 3-2-1 backup disclaimer) are folded into Constraints here rather than kept as separate capabilities, since they bend documentation/design decisions rather than describing testable tool behavior.
+- Two implementation-mechanism questions raised by the Epic 4 brainstorm are intentionally left unresolved here and deferred to the architecture step, since they are HOW, not WHAT, and don't block any capability's intent/success: (1) whether `unlock`/`resize`'s existing token-based `open` call needs any change to support a UV-enrolled key (CAP-13), or cryptsetup's token machinery already handles it transparently; (2) the concrete mechanism by which close-all/slam (CAP-14/15) live-enumerates "all currently open tombs" without a registry.
+- Existing Non-goals (remote/delegated unlock beyond cryptsetup's native token mode, post-quantum-readiness, shrink) were reconfirmed against the Epic 4 candidate features — none of CAP-12..17 touch them.
