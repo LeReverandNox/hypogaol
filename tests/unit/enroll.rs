@@ -109,3 +109,47 @@ fn enroll_fido2_key_failure_propagates_as_adapter_failure_untouched() {
         other => panic!("expected DomainError::AdapterFailure, got {other:?}"),
     }
 }
+
+#[test]
+fn enroll_with_user_verification_true_passes_it_to_enroll_fido2_key() {
+    let fido2 = FakeFido2Backend::passing();
+    let luks = FakeLuksBackend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let fixture = RealFixtureFile::create("user-verification-true");
+
+    let result = enroll::run(
+        &fixture.0,
+        "backup".to_string(),
+        Fido2DeviceSelection::Interactive,
+        true,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(fido2.user_verification_received(), Some(true));
+}
+
+#[test]
+fn enroll_without_the_flag_passes_false_unchanged_from_epic_2() {
+    let fido2 = FakeFido2Backend::passing();
+    let luks = FakeLuksBackend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let fixture = RealFixtureFile::create("user-verification-false");
+
+    let result = enroll::run(
+        &fixture.0,
+        "backup".to_string(),
+        Fido2DeviceSelection::Interactive,
+        false,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(fido2.user_verification_received(), Some(false));
+}

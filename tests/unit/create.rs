@@ -152,6 +152,33 @@ fn happy_path_runs_every_port_call_once_in_order() {
 }
 
 #[test]
+fn create_with_user_verification_true_threads_it_to_bootstrap_enrollment() {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let fixture = RealFixtureFile::create("user-verification-true");
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_TOMB_SIZE_BYTES,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        true,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(fido2.user_verification_received(), Some(true));
+}
+
+#[test]
 fn enroll_failure_closes_the_mapping_and_removes_the_backing_file() {
     let log = new_call_log();
     let luks = FakeLuksBackend::passing().with_log(log.clone());
