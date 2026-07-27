@@ -8,6 +8,7 @@
 //! detail" line (kept for bug-report value when no category matches).
 
 use crate::domain::errors::DomainError;
+use crate::domain::progress::{CreateStage, ResizeStage};
 
 /// Translates any `DomainError` reachable from `create`/`unlock`/`enroll`/
 /// `revoke` into a plain-language message. Exhaustive by construction: a 9th
@@ -68,6 +69,29 @@ pub fn translate(err: &DomainError) -> String {
             "No enrolled key is labeled {label:?}. Check the label (case-sensitive) and try again."
         ),
         DomainError::AdapterFailure(inner) => translate_adapter_failure(inner),
+    }
+}
+
+/// Translates each real `create` stage boundary (AD-19) into plain-language
+/// text. Exhaustive by construction, same guarantee as `translate` above.
+pub fn translate_create_stage(stage: &CreateStage) -> &'static str {
+    match stage {
+        CreateStage::AllocatingBackingFile => "Allocating the backing file...",
+        CreateStage::FormattingLuks2 => "Formatting as LUKS2...",
+        CreateStage::EnrollingFido2Key => {
+            "Enrolling your FIDO2 key — touch it now (you may also be asked for its PIN)..."
+        }
+        CreateStage::CreatingFilesystem => "Creating the filesystem...",
+    }
+}
+
+/// Translates each real `resize` stage boundary (AD-19) into plain-language
+/// text. Exhaustive by construction, same guarantee as `translate` above.
+pub fn translate_resize_stage(stage: &ResizeStage) -> &'static str {
+    match stage {
+        ResizeStage::GrowingBackingFile => "Growing the backing file...",
+        ResizeStage::ResizingLuks2Mapping => "Resizing the LUKS2 mapping...",
+        ResizeStage::GrowingFilesystem => "Growing the filesystem...",
     }
 }
 

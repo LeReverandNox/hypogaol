@@ -5,7 +5,9 @@ use tomb_fido2::domain::mapping_name;
 use tomb_fido2::domain::types::Filesystem;
 use tomb_fido2::domain::workflows::resize;
 
-use crate::fakes::{new_call_log, FakeFido2Backend, FakeFilesystemBackend, FakeLuksBackend};
+use crate::fakes::{
+    new_call_log, no_progress, FakeFido2Backend, FakeFilesystemBackend, FakeLuksBackend,
+};
 
 /// A real, uniquely-named file to canonicalize (AD-12's `mapping_name` is a
 /// pure `domain` helper, not behind a port — it needs something real on
@@ -42,7 +44,7 @@ fn file_backed_happy_path_runs_every_port_call_once_in_order() {
 
     let fixture = RealFixtureFile::create("resize-file-happy-path", &[0u8; 4096]);
 
-    let result = resize::run(&fixture.0, 8192, &luks, &fido2, &fs);
+    let result = resize::run(&fixture.0, 8192, &no_progress, &luks, &fido2, &fs);
 
     assert!(result.is_ok(), "expected Ok, got {result:?}");
     assert_eq!(
@@ -79,7 +81,7 @@ fn growfs_receives_whatever_read_filesystem_reports() {
 
     let fixture = RealFixtureFile::create("resize-growfs-filesystem", &[0u8; 4096]);
 
-    let result = resize::run(&fixture.0, 8192, &luks, &fido2, &fs);
+    let result = resize::run(&fixture.0, 8192, &no_progress, &luks, &fido2, &fs);
 
     assert!(result.is_ok(), "expected Ok, got {result:?}");
     assert_eq!(fs.last_growfs_filesystem(), Some(Filesystem::Ext4));
@@ -98,7 +100,7 @@ fn device_backed_happy_path_never_calls_set_backing_file_size() {
 
     let fixture = RealFixtureFile::create("resize-device-happy-path", &[0u8; 4096]);
 
-    let result = resize::run(&fixture.0, 8192, &luks, &fido2, &fs);
+    let result = resize::run(&fixture.0, 8192, &no_progress, &luks, &fido2, &fs);
 
     assert!(result.is_ok(), "expected Ok, got {result:?}");
     assert_eq!(
@@ -128,7 +130,7 @@ fn file_backed_true_shrink_is_rejected_by_tier_one_before_any_adapter_call() {
     // (AC #3), never reaching `read_filesystem` or `luks.open`.
     let fixture = RealFixtureFile::create("resize-true-shrink", &[0u8; 4096]);
 
-    let result = resize::run(&fixture.0, 2048, &luks, &fido2, &fs);
+    let result = resize::run(&fixture.0, 2048, &no_progress, &luks, &fido2, &fs);
 
     let Err(DomainError::ResizeMustGrow {
         requested,
@@ -162,7 +164,7 @@ fn file_backed_no_op_same_size_request_is_rejected_by_tier_two() {
     // check still correctly rejects it as a no-op once the mapping is open.
     let fixture = RealFixtureFile::create("resize-no-op-same-size", &[0u8; 4096]);
 
-    let result = resize::run(&fixture.0, 4096, &luks, &fido2, &fs);
+    let result = resize::run(&fixture.0, 4096, &no_progress, &luks, &fido2, &fs);
 
     let Err(DomainError::ResizeMustGrow {
         requested,
@@ -207,7 +209,7 @@ fn file_backed_retry_after_a_partial_failure_completes_instead_of_being_rejected
     // before `growfs` completed).
     let fixture = RealFixtureFile::create("resize-retry-after-partial-failure", &[0u8; 8192]);
 
-    let result = resize::run(&fixture.0, 8192, &luks, &fido2, &fs);
+    let result = resize::run(&fixture.0, 8192, &no_progress, &luks, &fido2, &fs);
 
     assert!(result.is_ok(), "expected Ok, got {result:?}");
     assert_eq!(
@@ -238,7 +240,7 @@ fn device_backed_too_small_partition_rejection_never_calls_open() {
 
     let fixture = RealFixtureFile::create("resize-too-small-partition", &[0u8; 4096]);
 
-    let result = resize::run(&fixture.0, 2048, &luks, &fido2, &fs);
+    let result = resize::run(&fixture.0, 2048, &no_progress, &luks, &fido2, &fs);
 
     let Err(DomainError::DeviceSizeExceedsCapacity {
         requested,
@@ -280,7 +282,7 @@ fn device_backed_headroom_shrink_is_caught_by_tier_two_and_closes_the_mapping() 
 
     // Passes tier 1 (well within raw capacity) but does not actually grow
     // the tomb's live current filesystem size of 4096.
-    let result = resize::run(&fixture.0, 4096, &luks, &fido2, &fs);
+    let result = resize::run(&fixture.0, 4096, &no_progress, &luks, &fido2, &fs);
 
     let Err(DomainError::ResizeMustGrow {
         requested,
@@ -319,7 +321,7 @@ fn mid_flow_failure_after_a_successful_resize_still_closes_the_mapping() {
 
     let fixture = RealFixtureFile::create("resize-mid-flow-failure", &[0u8; 4096]);
 
-    let result = resize::run(&fixture.0, 8192, &luks, &fido2, &fs);
+    let result = resize::run(&fixture.0, 8192, &no_progress, &luks, &fido2, &fs);
 
     assert!(result.is_err(), "expected Err, got {result:?}");
     assert_eq!(
@@ -355,7 +357,7 @@ fn close_failure_after_a_successful_grow_reports_the_grow_succeeded() {
 
     let fixture = RealFixtureFile::create("resize-close-failure-after-grow", &[0u8; 4096]);
 
-    let result = resize::run(&fixture.0, 8192, &luks, &fido2, &fs);
+    let result = resize::run(&fixture.0, 8192, &no_progress, &luks, &fido2, &fs);
 
     let Err(DomainError::AdapterFailure(message)) = result else {
         panic!("expected AdapterFailure, got {result:?}");

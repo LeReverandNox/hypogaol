@@ -20,6 +20,11 @@ pub fn new_call_log() -> CallLog {
     Rc::new(RefCell::new(Vec::new()))
 }
 
+/// No-op progress callback for tests that don't assert on stage ordering.
+/// Generic over both `CreateStage` and `ResizeStage` via inference at each
+/// call site.
+pub fn no_progress<S>(_stage: S) {}
+
 pub struct FakeLuksBackend {
     prerequisites: Result<(), Vec<String>>,
     keyslots: RefCell<Vec<KeyslotInfo>>,

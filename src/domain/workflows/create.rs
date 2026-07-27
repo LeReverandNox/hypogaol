@@ -4,6 +4,7 @@ use crate::domain::errors::DomainError;
 use crate::domain::keyslot_guard;
 use crate::domain::mapping_name;
 use crate::domain::preflight;
+use crate::domain::progress::CreateStage;
 use crate::domain::types::{CreateTarget, Filesystem, KeyMetadata, KeyslotRef, MapperHandle};
 use crate::ports::fido2_backend::{Fido2Backend, Fido2DeviceSelection};
 use crate::ports::filesystem_backend::FilesystemBackend;
@@ -34,6 +35,7 @@ pub fn run(
     target: CreateTarget,
     filesystem: Filesystem,
     fido2_selection: Fido2DeviceSelection,
+    progress: &dyn Fn(CreateStage),
     luks: &dyn LuksBackend,
     fido2: &dyn Fido2Backend,
     fs: &dyn FilesystemBackend,
@@ -54,14 +56,23 @@ pub fn run(
                 return Err(DomainError::DeviceTooSmall { path, size });
             }
 
+            progress(CreateStage::AllocatingBackingFile);
             fs.set_backing_file_size(&path, size)?;
 
             // From here on, the backing file exists: any failure below must
             // remove it again before returning, or every future `create` at
             // this same destination would permanently hit `DestinationExists`
             // with no way to recover.
-            let result =
-                bootstrap_and_provision(&path, size, filesystem, fido2_selection, luks, fido2, fs);
+            let result = bootstrap_and_provision(
+                &path,
+                size,
+                filesystem,
+                fido2_selection,
+                progress,
+                luks,
+                fido2,
+                fs,
+            );
             if result.is_err() {
                 let _ = fs.remove_backing_file(&path);
             }
@@ -119,6 +130,7 @@ pub fn run(
                 resolved_size,
                 filesystem,
                 fido2_selection,
+                progress,
                 luks,
                 fido2,
                 fs,
@@ -132,18 +144,28 @@ fn bootstrap_and_provision(
     size: u64,
     filesystem: Filesystem,
     fido2_selection: Fido2DeviceSelection,
+    progress: &dyn Fn(CreateStage),
     luks: &dyn LuksBackend,
     fido2: &dyn Fido2Backend,
     fs: &dyn FilesystemBackend,
 ) -> Result<(), DomainError> {
     let name = mapping_name::mapping_name(path)?;
+    progress(CreateStage::FormattingLuks2);
     let mapper = luks.bootstrap_format_and_open(path, &name, size, filesystem)?;
 
     // Whatever happens next, a successfully opened mapping must be closed —
     // otherwise a mid-flow failure leaks an open `/dev/mapper/vault-*`
     // mapping indefinitely, same as this story's post-review hardware-run fix
     // for the happy path, just extended to the failure paths too.
-    let result = finish_provisioning(&mapper, filesystem, fido2_selection, luks, fido2, fs);
+    let result = finish_provisioning(
+        &mapper,
+        filesystem,
+        fido2_selection,
+        progress,
+        luks,
+        fido2,
+        fs,
+    );
     match result {
         Ok(()) => luks.close(&mapper),
         Err(err) => {
@@ -157,6 +179,7 @@ fn finish_provisioning(
     mapper: &MapperHandle,
     filesystem: Filesystem,
     fido2_selection: Fido2DeviceSelection,
+    progress: &dyn Fn(CreateStage),
     luks: &dyn LuksBackend,
     fido2: &dyn Fido2Backend,
     fs: &dyn FilesystemBackend,
@@ -172,8 +195,10 @@ fn finish_provisioning(
         key_label: "primary".to_string(),
         filesystem,
     };
+    progress(CreateStage::EnrollingFido2Key);
     fido2.enroll_fido2_key(mapper, metadata, fido2_selection)?;
 
+    progress(CreateStage::CreatingFilesystem);
     fs.mkfs(mapper, filesystem)?;
 
     keyslot_guard::remove_keyslot_guarded(luks, &mapper.source_path, BOOTSTRAP_KEYSLOT)
