@@ -4,7 +4,7 @@ baseline_commit: 7488f539147e1139e21cc1bcb7804eeb25053908
 
 # Story 4.3: Enroll a FIDO2 Key with User-Verification
 
-Status: review
+Status: done
 
 ## Story
 
@@ -65,6 +65,18 @@ so that unlocking with this key demands proof of physical identity beyond mere t
 
 - [x] Task 9: Marker-bleed check (AC: none directly — CAP-5/NFR3 quality bar, repeatedly flagged by the Epic 2/3 retros as the most-repeated bug class in this codebase)
   - [x] Confirm by inspection that this story introduces no new `AdapterFailure` string and no new `DomainError` variant — `user_verification` is a plain `bool` threaded as a new parameter, entirely outside the `translate`/`translate_adapter_failure` marker-matching path in `cli/ux.rs`, so there is no bucket to collide with.
+
+### Review Findings
+
+- [x] [Review][Decision] No hardware test covers the mixed-authentication success path — the two new hardware tests exercise a single-key bootstrap success (`enroll_with_user_verification_on_a_uv_capable_key_disables_client_pin`) and a second-key-authenticated failure (`enroll_with_user_verification_on_a_non_uv_capable_key_fails_cleanly`), but nothing confirms that successfully enrolling a second UV-required key while authenticated by an already-enrolled key works end-to-end and leaves that existing key's own clientPin/UV settings untouched. **Resolved by LeReverandNox: added `enroll_with_user_verification_authenticated_by_an_existing_key_succeeds_and_leaves_it_unchanged`.** [tests/hardware/main.rs]
+- [x] [Review][Patch] `fido2_verification_args` — the actual post-review bug-fix logic (disabling clientPin when UV is requested) — has no unit test in default CI; it's a pure `bool -> Vec<String>` function only exercised via two `#[ignore]`d hardware tests requiring physical devices. Fixed: added `fido2_verification_args_true_disables_client_pin`/`_false_leaves_client_pin_at_its_default` to the existing `mod tests` block. [src/adapters/exec/mod.rs:672]
+- [x] [Review][Patch] `Fido2Backend::enroll_fido2_key`'s port-level doc comment says `user_verification` "maps to `--fido2-with-user-verification=yes|no`" but never mentions that `true` also requires disabling clientPin. Fixed: doc comment extended to state implementations must also disable clientPin-based verification. [src/ports/fido2_backend.rs:38]
+- [x] [Review][Patch] `create::run`'s `CreateTarget::Device` branch threading of `user_verification` has no test coverage — the new `create_with_user_verification_true_threads_it_to_bootstrap_enrollment` test only exercises `CreateTarget::File`. Fixed: added `create_device_with_user_verification_true_threads_it_to_bootstrap_enrollment`. [tests/unit/create.rs]
+- [x] [Review][Patch] `--user-verification`'s CLI help text (identical across `Enroll`, `CreateMode::File`, `CreateMode::Device`) doesn't warn that requesting it on a non-biometric key makes `systemd-cryptenroll` fail enrollment outright. Fixed: help text extended on all three variants. [src/cli/main.rs]
+- [x] [Review][Dismiss] `enroll_with_user_verification_on_a_non_uv_capable_key_fails_cleanly`'s `assert!(result.is_err(), ...)` doesn't distinguish a UV/clientPin-mismatch failure from an unrelated one — initially flagged as a patch, but on inspection `ExecAdapter::enroll_fido2_key` returns the same generic `"systemd-cryptenroll failed"` `AdapterFailure` for every cryptenroll failure by design (stdio is deliberately inherited, not captured, so the live FIDO2 touch/PIN prompt works — `src/adapters/exec/mod.rs:1218-1229`). Tightening this assertion isn't possible without capturing stderr, which would break that interactive UX — not a fixable test gap. [tests/hardware/main.rs:2048]
+- [x] [Review][Defer] `run_create`/`create::run` now carry two untyped `bool` parameters (`user_verification`, `announce`) with no compiler-enforced distinction — pre-existing pattern (`announce: bool` predates this diff), not introduced by Story 4.3. [src/cli/main.rs:292] — deferred, pre-existing
+- [x] [Review][Defer] Task 9's "no new `AdapterFailure` string/`DomainError` variant" check is manual/inspection-only, with no automated grep/lint enforcing it — already tracked as an open, in-progress retro action item. [sprint-status.yaml#action_items, epic 2] — deferred, pre-existing
+- [x] [Review][Defer] `user_verification=false` relies on `systemd-cryptenroll`'s own undeclared clientPin default rather than pinning it explicitly — pre-existing Epic 2 behavior, unchanged by this story. [src/adapters/exec/mod.rs:672] — deferred, pre-existing
 
 ## Dev Notes
 
