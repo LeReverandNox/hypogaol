@@ -66,6 +66,12 @@ enum Commands {
         /// this enrollment with. Must be given together with --fido2-device.
         #[arg(long, requires = "fido2_device")]
         unlock_fido2_device: Option<PathBuf>,
+
+        /// Require the device's own fingerprint/PIN check at unlock time,
+        /// not touch alone. Fails enrollment outright if the device has no
+        /// on-device verification method (e.g. no fingerprint sensor)
+        #[arg(long)]
+        user_verification: bool,
     },
 
     /// Revoke a FIDO2 key's keyslot from an existing tomb
@@ -130,6 +136,12 @@ enum CreateMode {
         /// for unattended/scripted use. Omit to be prompted interactively.
         #[arg(long)]
         fido2_device: Option<PathBuf>,
+
+        /// Require the device's own fingerprint/PIN check at unlock time,
+        /// not touch alone. Fails enrollment outright if the device has no
+        /// on-device verification method (e.g. no fingerprint sensor)
+        #[arg(long)]
+        user_verification: bool,
     },
 
     /// Create a new tomb on an existing raw device or partition
@@ -152,6 +164,12 @@ enum CreateMode {
         /// for unattended/scripted use. Omit to be prompted interactively.
         #[arg(long)]
         fido2_device: Option<PathBuf>,
+
+        /// Require the device's own fingerprint/PIN check at unlock time,
+        /// not touch alone. Fails enrollment outright if the device has no
+        /// on-device verification method (e.g. no fingerprint sensor)
+        #[arg(long)]
+        user_verification: bool,
     },
 }
 
@@ -277,6 +295,7 @@ fn confirm_device_wipe(path: &Path) -> bool {
 fn run_create(
     target: CreateTarget,
     filesystem: Filesystem,
+    user_verification: bool,
     fido2_selection: Fido2DeviceSelection,
     display_path: &str,
     announce: bool,
@@ -290,6 +309,7 @@ fn run_create(
     if let Err(err) = create::run(
         target,
         filesystem,
+        user_verification,
         fido2_selection,
         &|stage: CreateStage| println!("{}", ux::translate_create_stage(&stage)),
         &adapter,
@@ -367,7 +387,12 @@ fn run_unlock(path: PathBuf, read_only: bool) {
 /// `systemd-cryptenroll`'s own untranslated touch/PIN prompt text still
 /// appears as-is via inherited stdio, the same accepted limitation
 /// `run_unlock` documents for its own prompt.
-fn run_enroll(path: PathBuf, label: String, fido2_selection: Fido2DeviceSelection) {
+fn run_enroll(
+    path: PathBuf,
+    label: String,
+    fido2_selection: Fido2DeviceSelection,
+    user_verification: bool,
+) {
     let adapter = ExecAdapter::default();
 
     if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
@@ -377,7 +402,15 @@ fn run_enroll(path: PathBuf, label: String, fido2_selection: Fido2DeviceSelectio
 
     println!("Enrolling a new security key on this tomb. Follow the prompts below.");
 
-    match enroll::run(&path, label, fido2_selection, &adapter, &adapter, &adapter) {
+    match enroll::run(
+        &path,
+        label,
+        fido2_selection,
+        user_verification,
+        &adapter,
+        &adapter,
+        &adapter,
+    ) {
         Ok(()) => println!("New key enrolled."),
         Err(err) => {
             eprintln!("{}", ux::translate(&err));
@@ -539,17 +572,26 @@ pub fn run() {
                 size,
                 filesystem,
                 fido2_device,
+                user_verification,
             } => {
                 let display_path = path.display().to_string();
                 let target = CreateTarget::File { path, size };
                 let selection = fido2_selection_for_create(fido2_device);
-                run_create(target, filesystem.into(), selection, &display_path, true);
+                run_create(
+                    target,
+                    filesystem.into(),
+                    user_verification,
+                    selection,
+                    &display_path,
+                    true,
+                );
             }
             CreateMode::Device {
                 path,
                 size,
                 filesystem,
                 fido2_device,
+                user_verification,
             } => {
                 let confirmed = confirm_device_wipe(&path);
                 let display_path = path.display().to_string();
@@ -562,6 +604,7 @@ pub fn run() {
                 run_create(
                     target,
                     filesystem.into(),
+                    user_verification,
                     selection,
                     &display_path,
                     confirmed,
@@ -574,9 +617,10 @@ pub fn run() {
             label,
             fido2_device,
             unlock_fido2_device,
+            user_verification,
         } => {
             let selection = fido2_selection_for_enroll(fido2_device, unlock_fido2_device);
-            run_enroll(path, label, selection);
+            run_enroll(path, label, selection, user_verification);
         }
         Commands::Revoke { path, label } => run_revoke(path, label),
         Commands::Close { path } => run_close(path),

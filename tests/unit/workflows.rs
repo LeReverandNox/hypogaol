@@ -23,6 +23,7 @@ fn create_run_stops_at_preflight_before_reaching_its_own_todo() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,

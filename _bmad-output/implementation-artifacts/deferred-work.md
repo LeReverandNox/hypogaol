@@ -1,5 +1,11 @@
 # Deferred Work
 
+## Deferred from: code review of 4-3-enroll-a-fido2-key-with-user-verification (2026-07-27)
+
+- `run_create`/`create::run` now carry two untyped `bool` parameters (`user_verification`, `announce`) with no compiler-enforced distinction — pre-existing pattern (`announce: bool` predates this diff), not introduced by Story 4.3. [src/cli/main.rs:292]
+- Task 9's "no new `AdapterFailure` string/`DomainError` variant" check is manual/inspection-only, with no automated grep/lint enforcing it — already tracked as an open, in-progress retro action item. [sprint-status.yaml#action_items, epic 2]
+- `user_verification=false` relies on `systemd-cryptenroll`'s own undeclared clientPin default rather than pinning it explicitly — pre-existing Epic 2 behavior, unchanged by this story. [src/adapters/exec/mod.rs:672]
+
 ## Deferred from: code review of 1-1-project-scaffolding-nix-devshell (2026-07-22)
 
 - `ARCHITECTURE-SPINE.md`'s Stack table has a stale combined `serde`+`serde_json` version figure (`1.0.229`) that caused Story 1.1's `serde_json` pin deviation and will mislead future stories reading the table. [ARCHITECTURE-SPINE.md#Stack]

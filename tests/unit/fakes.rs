@@ -1,4 +1,4 @@
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
 use std::path::Path;
 use std::rc::Rc;
@@ -254,6 +254,7 @@ pub struct FakeFido2Backend {
     prerequisites: Result<(), Vec<String>>,
     log: CallLog,
     fail_at: Option<&'static str>,
+    user_verification_received: Cell<Option<bool>>,
 }
 
 impl FakeFido2Backend {
@@ -262,6 +263,7 @@ impl FakeFido2Backend {
             prerequisites: Ok(()),
             log: new_call_log(),
             fail_at: None,
+            user_verification_received: Cell::new(None),
         }
     }
 
@@ -270,6 +272,7 @@ impl FakeFido2Backend {
             prerequisites: Err(missing(missing_deps)),
             log: new_call_log(),
             fail_at: None,
+            user_verification_received: Cell::new(None),
         }
     }
 
@@ -281,6 +284,13 @@ impl FakeFido2Backend {
     pub fn with_failure_at(mut self, call: &'static str) -> Self {
         self.fail_at = Some(call);
         self
+    }
+
+    /// The `user_verification` value most recently passed to
+    /// `enroll_fido2_key` — lets a test assert the CLI flag/workflow
+    /// parameter actually reached the port (Task 8).
+    pub fn user_verification_received(&self) -> Option<bool> {
+        self.user_verification_received.get()
     }
 }
 
@@ -294,8 +304,10 @@ impl Fido2Backend for FakeFido2Backend {
         _mapper: &MapperHandle,
         _metadata: KeyMetadata,
         _selection: Fido2DeviceSelection,
+        user_verification: bool,
     ) -> Result<(), DomainError> {
         self.log.borrow_mut().push("enroll_fido2_key".to_string());
+        self.user_verification_received.set(Some(user_verification));
         if self.fail_at == Some("enroll_fido2_key") {
             return Err(DomainError::AdapterFailure(
                 "enroll_fido2_key failed (test)".to_string(),

@@ -74,7 +74,7 @@ development_status:
   epic-4: in-progress
   4-1-view-a-tombs-enrolled-keys-info: done
   4-2-real-progress-reporting-for-create-resize: done
-  4-3-enroll-a-fido2-key-with-user-verification: backlog
+  4-3-enroll-a-fido2-key-with-user-verification: done
   4-4-per-tomb-bind-hooks-exec-hooks-automation: backlog
   4-5-close-every-open-tomb-close-all: backlog
   4-6-emergency-slam: backlog
@@ -140,4 +140,8 @@ action_items:
   - epic: 3
     action: "Exercise release automation end-to-end against a real tag at least once before treating it as production-ready"
     owner: "LeReverandNox"
+    status: open
+  - epic: 3
+    action: "BUG (found during Story 4.3's hardware run, 2026-07-27): resize::run's tier-2 grow-only check (resize.rs's grow_open_mapping, fs.filesystem_size comparison) fails to reject a same-size resize request on a small (32 MiB) file-backed tomb — tests/hardware/main.rs's resize_rejects_a_shrink_request_and_leaves_the_tomb_untouched failed with 'expected DomainError::ResizeMustGrow, got Ok(())'. Root cause unconfirmed but suspected: mkfs.ext4 overhead on a near-minimum-size tomb makes the filesystem's own reported size close enough to the full backing-file size that new_size <= live_current_size no longer holds. Introduced in Story 3.2 (PR #29) — unrelated to Story 4.3's changes (neither resize.rs nor this test's assertions were touched by 4.3). Other 17/18 hardware tests passed."
+    owner: "unassigned"
     status: open
