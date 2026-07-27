@@ -52,6 +52,7 @@ fn create_file_backed_fires_all_four_stages_in_real_order() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &|stage| recorder.borrow_mut().push(stage),
         &luks,
@@ -90,6 +91,7 @@ fn create_device_backed_never_fires_allocating_backing_file() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &|stage| recorder.borrow_mut().push(stage),
         &luks,
@@ -198,6 +200,7 @@ fn create_does_not_fire_creating_filesystem_when_enroll_fails() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &|stage| recorder.borrow_mut().push(stage),
         &luks,

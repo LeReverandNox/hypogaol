@@ -108,6 +108,7 @@ fn create_a_file_backed_tomb_is_independently_unlockable_via_bare_cryptsetup() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &adapter,
@@ -189,6 +190,7 @@ fn create_a_device_backed_tomb_leaves_headroom_for_a_later_resize() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &adapter,
@@ -545,6 +547,7 @@ fn unlock_mounts_a_file_backed_tomb_with_a_readable_writable_filesystem() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &adapter,
@@ -608,6 +611,7 @@ fn unlock_works_unmodified_against_a_device_backed_tomb() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &adapter,
@@ -675,6 +679,7 @@ fn unlock_read_only_rejects_writes_at_both_layers_including_remount() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &adapter,
@@ -775,6 +780,7 @@ fn unlock_read_only_rejects_writes_at_both_layers_against_a_device_backed_tomb()
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &adapter,
@@ -876,6 +882,7 @@ fn unlock_falls_back_to_a_suffixed_mount_point_on_a_basename_collision() {
         let result = create::run(
             target,
             Filesystem::Ext4,
+            false,
             Fido2DeviceSelection::Interactive,
             &no_progress,
             &adapter,
@@ -984,6 +991,7 @@ fn enroll_adds_an_independent_second_key_without_corrupting_the_primary() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &adapter,
@@ -1000,6 +1008,7 @@ fn enroll_adds_an_independent_second_key_without_corrupting_the_primary() {
         &path,
         "backup".to_string(),
         Fido2DeviceSelection::Interactive,
+        false,
         &adapter,
         &adapter,
         &adapter,
@@ -1099,6 +1108,7 @@ fn revoke_removes_a_key_without_affecting_others() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &adapter,
@@ -1115,6 +1125,7 @@ fn revoke_removes_a_key_without_affecting_others() {
         &path,
         "backup".to_string(),
         Fido2DeviceSelection::Interactive,
+        false,
         &adapter,
         &adapter,
         &adapter,
@@ -1176,6 +1187,7 @@ fn revoke_aborts_on_the_last_remaining_key() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &adapter,
@@ -1235,6 +1247,7 @@ fn close_unmounts_and_relocks_a_file_backed_tomb_allowing_a_clean_repeat_unlock(
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &adapter,
@@ -1326,6 +1339,7 @@ fn close_works_unmodified_against_a_device_backed_tomb() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &adapter,
@@ -1405,6 +1419,7 @@ fn resize_grows_a_file_backed_tomb_preserving_data_and_keys() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &adapter,
@@ -1521,6 +1536,7 @@ fn resize_grows_a_device_backed_tomb_into_its_own_headroom() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &adapter,
@@ -1619,6 +1635,7 @@ fn resize_rejects_a_request_exceeding_the_raw_devices_capacity() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &adapter,
@@ -1687,6 +1704,7 @@ fn resize_rejects_a_shrink_request_and_leaves_the_tomb_untouched() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &adapter,
@@ -1758,6 +1776,7 @@ fn info_lists_enrolled_keys_without_unlocking() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &adapter,
@@ -1822,6 +1841,7 @@ fn info_works_unmodified_against_a_device_backed_tomb() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &adapter,

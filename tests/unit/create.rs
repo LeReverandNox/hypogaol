@@ -48,6 +48,7 @@ fn refuses_before_touching_anything_if_destination_already_exists() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -82,6 +83,7 @@ fn refuses_a_file_backed_size_below_the_minimum_before_touching_any_port() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -119,6 +121,7 @@ fn happy_path_runs_every_port_call_once_in_order() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -166,6 +169,7 @@ fn enroll_failure_closes_the_mapping_and_removes_the_backing_file() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -211,6 +215,7 @@ fn mkfs_failure_closes_the_mapping_and_removes_the_backing_file() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -251,6 +256,7 @@ fn bootstrap_format_and_open_failure_removes_the_backing_file_without_closing_a_
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -293,6 +299,7 @@ fn device_happy_path_with_no_size_given_uses_the_full_capacity() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -336,6 +343,7 @@ fn device_happy_path_with_a_size_smaller_than_capacity_uses_the_requested_size()
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -381,6 +389,7 @@ fn device_with_no_size_given_and_capacity_below_the_minimum_refuses_before_any_m
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -424,6 +433,7 @@ fn device_with_existing_luks2_header_refuses_even_when_confirmed() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -462,6 +472,7 @@ fn device_without_confirmation_refuses_even_with_no_header() {
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -498,6 +509,7 @@ fn device_with_requested_size_greater_than_capacity_refuses_before_any_mutating_
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -548,6 +560,7 @@ fn device_branch_failure_closes_the_mapping_without_removing_any_backing_file() 
     let result = create::run(
         target,
         Filesystem::Ext4,
+        false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
