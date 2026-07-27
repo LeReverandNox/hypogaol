@@ -1883,6 +1883,25 @@ mod tests {
     }
 
     #[test]
+    fn fido2_verification_args_true_disables_client_pin() {
+        assert_eq!(
+            fido2_verification_args(true),
+            vec![
+                "--fido2-with-user-verification=yes".to_string(),
+                "--fido2-with-client-pin=false".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn fido2_verification_args_false_leaves_client_pin_at_its_default() {
+        assert_eq!(
+            fido2_verification_args(false),
+            vec!["--fido2-with-user-verification=no".to_string()]
+        );
+    }
+
+    #[test]
     fn explicit_selection_requires_existing_when_needed() {
         let devices = [device("/dev/hidraw0")];
         let err = resolve_explicit_selection(&devices, Path::new("/dev/hidraw0"), None, true)
