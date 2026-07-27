@@ -4,7 +4,7 @@ baseline_commit: 088d063a93c2f919c5c1bc57112bed196514f6cb
 
 # Story 4.1: View a Tomb's Enrolled Keys (Info)
 
-Status: review
+Status: done
 
 ## Story
 
