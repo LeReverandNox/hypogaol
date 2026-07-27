@@ -20,11 +20,11 @@ so that I can check what's enrolled without unlocking the tomb.
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Add `domain::workflows::info` (AC #1, #2)
-  - [ ] Create `src/domain/workflows/info.rs`, mirroring `revoke.rs`'s shape (`src/domain/workflows/revoke.rs:15-21`): `pub fn run(path: &Path, luks: &dyn LuksBackend, fido2: &dyn Fido2Backend, fs: &dyn FilesystemBackend) -> Result<Vec<KeyslotInfo>, DomainError>`. Body is exactly `preflight::check(luks, fido2, fs)?;` followed by `luks.list_fido2_keyslots(path)` — no other port calls. `fido2`/`fs` are unused beyond `preflight::check`, same documented pattern `revoke.rs`'s doc comment already uses for its own unused params (AD-4's uniform three-port gate).
-  - [ ] `KeyslotInfo` (`src/domain/types.rs:56-59`) already carries only `keyslot`/`key_label` — no header/token schema change needed, and no risk of leaking `credential_id`/`created_at`/`filesystem` since they aren't fields on this struct at all (AC #2 is satisfied by the existing type, not by any new filtering logic).
-  - [ ] `LuksBackend::list_fido2_keyslots` (`src/ports/luks_backend.rs:30`) already reads fresh from the header via `cryptsetup luksDump --dump-json-metadata` (`src/adapters/exec/mod.rs:917-957`, `dump_json_metadata`) with no `luksOpen`/mount call anywhere in that path — AC #1's "without performing any unlock/open call" is already true of the existing adapter method; this task only wires a new workflow entry point to it, it does not change the adapter.
-  - [ ] Register the new module in `src/domain/workflows/mod.rs:1-6` (add `pub mod info;` alphabetically before `pub mod resize;`).
+- [x] Task 1: Add `domain::workflows::info` (AC #1, #2)
+  - [x] Create `src/domain/workflows/info.rs`, mirroring `revoke.rs`'s shape (`src/domain/workflows/revoke.rs:15-21`): `pub fn run(path: &Path, luks: &dyn LuksBackend, fido2: &dyn Fido2Backend, fs: &dyn FilesystemBackend) -> Result<Vec<KeyslotInfo>, DomainError>`. Body is exactly `preflight::check(luks, fido2, fs)?;` followed by `luks.list_fido2_keyslots(path)` — no other port calls. `fido2`/`fs` are unused beyond `preflight::check`, same documented pattern `revoke.rs`'s doc comment already uses for its own unused params (AD-4's uniform three-port gate).
+  - [x] `KeyslotInfo` (`src/domain/types.rs:56-59`) already carries only `keyslot`/`key_label` — no header/token schema change needed, and no risk of leaking `credential_id`/`created_at`/`filesystem` since they aren't fields on this struct at all (AC #2 is satisfied by the existing type, not by any new filtering logic).
+  - [x] `LuksBackend::list_fido2_keyslots` (`src/ports/luks_backend.rs:30`) already reads fresh from the header via `cryptsetup luksDump --dump-json-metadata` (`src/adapters/exec/mod.rs:917-957`, `dump_json_metadata`) with no `luksOpen`/mount call anywhere in that path — AC #1's "without performing any unlock/open call" is already true of the existing adapter method; this task only wires a new workflow entry point to it, it does not change the adapter.
+  - [x] Register the new module in `src/domain/workflows/mod.rs:1-6` (add `pub mod info;` alphabetically before `pub mod resize;`).
 
 - [ ] Task 2: Wire the `info` CLI subcommand (AC #1, #3)
   - [ ] In `src/cli/main.rs`, add an `Info` variant to `Commands` (after `Resize`, `src/cli/main.rs:87-97`), taking one positional `path: PathBuf` field with `#[arg(allow_hyphen_values = true)]`, same shape as `Close`/`Resize`. Doc-comment: `/// Show a tomb's technical info, including its enrolled FIDO2 keys`.
@@ -102,4 +102,9 @@ Unit tests against the shared fakes in `tests/unit/fakes.rs` (no fake changes ne
 
 ### Completion Notes List
 
+- Task 1: Added `domain::workflows::info::run`, mirroring `revoke.rs`'s preflight-then-`list_fido2_keyslots` shape. No new port method, type, or `DomainError` variant. Registered `pub mod info;` in `workflows/mod.rs`. `cargo build` passes.
+
 ### File List
+
+- src/domain/workflows/info.rs (NEW)
+- src/domain/workflows/mod.rs (UPDATE)
