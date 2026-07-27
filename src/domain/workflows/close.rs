@@ -110,24 +110,32 @@ fn run_hooks_step(
         }
     }
 
-    teardown_bind_hooks(&mountpoint, fs);
+    teardown_bind_hooks(&mountpoint, warn, fs);
 
     Ok(())
 }
 
 /// Re-reads and re-parses `bind-hooks` from the still-live `mountpoint`,
-/// unmounting each resolvable entry's destination. Individual failures are
+/// unmounting each resolvable entry's destination. Per-entry failures are
 /// ignored (an entry already unmounted, or one that fails containment on
 /// re-check, is simply skipped) and never warned about — teardown failures
-/// here are expected/benign, unlike `unlock`'s own bind-hooks warnings.
-fn teardown_bind_hooks(mountpoint: &Path, fs: &dyn FilesystemBackend) {
+/// here are expected/benign, unlike `unlock`'s own bind-hooks warnings. A
+/// whole-file read failure is different: it silently disables every entry at
+/// once, so unlike per-entry teardown failures, it does warn.
+fn teardown_bind_hooks(mountpoint: &Path, warn: &dyn Fn(HookWarning), fs: &dyn FilesystemBackend) {
     let bind_hooks_path = mountpoint.join("bind-hooks");
     if !fs.path_exists(&bind_hooks_path) {
         return;
     }
 
-    let Ok(content) = std::fs::read_to_string(&bind_hooks_path) else {
-        return;
+    let content = match std::fs::read_to_string(&bind_hooks_path) {
+        Ok(content) => content,
+        Err(_) => {
+            warn(HookWarning::BindHooksFileUnreadable {
+                path: bind_hooks_path,
+            });
+            return;
+        }
     };
 
     // `resolve_bind_hook_entry` needs a home directory to resolve `dest`

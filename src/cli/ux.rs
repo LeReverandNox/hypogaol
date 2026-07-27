@@ -123,6 +123,10 @@ pub fn translate_hook_warning(w: &HookWarning) -> String {
                 path.display()
             ),
         },
+        HookWarning::BindHooksFileUnreadable { path } => format!(
+            "Couldn't read this tomb's bind-hooks file ({}) — skipping all bind-hooks entries.",
+            path.display()
+        ),
     }
 }
 

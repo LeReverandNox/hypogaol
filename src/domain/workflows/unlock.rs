@@ -136,8 +136,14 @@ fn apply_bind_hooks(
         return applied;
     }
 
-    let Ok(content) = std::fs::read_to_string(&bind_hooks_path) else {
-        return applied;
+    let content = match std::fs::read_to_string(&bind_hooks_path) {
+        Ok(content) => content,
+        Err(_) => {
+            warn(HookWarning::BindHooksFileUnreadable {
+                path: bind_hooks_path,
+            });
+            return applied;
+        }
     };
 
     for entry in hooks::parse_bind_hooks(&content) {

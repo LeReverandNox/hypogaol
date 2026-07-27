@@ -47,6 +47,9 @@ pub enum HookWarning {
         path: PathBuf,
         exit_code: Option<i32>,
     },
+    BindHooksFileUnreadable {
+        path: PathBuf,
+    },
 }
 
 /// Why an `exec-hooks` file was rejected outright (AC #3/#4) — a hard error,

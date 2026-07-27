@@ -333,6 +333,11 @@ fn open_warns_but_continues_when_exec_hooks_exits_nonzero() {
     let exec_hooks_path = mountpoint.0.join("exec-hooks");
     std::fs::write(&exec_hooks_path, "#!/bin/sh\nexit 3\n")
         .expect("failed to write exec-hooks fixture");
+    // `with_path_exists(true)` below makes `bind-hooks` appear to exist too —
+    // give it a real (empty) file so the read actually succeeds, keeping this
+    // test's warnings assertion scoped to exec-hooks only.
+    std::fs::write(mountpoint.0.join("bind-hooks"), "")
+        .expect("failed to write empty bind-hooks fixture");
 
     let fs = FakeFilesystemBackend::passing()
         .with_log(log.clone())
