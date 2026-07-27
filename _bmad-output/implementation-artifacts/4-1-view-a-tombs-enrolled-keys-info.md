@@ -33,9 +33,9 @@ so that I can check what's enrolled without unlocking the tomb.
   - [x] Add `Commands::Info { path } => run_info(path)` to the `match` in `run()` (`src/cli/main.rs:487-540`).
   - [x] No target-type branching anywhere in this path (`info::run` takes one `path` for both file- and device-backed targets, same as `revoke`/`close`) — AC #3 is satisfied by construction, not by an explicit check.
 
-- [ ] Task 3: Marker-bleed check for any new failure text (AC: none directly — CAP-5/NFR3 quality bar, flagged repeatedly by the Epic 2/3 retros as the most-repeated bug class in this codebase)
-  - [ ] This story introduces no new `AdapterFailure` string shape — a failed `cryptsetup luksDump` on a non-existent or non-LUKS2 path already falls through `dump_json_metadata`'s existing error path (reused unmodified by `list_fido2_keyslots`) into the existing generic `"cryptsetup"` bucket in `src/cli/ux.rs`. Confirm this holds once Task 1/2 land rather than assuming it; if `luksDump` against a bad path produces a distinct string that doesn't already match an existing bucket, add a dedicated branch ordered before the generic ones, following the exact precedent of every prior story's marker-bleed fix.
-  - [ ] Do not add a new `DomainError` variant for this story — `info::run` has no new failure mode beyond preflight failure and whatever `list_fido2_keyslots` already returns (both already-typed).
+- [x] Task 3: Marker-bleed check for any new failure text (AC: none directly — CAP-5/NFR3 quality bar, flagged repeatedly by the Epic 2/3 retros as the most-repeated bug class in this codebase)
+  - [x] This story introduces no new `AdapterFailure` string shape — a failed `cryptsetup luksDump` on a non-existent or non-LUKS2 path already falls through `dump_json_metadata`'s existing error path (reused unmodified by `list_fido2_keyslots`) into the existing dedicated `"luksDump"` bucket in `src/cli/ux.rs:102` (shared with `enroll`/`revoke`, not the generic `"cryptsetup"` bucket). Confirmed by inspection: every `dump_json_metadata` error string (`src/adapters/exec/mod.rs:324-343`) contains the literal substring `"luksDump"`, so no new branch is needed.
+  - [x] Do not add a new `DomainError` variant for this story — `info::run` has no new failure mode beyond preflight failure and whatever `list_fido2_keyslots` already returns (both already-typed).
 
 - [ ] Task 4: Unit tests (AC #1, #2)
   - [ ] New `tests/unit/info.rs`, registered in `tests/unit/main.rs:1-13` (alphabetically before `keyslot_guard`). Mirror `tests/unit/revoke.rs`'s fakes-based style:
@@ -104,6 +104,7 @@ Unit tests against the shared fakes in `tests/unit/fakes.rs` (no fake changes ne
 
 - Task 1: Added `domain::workflows::info::run`, mirroring `revoke.rs`'s preflight-then-`list_fido2_keyslots` shape. No new port method, type, or `DomainError` variant. Registered `pub mod info;` in `workflows/mod.rs`. `cargo build` passes.
 - Task 2: Wired `Commands::Info { path }` and `run_info`, mirroring `run_close`'s preflight-then-call-then-report shape. Output prints only `key_label` per keyslot (AC #2), no target-type branching (AC #3). `cargo build` passes.
+- Task 3: Verified by inspection (no code change) — `dump_json_metadata`'s error strings all contain `"luksDump"`, already routed by the existing dedicated bucket in `src/cli/ux.rs:102`; no marker-bleed risk introduced.
 
 ### File List
 
