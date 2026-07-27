@@ -157,7 +157,15 @@ fn bootstrap_and_provision(
     // otherwise a mid-flow failure leaks an open `/dev/mapper/vault-*`
     // mapping indefinitely, same as this story's post-review hardware-run fix
     // for the happy path, just extended to the failure paths too.
-    let result = finish_provisioning(&mapper, filesystem, fido2_selection, progress, luks, fido2, fs);
+    let result = finish_provisioning(
+        &mapper,
+        filesystem,
+        fido2_selection,
+        progress,
+        luks,
+        fido2,
+        fs,
+    );
     match result {
         Ok(()) => luks.close(&mapper),
         Err(err) => {

@@ -1431,7 +1431,14 @@ fn resize_grows_a_file_backed_tomb_preserving_data_and_keys() {
     assert!(result.is_ok(), "close::run failed: {result:?}");
 
     println!("Resizing the tomb — touch the key when prompted (re-authenticates the grow).");
-    let result = resize::run(&path, grown_size, &no_progress, &adapter, &adapter, &adapter);
+    let result = resize::run(
+        &path,
+        grown_size,
+        &no_progress,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
     assert!(result.is_ok(), "resize::run failed: {result:?}");
 
     let backing_len = std::fs::metadata(&path)
@@ -1523,7 +1530,14 @@ fn resize_grows_a_device_backed_tomb_into_its_own_headroom() {
     assert!(result.is_ok(), "create::run failed: {result:?}");
 
     println!("Resizing into the device's headroom — touch the key when prompted.");
-    let result = resize::run(&loop_device.path, grown_size, &no_progress, &adapter, &adapter, &adapter);
+    let result = resize::run(
+        &loop_device.path,
+        grown_size,
+        &no_progress,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
     assert!(result.is_ok(), "resize::run failed: {result:?}");
 
     // The raw loop device's own geometry must never change (resize never
@@ -1684,7 +1698,14 @@ fn resize_rejects_a_shrink_request_and_leaves_the_tomb_untouched() {
     println!(
         "Requesting a same-size resize (grow-only rejection) — expecting a clean refusal, no key touch needed."
     );
-    let result = resize::run(&path, initial_size, &no_progress, &adapter, &adapter, &adapter);
+    let result = resize::run(
+        &path,
+        initial_size,
+        &no_progress,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
     assert!(
         matches!(
             result,
