@@ -1,7 +1,8 @@
 use std::path::PathBuf;
 
-use tomb_fido2::cli::ux::translate;
+use tomb_fido2::cli::ux::{translate, translate_create_stage, translate_resize_stage};
 use tomb_fido2::domain::errors::DomainError;
+use tomb_fido2::domain::progress::{CreateStage, ResizeStage};
 
 const JARGON_MARKERS: [&str; 4] = [
     "cryptsetup",
@@ -492,4 +493,51 @@ fn translates_adapter_failure_unknown_category_falls_back_gracefully() {
     let message = translate(&err);
     assert!(!message.is_empty());
     assert!(message.contains("some completely novel failure string"));
+}
+
+#[test]
+fn translate_create_stage_covers_every_variant_with_a_distinct_no_jargon_message() {
+    let stages = [
+        CreateStage::AllocatingBackingFile,
+        CreateStage::FormattingLuks2,
+        CreateStage::EnrollingFido2Key,
+        CreateStage::CreatingFilesystem,
+    ];
+    let messages: Vec<&str> = stages.iter().map(translate_create_stage).collect();
+
+    for message in messages.iter().copied() {
+        assert_no_jargon(message);
+    }
+
+    let mut unique = messages.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(
+        unique.len(),
+        messages.len(),
+        "expected every CreateStage variant to translate to a distinct message, got {messages:?}"
+    );
+}
+
+#[test]
+fn translate_resize_stage_covers_every_variant_with_a_distinct_no_jargon_message() {
+    let stages = [
+        ResizeStage::GrowingBackingFile,
+        ResizeStage::ResizingLuks2Mapping,
+        ResizeStage::GrowingFilesystem,
+    ];
+    let messages: Vec<&str> = stages.iter().map(translate_resize_stage).collect();
+
+    for message in messages.iter().copied() {
+        assert_no_jargon(message);
+    }
+
+    let mut unique = messages.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(
+        unique.len(),
+        messages.len(),
+        "expected every ResizeStage variant to translate to a distinct message, got {messages:?}"
+    );
 }

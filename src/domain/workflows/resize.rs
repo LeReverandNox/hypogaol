@@ -18,6 +18,12 @@ use crate::ports::luks_backend::LuksBackend;
 /// storage grows first, then the LUKS2 mapping, then the filesystem —
 /// reversing any of these risks growing a filesystem onto space the LUKS
 /// mapping doesn't have yet.
+///
+/// `progress` fires at each real stage boundary in that same order:
+/// `GrowingBackingFile` (file-backed targets only — a device-backed target
+/// never fires this stage) → `ResizingLuks2Mapping` → `GrowingFilesystem`. A
+/// stage only fires once its preceding port call has actually succeeded; if
+/// any port call returns `Err`, no later stage in this list fires.
 pub fn run(
     path: &Path,
     new_size: u64,

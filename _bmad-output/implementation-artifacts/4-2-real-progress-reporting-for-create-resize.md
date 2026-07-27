@@ -4,7 +4,7 @@ baseline_commit: 5afa585bfac5a55a72a2981ab8e3d31c675e67cd
 
 # Story 4.2: Real Progress Reporting for Create & Resize
 
-Status: review
+Status: done
 
 ## Story
 
@@ -87,6 +87,13 @@ so that I have visibility into a long-running operation instead of one message b
 
 - [x] Task 8: Marker-bleed check (AC: none directly — CAP-5/NFR3 quality bar, repeatedly flagged by the Epic 2/3 retros as the most-repeated bug class in this codebase)
   - [x] Confirm by inspection that this story introduces no new `AdapterFailure` string and no new `DomainError` variant — `translate_create_stage`/`translate_resize_stage` operate on the new `CreateStage`/`ResizeStage` enums directly, entirely outside the `translate`/`translate_adapter_failure` marker-matching path (`ux.rs:17-288`), so there is no bucket to collide with.
+
+### Review Findings
+
+- [x] [Review][Patch] Progress callback panic (e.g. broken stdout pipe) mid-transaction skips explicit mapper cleanup — resolved as: make the two CLI progress closures in `main.rs` panic-proof (non-panicking stdout write) instead of using `println!` [src/cli/main.rs:294, src/cli/main.rs:232]
+- [x] [Review][Patch] No unit test coverage for `translate_create_stage`/`translate_resize_stage` [src/cli/ux.rs:75-97]
+- [x] [Review][Patch] No test proves a stage's progress message doesn't fire for work that never completed — all 4 new tests use only passing fakes [tests/unit/progress.rs]
+- [x] [Review][Patch] `create::run`/`resize::run` doc comments don't document when/why each stage does or doesn't fire [src/domain/workflows/create.rs:34, src/domain/workflows/resize.rs:21]
 
 ## Dev Notes
 
