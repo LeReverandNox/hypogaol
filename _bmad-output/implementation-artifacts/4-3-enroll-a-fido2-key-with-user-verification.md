@@ -4,7 +4,7 @@ baseline_commit: 7488f539147e1139e21cc1bcb7804eeb25053908
 
 # Story 4.3: Enroll a FIDO2 Key with User-Verification
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -21,50 +21,50 @@ so that unlocking with this key demands proof of physical identity beyond mere t
 
 ## Tasks / Subtasks
 
-- [ ] Task 1: Add `user_verification: bool` to the `Fido2Backend::enroll_fido2_key` port (AC #1, #2, #3)
-  - [ ] `src/ports/fido2_backend.rs:39-44` — add `user_verification: bool` as the 4th parameter to `enroll_fido2_key`, after `selection`. Update the doc comment to note it maps to `--fido2-with-user-verification=yes|no` (AD-16).
-  - [ ] No change to `Fido2DeviceSelection` — UV is orthogonal to device selection, never embedded in it.
+- [x] Task 1: Add `user_verification: bool` to the `Fido2Backend::enroll_fido2_key` port (AC #1, #2, #3)
+  - [x] `src/ports/fido2_backend.rs:39-44` — add `user_verification: bool` as the 4th parameter to `enroll_fido2_key`, after `selection`. Update the doc comment to note it maps to `--fido2-with-user-verification=yes|no` (AD-16).
+  - [x] No change to `Fido2DeviceSelection` — UV is orthogonal to device selection, never embedded in it.
 
-- [ ] Task 2: Wire the flag into `ExecAdapter`'s `systemd-cryptenroll` invocation (AC #1, #2)
-  - [ ] `src/adapters/exec/mod.rs:1150-1158` — add `user_verification: bool` to `enroll_fido2_key`'s signature (matching Task 1's port change).
-  - [ ] Add `.arg(format!("--fido2-with-user-verification={}", if user_verification { "yes" } else { "no" }))` to **both** `Command::new("systemd-cryptenroll")` branches (`mod.rs:1218-1222` — the passphrase/`--unlock-key-file` branch — and `mod.rs:1249-1253` — the `--unlock-fido2-device` branch). Always pass the flag explicitly (never omit it), matching AD-16's "passed to `systemd-cryptenroll` as `--fido2-with-user-verification=yes|no`" wording — do not rely on the tool's own default.
-  - [ ] No change to token JSON metadata (`write_fido2_token_metadata`) — UV lives inside the FIDO2 credential itself, not a token field (architecture: "Token JSON metadata ... unchanged by Epic 4").
+- [x] Task 2: Wire the flag into `ExecAdapter`'s `systemd-cryptenroll` invocation (AC #1, #2)
+  - [x] `src/adapters/exec/mod.rs:1150-1158` — add `user_verification: bool` to `enroll_fido2_key`'s signature (matching Task 1's port change).
+  - [x] Add `.arg(format!("--fido2-with-user-verification={}", if user_verification { "yes" } else { "no" }))` to **both** `Command::new("systemd-cryptenroll")` branches (`mod.rs:1218-1222` — the passphrase/`--unlock-key-file` branch — and `mod.rs:1249-1253` — the `--unlock-fido2-device` branch). Always pass the flag explicitly (never omit it), matching AD-16's "passed to `systemd-cryptenroll` as `--fido2-with-user-verification=yes|no`" wording — do not rely on the tool's own default.
+  - [x] No change to token JSON metadata (`write_fido2_token_metadata`) — UV lives inside the FIDO2 credential itself, not a token field (architecture: "Token JSON metadata ... unchanged by Epic 4").
 
-- [ ] Task 3: Update `FakeFido2Backend` to accept and record the new parameter (AC #1, #2, #3 — test support)
-  - [ ] `tests/unit/fakes.rs:253-306` — add `user_verification_received: Cell<Option<bool>>` field (needs `use std::cell::Cell;` if not already imported — check the file's existing imports first). Initialize to `Cell::new(None)` in both `passing()` and `failing()`.
-  - [ ] `enroll_fido2_key`'s signature gains `user_verification: bool`; store it via `self.user_verification_received.set(Some(user_verification));` before the existing log-push/fail-at logic.
-  - [ ] Add `pub fn user_verification_received(&self) -> Option<bool>` getter, returning `self.user_verification_received.get()`.
+- [x] Task 3: Update `FakeFido2Backend` to accept and record the new parameter (AC #1, #2, #3 — test support)
+  - [x] `tests/unit/fakes.rs:253-306` — add `user_verification_received: Cell<Option<bool>>` field (needs `use std::cell::Cell;` if not already imported — check the file's existing imports first). Initialize to `Cell::new(None)` in both `passing()` and `failing()`.
+  - [x] `enroll_fido2_key`'s signature gains `user_verification: bool`; store it via `self.user_verification_received.set(Some(user_verification));` before the existing log-push/fail-at logic.
+  - [x] Add `pub fn user_verification_received(&self) -> Option<bool>` getter, returning `self.user_verification_received.get()`.
 
-- [ ] Task 4: Thread `user_verification` through `domain::workflows::enroll` (AC #1, #2)
-  - [ ] `src/domain/workflows/enroll.rs:17-24` — add `user_verification: bool` to `run`'s signature, placed immediately after `selection` and before the three ports (mirrors this codebase's established "workflow-specific args first, ports last" convention — the same placement `create`/`resize`'s `progress` param uses immediately before `luks`, per Story 4.2's Dev Notes).
-  - [ ] `enroll.rs:40` — pass `user_verification` through to `fido2.enroll_fido2_key(&mapper, metadata, selection, user_verification)`.
+- [x] Task 4: Thread `user_verification` through `domain::workflows::enroll` (AC #1, #2)
+  - [x] `src/domain/workflows/enroll.rs:17-24` — add `user_verification: bool` to `run`'s signature, placed immediately after `selection` and before the three ports (mirrors this codebase's established "workflow-specific args first, ports last" convention — the same placement `create`/`resize`'s `progress` param uses immediately before `luks`, per Story 4.2's Dev Notes).
+  - [x] `enroll.rs:40` — pass `user_verification` through to `fido2.enroll_fido2_key(&mapper, metadata, selection, user_verification)`.
 
-- [ ] Task 5: Thread `user_verification` through `domain::workflows::create` (AC #3)
-  - [ ] `src/domain/workflows/create.rs:40-48` — add `user_verification: bool` to `run`'s signature, placed **immediately after `filesystem` and before `fido2_selection`** (AD-16: "a sibling to `CreateTarget`/`filesystem`" — grouping the two enrollment-behavior params, `user_verification` and `fido2_selection`, together while keeping `progress` as the last non-port argument immediately before `luks`, per the existing convention). Full new order: `target, filesystem, user_verification, fido2_selection, progress, luks, fido2, fs`.
-  - [ ] Thread `user_verification` through both call sites of `bootstrap_and_provision` (`create.rs:72-81` and `create.rs:134-143`) and its own signature (`create.rs:148-157`), same parameter position.
-  - [ ] Thread `user_verification` through to `finish_provisioning`'s signature (`create.rs:184-192`) and its call site (`create.rs:166-174`), same position.
-  - [ ] `finish_provisioning` (`create.rs:205`) — pass it to `fido2.enroll_fido2_key(mapper, metadata, fido2_selection, user_verification)`.
+- [x] Task 5: Thread `user_verification` through `domain::workflows::create` (AC #3)
+  - [x] `src/domain/workflows/create.rs:40-48` — add `user_verification: bool` to `run`'s signature, placed **immediately after `filesystem` and before `fido2_selection`** (AD-16: "a sibling to `CreateTarget`/`filesystem`" — grouping the two enrollment-behavior params, `user_verification` and `fido2_selection`, together while keeping `progress` as the last non-port argument immediately before `luks`, per the existing convention). Full new order: `target, filesystem, user_verification, fido2_selection, progress, luks, fido2, fs`.
+  - [x] Thread `user_verification` through both call sites of `bootstrap_and_provision` (`create.rs:72-81` and `create.rs:134-143`) and its own signature (`create.rs:148-157`), same parameter position.
+  - [x] Thread `user_verification` through to `finish_provisioning`'s signature (`create.rs:184-192`) and its call site (`create.rs:166-174`), same position.
+  - [x] `finish_provisioning` (`create.rs:205`) — pass it to `fido2.enroll_fido2_key(mapper, metadata, fido2_selection, user_verification)`.
 
-- [ ] Task 6: CLI — add `--user-verification` flag and wire it through (AC #1, #2, #3)
-  - [ ] `src/cli/main.rs`'s `Enroll` variant (`main.rs:50-69`) — add `#[arg(long)] user_verification: bool` (same bare-bool idiom as `Unlock`'s `read_only`, `main.rs:45-46`).
-  - [ ] `CreateMode::File` and `CreateMode::Device` (`main.rs:113-156`) — add the identical `#[arg(long)] user_verification: bool` field to both variants.
-  - [ ] `run_enroll` (`main.rs:370-387`) — add `user_verification: bool` parameter, pass through to `enroll::run(&path, label, fido2_selection, user_verification, &adapter, &adapter, &adapter)` (position matches Task 4's new signature).
-  - [ ] `run_create` (`main.rs:277-304`) — add `user_verification: bool` parameter (positioned to match Task 5's new `create::run` signature), pass through in the `create::run(...)` call.
-  - [ ] `run()`'s dispatch (`main.rs:532-586`): `Commands::Create { mode }`'s two arms destructure the new `user_verification` field and pass it to `run_create`; `Commands::Enroll { .. }` destructures it and passes it to `run_enroll`.
+- [x] Task 6: CLI — add `--user-verification` flag and wire it through (AC #1, #2, #3)
+  - [x] `src/cli/main.rs`'s `Enroll` variant (`main.rs:50-69`) — add `#[arg(long)] user_verification: bool` (same bare-bool idiom as `Unlock`'s `read_only`, `main.rs:45-46`).
+  - [x] `CreateMode::File` and `CreateMode::Device` (`main.rs:113-156`) — add the identical `#[arg(long)] user_verification: bool` field to both variants.
+  - [x] `run_enroll` (`main.rs:370-387`) — add `user_verification: bool` parameter, pass through to `enroll::run(&path, label, fido2_selection, user_verification, &adapter, &adapter, &adapter)` (position matches Task 4's new signature).
+  - [x] `run_create` (`main.rs:277-304`) — add `user_verification: bool` parameter (positioned to match Task 5's new `create::run` signature), pass through in the `create::run(...)` call.
+  - [x] `run()`'s dispatch (`main.rs:532-586`): `Commands::Create { mode }`'s two arms destructure the new `user_verification` field and pass it to `run_create`; `Commands::Enroll { .. }` destructures it and passes it to `run_enroll`.
 
-- [ ] Task 7: Update every existing `enroll::run`/`create::run` call site for the new parameter (mechanical, no behavior change)
-  - [ ] `enroll::run` call sites — add `false` (the pre-existing, unchanged-behavior default) in the new position: `tests/unit/enroll.rs` (3 call sites: lines ~38-45, ~72-79, ~93-100) and `tests/hardware/main.rs` (2 call sites — grep the file for exact locations before starting, do not assume unit-test line numbers apply).
-  - [ ] `create::run` call sites — add `false` in the new position: `tests/unit/create.rs` (13 call sites), `tests/unit/workflows.rs` (1 call site), `tests/unit/progress.rs` (3 call sites), `tests/hardware/main.rs` (18 call sites — grep for exact locations).
-  - [ ] `cargo build --tests` must be green (hardware tests are `#[ignore]`d but still must compile) before starting Task 8's new tests — get this mechanical pass fully done first, same discipline Story 4.2's Dev Notes called out for its own signature change.
+- [x] Task 7: Update every existing `enroll::run`/`create::run` call site for the new parameter (mechanical, no behavior change)
+  - [x] `enroll::run` call sites — add `false` (the pre-existing, unchanged-behavior default) in the new position: `tests/unit/enroll.rs` (3 call sites: lines ~38-45, ~72-79, ~93-100) and `tests/hardware/main.rs` (2 call sites — grep the file for exact locations before starting, do not assume unit-test line numbers apply).
+  - [x] `create::run` call sites — add `false` in the new position: `tests/unit/create.rs` (13 call sites), `tests/unit/workflows.rs` (1 call site), `tests/unit/progress.rs` (3 call sites), `tests/hardware/main.rs` (18 call sites — grep for exact locations).
+  - [x] `cargo build --tests` must be green (hardware tests are `#[ignore]`d but still must compile) before starting Task 8's new tests — get this mechanical pass fully done first, same discipline Story 4.2's Dev Notes called out for its own signature change.
 
-- [ ] Task 8: New tests proving UV threads correctly (AC #1, #2, #3)
-  - [ ] `tests/unit/enroll.rs` — new test `enroll_with_user_verification_true_passes_it_to_enroll_fido2_key`: call `enroll::run(...)` with `user_verification: true` against a `FakeFido2Backend::passing()`, then assert `fido2.user_verification_received() == Some(true)`.
-  - [ ] `tests/unit/enroll.rs` — new test `enroll_without_the_flag_passes_false_unchanged_from_epic_2`: call with `user_verification: false`, assert `fido2.user_verification_received() == Some(false)`.
-  - [ ] `tests/unit/create.rs` — new test `create_with_user_verification_true_threads_it_to_bootstrap_enrollment`: a `CreateTarget::File` happy path with `user_verification: true`, assert `fido2.user_verification_received() == Some(true)` — proves AC #3 (create's bootstrap enrollment is the same call path as standalone enroll, not a divergent one).
-  - [ ] No new tests needed for the `ExecAdapter`'s `--fido2-with-user-verification` arg construction beyond what's already covered by `tests/hardware/main.rs`'s existing enroll/create scenarios (AD-7: real-adapter behavior is hardware-gated, not unit-tested) — do not add a unit test that inspects `Command` args, since no existing test does that for any other `systemd-cryptenroll` flag either.
+- [x] Task 8: New tests proving UV threads correctly (AC #1, #2, #3)
+  - [x] `tests/unit/enroll.rs` — new test `enroll_with_user_verification_true_passes_it_to_enroll_fido2_key`: call `enroll::run(...)` with `user_verification: true` against a `FakeFido2Backend::passing()`, then assert `fido2.user_verification_received() == Some(true)`.
+  - [x] `tests/unit/enroll.rs` — new test `enroll_without_the_flag_passes_false_unchanged_from_epic_2`: call with `user_verification: false`, assert `fido2.user_verification_received() == Some(false)`.
+  - [x] `tests/unit/create.rs` — new test `create_with_user_verification_true_threads_it_to_bootstrap_enrollment`: a `CreateTarget::File` happy path with `user_verification: true`, assert `fido2.user_verification_received() == Some(true)` — proves AC #3 (create's bootstrap enrollment is the same call path as standalone enroll, not a divergent one).
+  - [x] No new tests needed for the `ExecAdapter`'s `--fido2-with-user-verification` arg construction beyond what's already covered by `tests/hardware/main.rs`'s existing enroll/create scenarios (AD-7: real-adapter behavior is hardware-gated, not unit-tested) — do not add a unit test that inspects `Command` args, since no existing test does that for any other `systemd-cryptenroll` flag either.
 
-- [ ] Task 9: Marker-bleed check (AC: none directly — CAP-5/NFR3 quality bar, repeatedly flagged by the Epic 2/3 retros as the most-repeated bug class in this codebase)
-  - [ ] Confirm by inspection that this story introduces no new `AdapterFailure` string and no new `DomainError` variant — `user_verification` is a plain `bool` threaded as a new parameter, entirely outside the `translate`/`translate_adapter_failure` marker-matching path in `cli/ux.rs`, so there is no bucket to collide with.
+- [x] Task 9: Marker-bleed check (AC: none directly — CAP-5/NFR3 quality bar, repeatedly flagged by the Epic 2/3 retros as the most-repeated bug class in this codebase)
+  - [x] Confirm by inspection that this story introduces no new `AdapterFailure` string and no new `DomainError` variant — `user_verification` is a plain `bool` threaded as a new parameter, entirely outside the `translate`/`translate_adapter_failure` marker-matching path in `cli/ux.rs`, so there is no bucket to collide with.
 
 ## Dev Notes
 
@@ -123,8 +123,36 @@ Unit tests against the shared fakes in `tests/unit/fakes.rs`, run in default CI.
 
 ### Agent Model Used
 
+Claude Sonnet 5 (claude-sonnet-5)
+
 ### Debug Log References
+
+None — no debugging required; implementation matched the story's Dev Notes and all tests passed on first run after each task's mechanical wiring.
 
 ### Completion Notes List
 
+- Task 1: Added `user_verification: bool` as `enroll_fido2_key`'s 4th port parameter, after `selection`, with doc comment noting the AD-16 mapping.
+- Task 2: Added `.arg(format!("--fido2-with-user-verification={}", if user_verification { "yes" } else { "no" }))` to both `ExecAdapter::enroll_fido2_key` `Command` branches — always passed explicitly, never relying on `systemd-cryptenroll`'s own default.
+- Task 3: `FakeFido2Backend` gained `user_verification_received: Cell<Option<bool>>` plus a getter, set inside `enroll_fido2_key` before the existing fail-at logic.
+- Task 4: `enroll::run` gained `user_verification: bool` immediately after `selection`, threaded straight into its `fido2.enroll_fido2_key` call.
+- Task 5: `create::run`/`bootstrap_and_provision`/`finish_provisioning` all gained `user_verification: bool` immediately after `filesystem` and before `fido2_selection`, per AD-16's grouping and the existing param-ordering convention; threaded to `finish_provisioning`'s `fido2.enroll_fido2_key` call.
+- Task 6: Added `#[arg(long)] user_verification: bool` to `Enroll`, `CreateMode::File`, and `CreateMode::Device`; wired through `run_enroll`/`run_create`/`run()`'s dispatch.
+- Task 7: Mechanically migrated all existing `enroll::run` (5 test call sites: 3 in `tests/unit/enroll.rs`, 2 in `tests/hardware/main.rs`) and `create::run` (35 test call sites: 13 in `tests/unit/create.rs`, 1 in `tests/unit/workflows.rs`, 3 in `tests/unit/progress.rs`, 18 in `tests/hardware/main.rs`) call sites with `false` in the new position. `cargo build --tests` confirmed green before Task 8.
+- Task 8: Added `enroll_with_user_verification_true_passes_it_to_enroll_fido2_key`, `enroll_without_the_flag_passes_false_unchanged_from_epic_2` (`tests/unit/enroll.rs`), and `create_with_user_verification_true_threads_it_to_bootstrap_enrollment` (`tests/unit/create.rs`). All pass.
+- Task 9: Inspected the diff — no new `AdapterFailure` string or `DomainError` variant introduced; `user_verification` is a plain `bool` outside the `cli::ux` marker-matching path.
+- Full regression: `cargo test --lib --tests` — 128 passed, 0 failed, 0 ignored (hardware tests remain `#[ignore]`d, unaffected in scope by this story per its Dev Notes).
+- Real-hardware verification of an actual UV-enrolled key requiring fingerprint/PIN at unlock (vs. touch-only) is a manual step for LeReverandNox — see the hardware test command below.
+
 ### File List
+
+- `src/ports/fido2_backend.rs` — UPDATE
+- `src/adapters/exec/mod.rs` — UPDATE
+- `src/domain/workflows/enroll.rs` — UPDATE
+- `src/domain/workflows/create.rs` — UPDATE
+- `src/cli/main.rs` — UPDATE
+- `tests/unit/fakes.rs` — UPDATE
+- `tests/unit/enroll.rs` — UPDATE
+- `tests/unit/create.rs` — UPDATE
+- `tests/unit/workflows.rs` — UPDATE
+- `tests/unit/progress.rs` — UPDATE
+- `tests/hardware/main.rs` — UPDATE
