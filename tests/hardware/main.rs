@@ -4,7 +4,7 @@ use std::process::Command;
 use tomb_fido2::adapters::exec::ExecAdapter;
 use tomb_fido2::domain::mapping_name;
 use tomb_fido2::domain::types::{CreateTarget, Filesystem};
-use tomb_fido2::domain::workflows::{close, create, enroll, resize, revoke, unlock};
+use tomb_fido2::domain::workflows::{close, create, enroll, info, resize, revoke, unlock};
 use tomb_fido2::ports::fido2_backend::Fido2DeviceSelection;
 use tomb_fido2::ports::luks_backend::LuksBackend;
 
@@ -1685,4 +1685,126 @@ fn resize_rejects_a_shrink_request_and_leaves_the_tomb_untouched() {
         .expect("unlock::run failed after a refused resize — the rejection must be a no-op");
     let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
     UnlockCleanup::new(mountpoint, name).run();
+}
+
+/// Concrete proof of Story 4.1, AC #1's "without performing any unlock/open
+/// call": create a file-backed tomb, then call `info::run` with no preceding
+/// `unlock::run`/mount anywhere in the test. If `info::run` accidentally
+/// required an open mapping, this would hang waiting for a touch prompt that
+/// never comes, or fail outright since nothing was ever mounted.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and a real FIDO2
+/// security key present, ready to be touched only once, for `create::run`'s
+/// own enrollment.
+#[test]
+#[ignore]
+fn info_lists_enrolled_keys_without_unlocking() {
+    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-info");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("tomb.img");
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::File {
+        path: path.clone(),
+        size: 64 * 1024 * 1024,
+    };
+
+    println!("Creating tomb — touch the key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    println!("Running info — no key touch expected, no unlock/open call made.");
+    let result = info::run(&path, &adapter, &adapter, &adapter);
+    let keyslots = result.expect("info::run failed");
+    assert_eq!(
+        keyslots.len(),
+        1,
+        "expected exactly one enrolled FIDO2 keyslot, got {keyslots:?}"
+    );
+    assert_eq!(
+        keyslots[0].key_label, "primary",
+        "expected the enrolled keyslot to be labeled \"primary\", got {keyslots:?}"
+    );
+}
+
+/// Proves Story 4.1, AC #3's "identical command works unmodified" against a
+/// raw device/partition instead of a loop-backed file — same shape as
+/// `info_lists_enrolled_keys_without_unlocking` above, just via the
+/// `LoopDevice` helper. No branch to test around: `info::run` takes one
+/// `path` for both target types, same as `revoke`/`close`.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and a real FIDO2
+/// security key present, ready to be touched only once, for `create::run`'s
+/// own enrollment.
+#[test]
+#[ignore]
+fn info_works_unmodified_against_a_device_backed_tomb() {
+    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-info-device");
+    let backing_file = dir.join("loop-backing.img");
+
+    // Must run before the backing file is deleted/recreated below — see
+    // `detach_stale`'s doc comment.
+    LoopDevice::detach_stale(&backing_file);
+
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+
+    let loop_capacity: u64 = 64 * 1024 * 1024;
+    {
+        let file = std::fs::File::create(&backing_file).expect("failed to create backing file");
+        file.set_len(loop_capacity)
+            .expect("failed to size backing file");
+    }
+
+    let loop_device = LoopDevice::attach(&backing_file);
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::Device {
+        path: loop_device.path.clone(),
+        size: None,
+        confirmed: true,
+    };
+
+    println!("Creating tomb — touch the key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    println!("Running info — no key touch expected, no unlock/open call made.");
+    let result = info::run(&loop_device.path, &adapter, &adapter, &adapter);
+    let keyslots = result.expect("info::run failed");
+    assert_eq!(
+        keyslots.len(),
+        1,
+        "expected exactly one enrolled FIDO2 keyslot, got {keyslots:?}"
+    );
+    assert_eq!(
+        keyslots[0].key_label, "primary",
+        "expected the enrolled keyslot to be labeled \"primary\", got {keyslots:?}"
+    );
+
+    let detach = Command::new("sudo")
+        .args(["losetup", "-d"])
+        .arg(&loop_device.path)
+        .output()
+        .expect("failed to run losetup -d");
+    assert!(
+        detach.status.success(),
+        "losetup -d failed: {}",
+        String::from_utf8_lossy(&detach.stderr)
+    );
 }

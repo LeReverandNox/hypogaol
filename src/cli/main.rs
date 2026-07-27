@@ -10,6 +10,7 @@ use crate::domain::types::{CreateTarget, Filesystem};
 use crate::domain::workflows::close;
 use crate::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
 use crate::domain::workflows::enroll;
+use crate::domain::workflows::info;
 use crate::domain::workflows::resize;
 use crate::domain::workflows::revoke;
 use crate::domain::workflows::unlock;
@@ -94,6 +95,13 @@ enum Commands {
         /// current size; resize is grow-only
         #[arg(long, value_parser = parse_size)]
         size: u64,
+    },
+
+    /// Show a tomb's technical info, including its enrolled FIDO2 keys
+    Info {
+        /// Path to the existing tomb's backing file or device
+        #[arg(allow_hyphen_values = true)]
+        path: PathBuf,
     },
 }
 
@@ -484,6 +492,34 @@ fn run_resize(path: PathBuf, new_size: u64) {
     }
 }
 
+/// Builds the adapter, runs `info::run`, and reports the result. Mirrors
+/// `run_close`'s shape: preflight check first, then the call, then report.
+/// No intro line is needed beforehand — unlike `unlock`/`resize`, info never
+/// touches a physical FIDO2 key, so there's no touch/PIN prompt to warn
+/// about. Only `key_label` per keyslot is printed (AC #2) — `credential_id`,
+/// `created_at`, and `filesystem` stay internal.
+fn run_info(path: PathBuf) {
+    let adapter = ExecAdapter::default();
+
+    if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
+        eprintln!("{}", ux::translate(&err));
+        std::process::exit(1);
+    }
+
+    match info::run(&path, &adapter, &adapter, &adapter) {
+        Ok(keyslots) => {
+            println!("Enrolled FIDO2 keys for {}:", path.display());
+            for keyslot in keyslots {
+                println!("  - {}", keyslot.key_label);
+            }
+        }
+        Err(err) => {
+            eprintln!("{}", ux::translate(&err));
+            std::process::exit(1);
+        }
+    }
+}
+
 pub fn run() {
     let cli = Cli::parse();
 
@@ -536,5 +572,6 @@ pub fn run() {
         Commands::Revoke { path, label } => run_revoke(path, label),
         Commands::Close { path } => run_close(path),
         Commands::Resize { path, size } => run_resize(path, size),
+        Commands::Info { path } => run_info(path),
     }
 }
