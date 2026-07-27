@@ -4,7 +4,7 @@ baseline_commit: fee50e397a35bbde77c1fc768de6c7976a092cd3
 
 # Story 4.4: Per-Tomb Bind-Hooks & Exec-Hooks Automation
 
-Status: review
+Status: done
 
 ## Story
 
@@ -248,3 +248,14 @@ None — no debugging required beyond the expected fallout of Task 9's mechanica
 - `tests/unit/main.rs` — UPDATE
 - `tests/hardware/main.rs` — UPDATE (call-site migration only, Task 9)
 - `README.md` — UPDATE (Hooks section ordering fix)
+
+### Review Findings
+
+- [x] [Review][Defer] TOCTOU gap between the exec-hooks guardrail check and execution — `hook_file_metadata` stats the file, then `run_hook` execs it by path with no fd-pinning in between; a local write-capable actor could swap the script in that window, defeating the "never runs code it didn't write itself, checked accordingly" guarantee. A real fix needs fd-based exec (open once, fstat the fd, exec via the fd — e.g. `fexecve` via unsafe libc). Deferred: matches this codebase's existing local-single-user trust model — nothing else here defends against a co-resident attacker with write access either. [src/domain/workflows/unlock.rs:70,85; src/domain/workflows/close.rs:79,87; src/adapters/exec/mod.rs:1853-1895]
+- [x] [Review][Patch] `close::run`'s retry self-healing is broken by the new hooks step: `run_hooks_step`'s `fs.mount_point_of(mapper)?` (close.rs:68) propagates a bare `"not currently mounted"` error via `?`, before the existing tolerant match on `fs.umount` (close.rs:48-52) ever runs. Retrying `close` after a prior close partially completed (umount succeeded, `luks.close` failed) now hard-fails instead of self-healing — reintroducing the exact bug the 2026-07-26 review finding fixed. The test suite doesn't catch it because the fake decouples `mount_point_of` from `umount`'s `not_currently_mounted` toggle, unlike the real adapter where `umount` calls `mount_point_of` internally. Fixed: wrapped the `run_hooks_step` call in the same tolerant match. [src/domain/workflows/close.rs:44-53]
+- [x] [Review][Patch] `unlock::run`'s hooks step leaves the tomb mounted and the LUKS mapping open with zero rollback when `fs.invoking_home_dir()`, `fs.hook_file_metadata()`, or `fs.run_hook()` themselves return `Err` (as opposed to the guardrail returning `Some(reason)`) — only the guardrail-rejection branch performs the bind-hooks-teardown/umount/luks.close rollback; these three bare `?`s bypass it entirely. Fixed: extracted a shared `rollback` closure and routed all three error paths through it. [src/domain/workflows/unlock.rs:57-112]
+- [x] [Review][Patch] An unreadable `bind-hooks` file (permission denied / IO error on `read_to_string`) silently disables every bind-hooks entry with zero warning, in both `unlock`'s `apply_bind_hooks` and `close`'s `teardown_bind_hooks` — every other skip path in this feature warns, this one doesn't. Fixed: added `HookWarning::BindHooksFileUnreadable`, surfaced from both call sites (`teardown_bind_hooks` now takes `warn`). [src/domain/workflows/unlock.rs:114-121; src/domain/workflows/close.rs:121-137; src/domain/hooks.rs; src/cli/ux.rs]
+- [x] [Review][Patch] `invoking_home_dir`'s `getent passwd` fallback parses the full stdout instead of just the first line, unlike `mount_point_of`'s identical, explicitly-commented safeguard a few dozen lines away in the same file — a multi-line `getent` result would silently corrupt the parsed home directory. Fixed: added the same `.lines().next()` guard. [src/adapters/exec/mod.rs:1919-1926]
+- [x] [Review][Patch] Duplicated `warn` closure literal in `run_unlock` and `run_close` — trivial to factor into one shared helper. Fixed: extracted `print_hook_warning`, used by both call sites. [src/cli/main.rs]
+- [x] [Review][Defer] Close-time bind-hooks teardown can leave a stale bind mount dangling under `$HOME` if `bind-hooks` is edited between `unlock`/`close` (removing an applied entry) or `invoking_home_dir` fails during teardown — deferred, pre-existing architectural constraint (AD-2 forbids a persisted mount registry, so `close` has no memory of what `unlock` actually applied). [src/domain/workflows/close.rs:115-137]
+- [x] [Review][Defer] Nothing verifies the invoking `tomb-fido2` process itself is unprivileged before running `exec-hooks` — if the whole CLI is launched under `sudo`, the hook script runs as root despite the guardrail's "never elevated" framing — deferred, pre-existing whole-tool privilege-model gap, not specific to this story's diff. [src/adapters/exec/mod.rs:1886-1895]
