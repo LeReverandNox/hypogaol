@@ -1,7 +1,8 @@
 ---
-stepsCompleted: [step-01-validate-prerequisites, step-01-refresh-2026-07-22, step-02-design-epics, step-01-refresh-2026-07-22-b, step-03-epic-1-stories, step-03-epic-2-stories, step-03-epic-3-stories, step-03-create-stories]
+stepsCompleted: [step-01-validate-prerequisites, step-01-refresh-2026-07-22, step-02-design-epics, step-01-refresh-2026-07-22-b, step-03-epic-1-stories, step-03-epic-2-stories, step-03-epic-3-stories, step-03-create-stories, step-01-refresh-2026-07-27-epic4, step-02-design-epics-epic4, step-03-epic-4-stories]
 inputDocuments:
   - _bmad-output/specs/spec-tomb-fido2/SPEC.md
+  - _bmad-output/specs/spec-tomb-fido2/hooks.md
   - _bmad-output/planning-artifacts/architecture/architecture-tomb-fido2-2026-07-22/ARCHITECTURE-SPINE.md
 ---
 
@@ -28,6 +29,12 @@ FR8: User can create a brand-new tomb in one operation, in either of two target 
 FR9: User can close an unlocked tomb — unmount its filesystem and re-lock the LUKS2 volume — as the symmetric counterpart to CAP-1's unlock+mount. (CAP-9)
 FR10: User can grow an existing tomb's LUKS2 volume and filesystem to a larger size without recreating it or re-enrolling any FIDO2 keys. (CAP-10)
 FR11: User can unlock and mount an existing tomb in read-only mode, so the LUKS2/dm-crypt mapping itself refuses writes at the block-device level, not merely the filesystem mount. (CAP-11)
+FR12: User can view technical info about a tomb, including its currently enrolled FIDO2 keys with their labels, through one info command, without needing to unlock it first. (CAP-12)
+FR13: User can enroll a FIDO2 key with user-verification (fingerprint/PIN) required instead of touch-only presence, both at tomb creation's bootstrap enrollment and via the standalone enroll command. (CAP-13)
+FR14: User can close every currently-open/unlocked tomb in one command. (CAP-14)
+FR15: User can run an emergency command that closes every open tomb and forcibly clears any process holding a mount busy, firing immediately with no confirmation prompt. (CAP-15)
+FR16: User can define per-tomb bind-hooks (auto bind-mount tomb-internal paths onto `$HOME`-relative paths on open) and an exec-hooks executable (run as the invoking user at open/close), with an option to skip hook processing for a given invocation. (CAP-16)
+FR17: User gets real step-by-step progress messages during create and resize, naming each real stage as it begins and completes, replacing the Story 1.5 stopgap of one message before and one after the whole operation. (CAP-17)
 
 ### NonFunctional Requirements
 
@@ -42,6 +49,11 @@ NFR8: Tool must actively prevent revoking the last remaining valid keyslot.
 NFR9: Tool must make a best-effort attempt to avoid decrypted key material leaking or persisting in process memory.
 NFR10: Filesystem operations (`mkfs` at creation, `growfs` at resize, `mount`/`umount`) must use only standard, well-known tools/syscalls for the user-selected filesystem type — no custom or tool-proprietary filesystem handling.
 NFR11: Read-only unlock must refuse writes at both the LUKS2/dm-crypt mapping level and the filesystem mount level — a filesystem-level-only read-only mount over a read-write dm-crypt mapping does not satisfy this.
+NFR12: Close-all/slam must discover open tombs by live-querying system state only (`dmsetup`/`cryptsetup status`) — never a stored registry or lock file.
+NFR13: Slam fires with zero confirmation prompt, by design — its emergency/panic-button framing overrides the general confirm-before-irreversible-action pattern used elsewhere (create's wipe warning, revoke's last-keyslot guard).
+NFR14: Hooks introduce an arbitrary-code-execution risk surface — exec-hooks must always run unprivileged as the invoking user; hook files must pass regular-file/executable-bit/ownership/not-world-writable checks (hard error if failed, aborting the operation); bind-hooks entries must pass path-containment checks (tomb-root source, `$HOME` destination), skipped with a warning if failed, never silently applied.
+NFR15: Create and resize must report distinct named-stage progress messages as each real stage occurs, not merely a single message before and after the whole operation.
+NFR16: UV enrollment is a stronger verification mode of the existing FIDO2 mechanism, not a new auth path — must not violate the no-fallback-auth-paths constraint (NFR5).
 
 ### Additional Requirements
 
@@ -61,6 +73,13 @@ NFR11: Read-only unlock must refuse writes at both the LUKS2/dm-crypt mapping le
 - AD-11 (new): Read-only unlock propagates atomically to both layers, with rollback on partial failure — a single `read_only: bool` is passed to both `LuksBackend::open` (`cryptsetup luksOpen --readonly`) and `FilesystemBackend::mount` (`mount -o ro`) in the same call; no code path sets one without the other. If `open` succeeds but `mount` fails, `unlock` closes the just-opened mapping before returning the error. (binds CAP-11)
 - AD-12 (new): Deterministic mapping name and mountpoint discovery, no registry — the dm-crypt mapping name is derived deterministically from the canonicalized input device/file path (stable hash, prefixed with a fixed constant defined once in code — kept independent of the product's own name, per AD-13), never user-supplied/random/stored; any workflow needing it (`close`, `resize`, a later `unlock`) reconstructs the identical name from the path argument alone. The mount point is resolved via the kernel's own mount table (e.g. `findmnt`), never remembered. (binds CAP-1, CAP-9, CAP-10, CAP-11)
 - AD-13 (new): Placeholder-name isolation — the product name is a placeholder pending a permanent choice, and no implementation identifier assumes its permanence: LUKS2 token JSON field names are generic (`key_label`, `filesystem`, `credential_id`, `created_at`, AD-2), never prefixed with the product name; AD-12's mapping-name prefix is a separate fixed constant, not derived from the product name; the CLI binary name and any user-facing product-name string are read from exactly one source (the Cargo package name), never duplicated as a string literal in `cli`, error messages, or elsewhere. (binds all CAP-1..11)
+- AD-14 (Epic 4): Hooks (bind-hooks/exec-hooks) live on the existing `FilesystemBackend` port — no new port, per Rule of Three. Four new methods: `bind_mount(source, dest)` (privileged), `hook_file_metadata(path)`, `run_hook(path, args)` (deliberately unprivileged), `invoking_home_dir()`. `unlock`/`close` gain a `skip_hooks: bool`; `read_only: true` forces hook-skip unconditionally. On open: bind-hooks entries failing containment/existence are skipped with a warning; a failing exec-hooks guardrail check is a hard error that aborts via AD-11's rollback. On close: bind-hooks teardown (umount each destination) happens before the primary mount's umount, since a bind mount is never implicitly released by unmounting its source. (binds CAP-16)
+- AD-15 (Epic 4): `info` reuses the existing keyslot-listing query — `domain::workflows::info` calls `preflight` then `LuksBackend::list_fido2_keyslots` directly, no new port method. v1 output is `key_label` per keyslot only (matching CAP-12's success criterion word for word); `credential_id`/`created_at`/`filesystem` stay internal. (binds CAP-12)
+- AD-16 (Epic 4): User-verification is an enrollment-time-only parameter — `Fido2Backend::enroll_fido2_key` gains `user_verification: bool`, passed to `systemd-cryptenroll --fido2-with-user-verification=yes|no`; `enroll` and `create`'s bootstrap step both thread it. Resolved (web-verified against `systemd-cryptenroll(1)`): unlock-time behavior is read automatically from the stored credential by cryptsetup's `systemd-fido2` token plugin — `LuksBackend::open`/`resize` need no change. (binds CAP-13)
+- AD-17 (Epic 4): Close-all/slam discover open tombs via new `LuksBackend::list_open_mappings()` — enumerates live dm-crypt mappings carrying AD-12's fixed mapping-name prefix (`dmsetup ls` filtered by prefix, cross-checked with `cryptsetup status` to recover `source_path`), never a lookup table. `close_all` loops over discovered mappings applying AD-8/AD-14's exact single-close sequence to each; one mapping's failure never aborts the batch — per-mapping outcomes are collected and all reported. `slam` is `close_all` with AD-18's escalation added per mapping. (binds CAP-14, CAP-15)
+- AD-18 (Epic 4): Slam's busy-mount escalation — two new mechanism-only `FilesystemBackend` methods, `processes_using(mountpoint)` (`fuser -m`) and `signal_process(pid, Signal)` (`kill -s`); the escalation *policy* (SIGTERM → pause 1s → retry umount → SIGHUP → pause 1s → retry → SIGKILL → pause 1s → retry, moving to the next mapping once umount succeeds or no holders remain) lives in `domain::workflows::slam`, not the adapter, so it stays unit-testable against AD-7's fake ports. Zero confirmation prompt, by design (NFR13). (binds CAP-15)
+- AD-19 (Epic 4): Progress reporting is a callback seam, never I/O inside `domain` — `create`/`resize` each take a `progress: &dyn Fn(Stage)` parameter, invoked synchronously at each real stage boundary; `Stage` is a typed, payload-free per-workflow enum (`CreateStage::{AllocatingBackingFile, FormattingLuks2, CreatingFilesystem, EnrollingFido2Key}`, `ResizeStage::{GrowingBackingFile, ResizingLuks2Mapping, GrowingFilesystem}`). `cli` supplies the closure and translates each stage via new `cli::ux::translate_stage`, the same translate-at-the-boundary shape as the existing `DomainError -> ux::translate` convention. (binds CAP-17)
+- New external tool dependencies (Epic 4): `psmisc` (`fuser`, AD-18) and `util-linux` `kill` (AD-18) — added to preflight's checked binaries and the Nix devShell.
 - Data/error conventions: per-key label + metadata stored as JSON in the LUKS2 token slot (`key_label`, `credential_id`, `created_at`, `filesystem`); domain errors are a typed enum (`thiserror`), translated to plain-language text only at the `cli` boundary; no persistent logging/telemetry (stderr-only, ephemeral); no config file.
 - Stack: Rust 1.90.0, clap 4.6.4, serde/serde_json 1.0.229, thiserror 2.0.19, anyhow 1.0.104, zeroize 1.9.0 (AD-3/AD-9 bootstrap-passphrase wipe only); external: cryptsetup 2.8.6, systemd 261 (+FIDO2 +LIBCRYPTSETUP_PLUGINS), fido2-token/libfido2 1.17.0, e2fsprogs (`mkfs.ext4`/`resize2fs`, AD-8 v1 ext4-only), util-linux `blockdev` (AD-9 `device_capacity`); Linux only.
 - Structural seed: `src/domain/{workflows/{create,unlock,enroll,revoke,close,resize}.rs, preflight.rs, errors.rs}`, `src/ports/{luks_backend,fido2_backend,filesystem_backend}.rs`, `src/adapters/exec/`, `src/cli/{main,ux}.rs`, `tests/{unit,hardware}/`, `Makefile`, `flake.nix`/`flake.lock`, `README.md`. No starter template — greenfield project.
@@ -99,6 +118,12 @@ FR8: Epic 1 - Create a brand-new tomb, file-backed or device-backed (format, fil
 FR9: Epic 3 - Close an unlocked tomb (unmount + re-lock)
 FR10: Epic 3 - Grow an existing tomb's volume and filesystem
 FR11: Epic 3 - Unlock and mount an existing tomb read-only
+FR12: Epic 4 - View a tomb's enrolled FIDO2 keys via info, without unlocking
+FR13: Epic 4 - Enroll a FIDO2 key requiring user-verification (fingerprint/PIN)
+FR14: Epic 4 - Close every open tomb in one command (close-all)
+FR15: Epic 4 - Emergency slam: close-all + busy-mount signal escalation, no confirmation
+FR16: Epic 4 - Per-tomb bind-hooks/exec-hooks automation on open/close, skippable
+FR17: Epic 4 - Named-stage progress reporting during create and resize
 
 ## Epic List
 
@@ -113,6 +138,10 @@ Users can enroll an additional FIDO2 key as a backup unlock method on an already
 ### Epic 3: Tomb Lifecycle & Advanced Access
 Users can close an unlocked tomb (unmount + re-lock) as the clean counterpart to Epic 1's unlock, grow an existing tomb's capacity without recreating it or re-enrolling keys, and unlock a tomb read-only when they only need to inspect its contents safely.
 **FRs covered:** FR9, FR10, FR11
+
+### Epic 4: Advanced Operations & Automation
+Users can inspect a tomb's enrolled keys without unlocking it, enroll keys with stronger fingerprint/PIN verification, manage every open tomb in bulk (routine close-all or panic-button slam), automate per-tomb setup/teardown via bind- and exec-hooks, and see real progress as create/resize actually happen — turning the tool from single-tomb basics into something usable for someone managing several tombs under real operational and emergency conditions.
+**FRs covered:** FR12, FR13, FR14, FR15, FR16, FR17
 
 ## Epic 1: Create & Open a Tomb (Foundation)
 
@@ -447,3 +476,161 @@ So that I can inspect its contents without risking any writes, at both the block
 **Given** an existing tomb backed by a raw device/partition instead of a loop-backed file
 **When** I run unlock with the read-only flag
 **Then** the identical command works unmodified — read-only unlock makes no branching decision based on target type
+
+## Epic 4: Advanced Operations & Automation
+
+Users can inspect a tomb's enrolled keys without unlocking it, enroll keys with stronger fingerprint/PIN verification, manage every open tomb in bulk (routine close-all or panic-button slam), automate per-tomb setup/teardown via bind- and exec-hooks, and see real progress as create/resize actually happen — turning the tool from single-tomb basics into something usable for someone managing several tombs under real operational and emergency conditions.
+
+### Story 4.1: View a Tomb's Enrolled Keys (Info)
+
+As a user,
+I want to view a tomb's technical info including its enrolled FIDO2 keys and labels,
+So that I can check what's enrolled without unlocking the tomb.
+
+**Acceptance Criteria:**
+
+**Given** an existing tomb
+**When** I run the info command against it
+**Then** `domain::preflight` runs first, like every other workflow
+**And** it lists each currently enrolled FIDO2 keyslot with its `key_label`, without performing any unlock/open call
+
+**Given** the info output
+**When** displayed
+**Then** it shows `key_label` per keyslot only — `credential_id`, `created_at`, and `filesystem` stay internal, not part of v1's info output
+
+**Given** an existing tomb on a raw device/partition instead of a loop-backed file
+**When** I run info
+**Then** the identical command works unmodified
+
+### Story 4.2: Real Progress Reporting for Create & Resize
+
+As a user,
+I want to see a distinct message for each real stage of create and resize as it happens,
+So that I have visibility into a long-running operation instead of one message before and after.
+
+**Acceptance Criteria:**
+
+**Given** I run create
+**When** it executes
+**Then** I see a distinct message as each real stage begins, in order: allocating the backing file, formatting as LUKS2, creating the filesystem, enrolling the FIDO2 key
+**And** no stage's message carries data beyond naming which stage is running
+
+**Given** I run resize
+**When** it executes
+**Then** I see a distinct message for each real stage in order: growing the backing file, resizing the LUKS2 mapping, growing the filesystem
+
+**Given** resize on a raw device/partition target
+**When** it executes
+**Then** only the two applicable stages fire (resizing the LUKS2 mapping, growing the filesystem) — no "growing the backing file" stage, since that only applies to file-backed tombs
+
+**Given** progress reporting
+**When** it's implemented
+**Then** `domain` performs no direct I/O for these messages — it invokes a callback, and `cli` is what actually translates and prints text
+
+### Story 4.3: Enroll a FIDO2 Key with User-Verification
+
+As a user,
+I want to enroll a FIDO2 key requiring user-verification (fingerprint/PIN),
+So that unlocking with this key demands proof of physical identity beyond mere touch.
+
+**Acceptance Criteria:**
+
+**Given** an already-created tomb
+**When** I run enroll with the user-verification flag
+**Then** the new key is enrolled via `systemd-cryptenroll --fido2-with-user-verification=yes`
+**And** unlocking later with that key requires the device's own fingerprint/PIN check, not touch alone
+
+**Given** I run enroll without the flag
+**When** it completes
+**Then** the key continues to unlock with touch alone, unchanged from Epic 2 behavior
+
+**Given** I create a brand-new tomb with the user-verification flag set on its bootstrap enrollment
+**When** creation completes
+**Then** the first key enrolled is UV-required, same as a standalone enroll would produce
+
+**Given** a UV-enrolled key
+**When** unlock or resize runs
+**Then** no change is needed to the open call itself — cryptsetup's `systemd-fido2` token plugin reads the UV requirement from the stored credential automatically
+
+### Story 4.4: Per-Tomb Bind-Hooks & Exec-Hooks Automation
+
+As a user,
+I want to define per-tomb bind-hooks and an exec-hooks executable,
+So that opening and closing a tomb also carries out my own automation (e.g. bind-mounting my `.gnupg` into `$HOME`), without running separate commands.
+
+**Acceptance Criteria:**
+
+**Given** a tomb with a `bind-hooks` file listing valid tomb-root-to-`$HOME`-relative mappings
+**When** I open it
+**Then** each valid mapping is bind-mounted onto its `$HOME`-relative destination after the primary mount succeeds
+
+**Given** a `bind-hooks` entry whose source or destination path doesn't exist, or that uses `..`/an absolute path to escape the tomb root or `$HOME`
+**When** open runs
+**Then** that entry is skipped with a warning — the rest of open continues normally, this is not a hard failure
+
+**Given** a tomb with an `exec-hooks` file present
+**When** I open it
+**Then** the tool verifies it's a regular file (not a symlink), has the executable bit set, is owned by the invoking user or root, and is not world-writable, before running it with `open <mountpoint>` as the invoking user, never elevated
+
+**Given** `exec-hooks` fails any of those guardrail checks
+**When** open runs
+**Then** it's a hard error that aborts the whole open — rolling back (closing the just-opened mapping, unmounting first if the primary mount had already succeeded) rather than leaving a partially set-up tomb mounted
+
+**Given** a tomb with hooks configured
+**When** I close it
+**Then** `exec-hooks` runs first with `close <mountpoint> <tomb-name> <loopback-device> <mapper-device>`, then each still-mounted bind-hooks destination is unmounted, then the primary mountpoint, then the LUKS2 mapping is closed — in that order
+
+**Given** I pass the skip-hooks flag, or unlock with read-only
+**When** I open or close the tomb
+**Then** neither bind-hooks nor exec-hooks runs at all — read-only unlock forces this regardless of the flag, since hooks never apply to read-only unlock
+
+### Story 4.5: Close Every Open Tomb (Close-All)
+
+As a user,
+I want to close every currently open/unlocked tomb in one command,
+So that I don't have to close them one by one when I'm done using several.
+
+**Acceptance Criteria:**
+
+**Given** multiple tombs currently open/unlocked
+**When** I run close-all
+**Then** the tool discovers them by enumerating live dm-crypt mappings carrying the tool's fixed mapping-name prefix (`dmsetup ls`, cross-checked with `cryptsetup status`) — never a stored registry
+**And** applies the same sequence as a single close (hooks, then bind-hooks teardown, then primary unmount, then LUKS2 close) to each discovered mapping
+
+**Given** close-all is running against several tombs
+**When** one tomb's close fails partway (e.g. still busy)
+**Then** it continues on to the remaining tombs rather than aborting the whole batch
+**And** reports every failure alongside every success at the end
+
+**Given** no tombs are currently open
+**When** I run close-all
+**Then** it completes cleanly, reporting nothing to close
+
+**Given** close-all
+**When** it runs
+**Then** `domain::preflight` runs first, like every other workflow, and the same `skip_hooks` flag threads uniformly to every mapping in the batch
+
+### Story 4.6: Emergency Slam
+
+As a user,
+I want an emergency command that force-closes every open tomb immediately with no confirmation,
+So that in a genuine crisis I can clear everything blocking unmount without being asked to confirm anything.
+
+**Acceptance Criteria:**
+
+**Given** one or more open tombs, with at least one mount currently busy (a process holding it open)
+**When** I run slam
+**Then** it discovers open tombs the same way close-all does, and for a busy mount signals every holding process `SIGTERM`, pauses briefly, retries the close; if still busy escalates to `SIGHUP`, pauses, retries; if still busy escalates to `SIGKILL`, pauses, retries
+**And** moves on to the next mapping once the close succeeds or no holding process remains, whichever comes first
+
+**Given** slam
+**When** it runs
+**Then** it fires with zero confirmation prompt — unlike every other mutating command in the tool
+
+**Given** a mapping with hooks configured
+**When** slam processes it
+**Then** the hooks step (exec-hooks/bind-hooks teardown) runs exactly once at the start of that mapping's close attempt, never re-run across escalation rounds
+
+**Given** slam is processing several open tombs and one never clears (a process keeps re-acquiring the mount)
+**When** that happens
+**Then** it's reported as that one mapping's failure, without blocking slam from completing the rest of the batch
