@@ -84,3 +84,9 @@
 ## Deferred from: code review of story-3.3 (2026-07-27)
 
 - `luks.close()`'s failure on the mount-failure rollback path is silently discarded (`let _ = luks.close(&mapper);`), so a `mount` failure followed by a `close` failure leaves a dangling mapper with no signal to the caller — same long-standing pattern already noted for `create.rs:132`/`unlock.rs:30` in the 3-2 review and `resize.rs:72`; now also covers the read-only path this story adds, still not introduced by this story. [src/domain/workflows/unlock.rs:31]
+
+## Deferred from: code review of 4-4-per-tomb-bind-hooks-exec-hooks-automation (2026-07-28)
+
+- TOCTOU gap between the exec-hooks guardrail check and execution — `hook_file_metadata` stats the file, then `run_hook` execs it by path with no fd-pinning in between; a local write-capable actor could swap the script in that window. A real fix needs fd-based exec (open once, fstat the fd, exec via the fd — e.g. `fexecve` via unsafe libc). Deferred: matches this codebase's existing local-single-user trust model — nothing else here defends against a co-resident attacker with write access either. [src/domain/workflows/unlock.rs:70,85; src/domain/workflows/close.rs:79,87; src/adapters/exec/mod.rs:1853-1895]
+- Close-time bind-hooks teardown can leave a stale bind mount dangling under `$HOME` if `bind-hooks` is edited between `unlock`/`close` (removing an applied entry) or `invoking_home_dir` fails during teardown — pre-existing architectural constraint (AD-2 forbids a persisted mount registry, so `close` has no memory of what `unlock` actually applied). [src/domain/workflows/close.rs:115-137]
+- Nothing verifies the invoking `tomb-fido2` process itself is unprivileged before running `exec-hooks` — if the whole CLI is launched under `sudo`, the hook script runs as root despite the guardrail's "never elevated" framing — pre-existing whole-tool privilege-model gap, not specific to this story's diff. [src/adapters/exec/mod.rs:1886-1895]

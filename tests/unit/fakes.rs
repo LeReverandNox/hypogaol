@@ -1,10 +1,12 @@
 use std::cell::{Cell, RefCell};
 use std::collections::VecDeque;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use tomb_fido2::domain::errors::DomainError;
-use tomb_fido2::domain::types::{Filesystem, KeyMetadata, KeyslotInfo, KeyslotRef, MapperHandle};
+use tomb_fido2::domain::types::{
+    Filesystem, HookFileMeta, KeyMetadata, KeyslotInfo, KeyslotRef, MapperHandle,
+};
 use tomb_fido2::ports::fido2_backend::{Fido2Backend, Fido2DeviceSelection};
 use tomb_fido2::ports::filesystem_backend::FilesystemBackend;
 use tomb_fido2::ports::luks_backend::LuksBackend;
@@ -340,6 +342,35 @@ pub struct FakeFilesystemBackend {
     last_umount: RefCell<Option<MapperHandle>>,
     last_growfs_filesystem: RefCell<Option<Filesystem>>,
     last_mount_read_only: RefCell<Option<bool>>,
+    // Story 4.4 (per-tomb bind-hooks/exec-hooks automation): six new
+    // `FilesystemBackend` methods' fake state.
+    hook_file_metadata: Cell<HookFileMeta>,
+    invoking_home_dir: PathBuf,
+    mount_point_of: RefCell<Option<PathBuf>>,
+    bind_mount_failure: bool,
+    run_hook_exit_code: Cell<Option<i32>>,
+    last_run_hook: RefCell<Option<(PathBuf, Vec<String>)>>,
+    // Distinct return values for successive `path_exists` calls (one call
+    // consumes one value), falling back to `path_exists` once exhausted —
+    // same "prove a caller checks two different paths independently"
+    // convention as `FakeLuksBackend::keyslots_sequence`. Needed because
+    // `resolve_bind_hook_entry` checks a source and a dest path with two
+    // separate `path_exists` calls that must be able to disagree (e.g. AC
+    // #2's "source exists but dest doesn't" case).
+    path_exists_sequence: RefCell<Option<VecDeque<bool>>>,
+}
+
+/// A valid, unrejectable `exec-hooks` file's metadata (AC #3's guardrail
+/// passes on every check) — the default `hook_file_metadata` returns, so
+/// tests that don't care about the guardrail never trip it by accident.
+fn passing_hook_file_meta() -> HookFileMeta {
+    HookFileMeta {
+        is_regular_file: true,
+        is_symlink: false,
+        is_executable: true,
+        owned_by_invoking_user_or_root: true,
+        is_world_writable: false,
+    }
 }
 
 impl FakeFilesystemBackend {
@@ -356,6 +387,13 @@ impl FakeFilesystemBackend {
             last_umount: RefCell::new(None),
             last_growfs_filesystem: RefCell::new(None),
             last_mount_read_only: RefCell::new(None),
+            hook_file_metadata: Cell::new(passing_hook_file_meta()),
+            invoking_home_dir: PathBuf::from("/home/fake-user"),
+            mount_point_of: RefCell::new(None),
+            bind_mount_failure: false,
+            run_hook_exit_code: Cell::new(Some(0)),
+            last_run_hook: RefCell::new(None),
+            path_exists_sequence: RefCell::new(None),
         }
     }
 
@@ -372,6 +410,13 @@ impl FakeFilesystemBackend {
             last_umount: RefCell::new(None),
             last_growfs_filesystem: RefCell::new(None),
             last_mount_read_only: RefCell::new(None),
+            hook_file_metadata: Cell::new(passing_hook_file_meta()),
+            invoking_home_dir: PathBuf::from("/home/fake-user"),
+            mount_point_of: RefCell::new(None),
+            bind_mount_failure: false,
+            run_hook_exit_code: Cell::new(Some(0)),
+            last_run_hook: RefCell::new(None),
+            path_exists_sequence: RefCell::new(None),
         }
     }
 
@@ -382,6 +427,16 @@ impl FakeFilesystemBackend {
 
     pub fn with_path_exists(mut self, value: bool) -> Self {
         self.path_exists = value;
+        self
+    }
+
+    /// Returns each value in `sequence` on successive `path_exists` calls
+    /// (one call consumes one value), falling back to `path_exists`'s own
+    /// value once exhausted — lets a test make a source path "exist" while a
+    /// dest path (or vice versa) doesn't, since `resolve_bind_hook_entry`
+    /// checks both independently.
+    pub fn with_path_exists_sequence(self, sequence: Vec<bool>) -> Self {
+        *self.path_exists_sequence.borrow_mut() = Some(sequence.into());
         self
     }
 
@@ -437,6 +492,48 @@ impl FakeFilesystemBackend {
         *self.last_mount_read_only.borrow()
     }
 
+    /// The `HookFileMeta` `hook_file_metadata` returns — settable so a test
+    /// can drive every `HookRejectionReason` branch (Task 10).
+    pub fn with_hook_file_metadata(self, meta: HookFileMeta) -> Self {
+        self.hook_file_metadata.set(meta);
+        self
+    }
+
+    /// The `PathBuf` `invoking_home_dir` returns.
+    pub fn with_invoking_home_dir(mut self, home: PathBuf) -> Self {
+        self.invoking_home_dir = home;
+        self
+    }
+
+    /// The `PathBuf` `mount_point_of` returns — independent of ever calling
+    /// `mount`, since `close`'s tests need it without an `unlock` in the
+    /// picture.
+    pub fn with_mount_point_of(self, mountpoint: PathBuf) -> Self {
+        *self.mount_point_of.borrow_mut() = Some(mountpoint);
+        self
+    }
+
+    /// Makes `bind_mount` log its call then return an `AdapterFailure`
+    /// instead of succeeding.
+    pub fn with_bind_mount_failure(mut self) -> Self {
+        self.bind_mount_failure = true;
+        self
+    }
+
+    /// The exit code `run_hook`'s returned `ExitStatus` reports — `Some(0)`
+    /// by default (success). `None` simulates a hook killed by a signal
+    /// (`ExitStatus::code()` returns `None` in that case too).
+    pub fn with_run_hook_exit_status(self, code: Option<i32>) -> Self {
+        self.run_hook_exit_code.set(code);
+        self
+    }
+
+    /// The `(path, args)` most recently passed to `run_hook` — lets a test
+    /// assert the exact `open`/`close` argv a hook was invoked with.
+    pub fn last_run_hook(&self) -> Option<(PathBuf, Vec<String>)> {
+        self.last_run_hook.borrow().clone()
+    }
+
     fn fail_if(&self, call: &'static str) -> Result<(), DomainError> {
         if self.fail_at == Some(call) {
             Err(DomainError::AdapterFailure(format!("{call} failed (test)")))
@@ -453,6 +550,14 @@ impl FilesystemBackend for FakeFilesystemBackend {
 
     fn path_exists(&self, _path: &Path) -> bool {
         self.log.borrow_mut().push("path_exists".to_string());
+        if let Some(next) = self
+            .path_exists_sequence
+            .borrow_mut()
+            .as_mut()
+            .and_then(VecDeque::pop_front)
+        {
+            return next;
+        }
         self.path_exists
     }
 
@@ -523,5 +628,70 @@ impl FilesystemBackend for FakeFilesystemBackend {
             )));
         }
         self.fail_if("umount")
+    }
+
+    fn bind_mount(&self, _source: &Path, _dest: &Path) -> Result<(), DomainError> {
+        self.log.borrow_mut().push("bind_mount".to_string());
+        if self.bind_mount_failure {
+            return Err(DomainError::AdapterFailure(
+                "bind_mount failed (test)".to_string(),
+            ));
+        }
+        self.fail_if("bind_mount")
+    }
+
+    fn hook_file_metadata(&self, _path: &Path) -> Result<HookFileMeta, DomainError> {
+        self.log.borrow_mut().push("hook_file_metadata".to_string());
+        self.fail_if("hook_file_metadata")?;
+        Ok(self.hook_file_metadata.get())
+    }
+
+    fn run_hook(
+        &self,
+        path: &Path,
+        args: &[&str],
+    ) -> Result<std::process::ExitStatus, DomainError> {
+        self.log.borrow_mut().push("run_hook".to_string());
+        *self.last_run_hook.borrow_mut() = Some((
+            path.to_path_buf(),
+            args.iter().map(|s| s.to_string()).collect(),
+        ));
+        self.fail_if("run_hook")?;
+        Ok(exit_status_with_code(self.run_hook_exit_code.get()))
+    }
+
+    fn invoking_home_dir(&self) -> Result<PathBuf, DomainError> {
+        self.log.borrow_mut().push("invoking_home_dir".to_string());
+        self.fail_if("invoking_home_dir")?;
+        Ok(self.invoking_home_dir.clone())
+    }
+
+    fn mount_point_of(&self, mapper: &MapperHandle) -> Result<PathBuf, DomainError> {
+        self.log.borrow_mut().push("mount_point_of".to_string());
+        self.fail_if("mount_point_of")?;
+        Ok(self
+            .mount_point_of
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| PathBuf::from(format!("/tmp/fake-mount-{}", mapper.name))))
+    }
+
+    fn unmount_bind_hook_destination(&self, _dest: &Path) -> Result<(), DomainError> {
+        self.log
+            .borrow_mut()
+            .push("unmount_bind_hook_destination".to_string());
+        self.fail_if("unmount_bind_hook_destination")
+    }
+}
+
+/// Builds a real `ExitStatus` reporting `code` (`None` simulates termination
+/// by a signal, matching `ExitStatus::code()`'s own `None` case) — this
+/// project only targets Linux (Cargo.toml), so `ExitStatusExt::from_raw`'s
+/// wait-status encoding is always available.
+fn exit_status_with_code(code: Option<i32>) -> std::process::ExitStatus {
+    use std::os::unix::process::ExitStatusExt;
+    match code {
+        Some(code) => std::process::ExitStatus::from_raw((code & 0xff) << 8),
+        None => std::process::ExitStatus::from_raw(9),
     }
 }

@@ -8,6 +8,7 @@
 //! detail" line (kept for bug-report value when no category matches).
 
 use crate::domain::errors::DomainError;
+use crate::domain::hooks::{BindHookSkipReason, HookRejectionReason, HookWarning};
 use crate::domain::progress::{CreateStage, ResizeStage};
 
 /// Translates any `DomainError` reachable from `create`/`unlock`/`enroll`/
@@ -69,6 +70,63 @@ pub fn translate(err: &DomainError) -> String {
             "No enrolled key is labeled {label:?}. Check the label (case-sensitive) and try again."
         ),
         DomainError::AdapterFailure(inner) => translate_adapter_failure(inner),
+        DomainError::HookRejected { path, reason } => {
+            let clause = match reason {
+                HookRejectionReason::NotARegularFile => {
+                    "it isn't a regular file (or is a symlink)"
+                }
+                HookRejectionReason::NotExecutable => "it isn't marked executable",
+                HookRejectionReason::WrongOwner => {
+                    "it isn't owned by you or root"
+                }
+                HookRejectionReason::WorldWritable => "it's writable by anyone on this system",
+            };
+            format!(
+                "tomb-fido2 refused to run this tomb's exec-hooks script ({}) because {clause}. \
+                 Nothing has changed.",
+                path.display()
+            )
+        }
+    }
+}
+
+/// Translates each `HookWarning` (AD-19's callback-seam precedent) into
+/// plain-language text — what `unlock`/`close`'s `warn` closure calls.
+/// Exhaustive by construction, same guarantee as `translate` above.
+pub fn translate_hook_warning(w: &HookWarning) -> String {
+    match w {
+        HookWarning::BindHookSkipped {
+            source,
+            dest,
+            reason,
+        } => {
+            let clause = match reason {
+                BindHookSkipReason::SourceMissing => "its source path doesn't exist",
+                BindHookSkipReason::DestMissing => "its destination path doesn't exist",
+                BindHookSkipReason::SourceEscapesTombRoot => {
+                    "its source path escapes the tomb"
+                }
+                BindHookSkipReason::DestEscapesHome => {
+                    "its destination path escapes your home directory"
+                }
+                BindHookSkipReason::BindMountFailed => "the bind-mount itself failed",
+            };
+            format!("Skipped bind-hooks entry \"{source} -> {dest}\": {clause}.")
+        }
+        HookWarning::ExecHookNonZeroExit { path, exit_code } => match exit_code {
+            Some(code) => format!(
+                "This tomb's exec-hooks script ({}) exited with status {code} — continuing anyway.",
+                path.display()
+            ),
+            None => format!(
+                "This tomb's exec-hooks script ({}) was terminated by a signal — continuing anyway.",
+                path.display()
+            ),
+        },
+        HookWarning::BindHooksFileUnreadable { path } => format!(
+            "Couldn't read this tomb's bind-hooks file ({}) — skipping all bind-hooks entries.",
+            path.display()
+        ),
     }
 }
 

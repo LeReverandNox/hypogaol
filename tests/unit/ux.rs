@@ -1,7 +1,10 @@
 use std::path::PathBuf;
 
-use tomb_fido2::cli::ux::{translate, translate_create_stage, translate_resize_stage};
+use tomb_fido2::cli::ux::{
+    translate, translate_create_stage, translate_hook_warning, translate_resize_stage,
+};
 use tomb_fido2::domain::errors::DomainError;
+use tomb_fido2::domain::hooks::{BindHookSkipReason, HookRejectionReason, HookWarning};
 use tomb_fido2::domain::progress::{CreateStage, ResizeStage};
 
 const JARGON_MARKERS: [&str; 4] = [
@@ -540,4 +543,93 @@ fn translate_resize_stage_covers_every_variant_with_a_distinct_no_jargon_message
         messages.len(),
         "expected every ResizeStage variant to translate to a distinct message, got {messages:?}"
     );
+}
+
+#[test]
+fn translate_covers_every_hook_rejection_reason_with_a_distinct_no_jargon_message() {
+    let reasons = [
+        HookRejectionReason::NotARegularFile,
+        HookRejectionReason::NotExecutable,
+        HookRejectionReason::WrongOwner,
+        HookRejectionReason::WorldWritable,
+    ];
+    let messages: Vec<String> = reasons
+        .iter()
+        .map(|reason| {
+            translate(&DomainError::HookRejected {
+                path: PathBuf::from("/tmp/my-tomb/exec-hooks"),
+                reason: *reason,
+            })
+        })
+        .collect();
+
+    for message in &messages {
+        assert_no_jargon(message);
+        assert!(message.contains("/tmp/my-tomb/exec-hooks"));
+    }
+
+    let mut unique = messages.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(
+        unique.len(),
+        messages.len(),
+        "expected every HookRejectionReason variant to translate to a distinct message, got {messages:?}"
+    );
+}
+
+#[test]
+fn translate_hook_warning_covers_every_bind_hook_skip_reason_with_a_distinct_no_jargon_message() {
+    let reasons = [
+        BindHookSkipReason::SourceMissing,
+        BindHookSkipReason::DestMissing,
+        BindHookSkipReason::SourceEscapesTombRoot,
+        BindHookSkipReason::DestEscapesHome,
+        BindHookSkipReason::BindMountFailed,
+    ];
+    let messages: Vec<String> = reasons
+        .iter()
+        .map(|reason| {
+            translate_hook_warning(&HookWarning::BindHookSkipped {
+                source: ".gnupg".to_string(),
+                dest: ".gnupg".to_string(),
+                reason: *reason,
+            })
+        })
+        .collect();
+
+    for message in &messages {
+        assert_no_jargon(message);
+        assert!(message.contains(".gnupg"));
+    }
+
+    let mut unique = messages.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    assert_eq!(
+        unique.len(),
+        messages.len(),
+        "expected every BindHookSkipReason variant to translate to a distinct message, got {messages:?}"
+    );
+}
+
+#[test]
+fn translate_hook_warning_exec_hook_non_zero_exit_with_a_code() {
+    let message = translate_hook_warning(&HookWarning::ExecHookNonZeroExit {
+        path: PathBuf::from("/tmp/my-tomb/exec-hooks"),
+        exit_code: Some(3),
+    });
+    assert_no_jargon(&message);
+    assert!(message.contains("/tmp/my-tomb/exec-hooks"));
+    assert!(message.contains('3'));
+}
+
+#[test]
+fn translate_hook_warning_exec_hook_non_zero_exit_without_a_code() {
+    let message = translate_hook_warning(&HookWarning::ExecHookNonZeroExit {
+        path: PathBuf::from("/tmp/my-tomb/exec-hooks"),
+        exit_code: None,
+    });
+    assert_no_jargon(&message);
+    assert!(message.contains("/tmp/my-tomb/exec-hooks"));
 }

@@ -1,16 +1,18 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::io::{self, Write};
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, ExitStatus, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 use zeroize::Zeroizing;
 
 use crate::domain::errors::DomainError;
-use crate::domain::types::{Filesystem, KeyMetadata, KeyslotInfo, KeyslotRef, MapperHandle};
+use crate::domain::types::{
+    Filesystem, HookFileMeta, KeyMetadata, KeyslotInfo, KeyslotRef, MapperHandle,
+};
 use crate::ports::fido2_backend::{Fido2Backend, Fido2DeviceSelection};
 use crate::ports::filesystem_backend::FilesystemBackend;
 use crate::ports::luks_backend::LuksBackend;
@@ -1803,28 +1805,8 @@ impl FilesystemBackend for ExecAdapter {
             )));
         }
 
-        let findmnt_output = Command::new("findmnt")
-            .args(["-n", "-o", "TARGET"])
-            .arg(&device_node)
-            .output()
-            .map_err(|e| DomainError::AdapterFailure(format!("failed to run findmnt: {e}")))?;
-
-        // Only the first line: a device mounted at more than one target
-        // would otherwise hand `umount` a multi-line argument with an
-        // embedded newline (review finding, 2026-07-26).
-        let mountpoint = String::from_utf8_lossy(&findmnt_output.stdout)
-            .lines()
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_string();
-
-        if !findmnt_output.status.success() || mountpoint.is_empty() {
-            return Err(DomainError::AdapterFailure(format!(
-                "{} is not currently mounted",
-                device_node.display()
-            )));
-        }
+        let mountpoint = self.mount_point_of(mapper)?;
+        let mountpoint = mountpoint.to_string_lossy().into_owned();
 
         let umount_output = privileged("umount")
             .arg(&mountpoint)
@@ -1848,6 +1830,153 @@ impl FilesystemBackend for ExecAdapter {
         }
 
         Ok(())
+    }
+
+    fn bind_mount(&self, source: &Path, dest: &Path) -> Result<(), DomainError> {
+        let output = privileged("mount")
+            .args(["--bind"])
+            .arg(source)
+            .arg(dest)
+            .output()
+            .map_err(|e| DomainError::AdapterFailure(format!("failed to run mount --bind: {e}")))?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(DomainError::AdapterFailure(format!(
+                "mount --bind failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )))
+        }
+    }
+
+    fn hook_file_metadata(&self, path: &Path) -> Result<HookFileMeta, DomainError> {
+        // `symlink_metadata` (not `metadata`) — must not follow a symlink,
+        // same reasoning `set_backing_file_size`'s `O_NOFOLLOW` already
+        // documents.
+        let symlink_meta = std::fs::symlink_metadata(path).map_err(|e| {
+            DomainError::AdapterFailure(format!("failed to stat {}: {e}", path.display()))
+        })?;
+        let is_symlink = symlink_meta.file_type().is_symlink();
+
+        // A non-symlink's `symlink_metadata` IS its metadata — only re-stat
+        // through the path when it actually is a symlink.
+        let meta = if is_symlink {
+            symlink_meta
+        } else {
+            path.metadata().map_err(|e| {
+                DomainError::AdapterFailure(format!("failed to stat {}: {e}", path.display()))
+            })?
+        };
+
+        let mode = meta.permissions().mode();
+        let invoking_uid = invoking_identity()?.uid.parse::<u32>().map_err(|e| {
+            DomainError::AdapterFailure(format!("failed to parse invoking uid: {e}"))
+        })?;
+
+        Ok(HookFileMeta {
+            is_regular_file: meta.file_type().is_file(),
+            is_symlink,
+            is_executable: mode & 0o111 != 0,
+            owned_by_invoking_user_or_root: meta.uid() == invoking_uid || meta.uid() == 0,
+            is_world_writable: mode & 0o002 != 0,
+        })
+    }
+
+    fn run_hook(&self, path: &Path, args: &[&str]) -> Result<ExitStatus, DomainError> {
+        // Inherited stdio (`.status()`, not `.output()`) — same pattern as
+        // every other interactive subprocess in this file; the hook may
+        // itself want a terminal. No `privileged()` wrapper: this is the one
+        // deliberate exception (AC #3's "never elevated") — it spawns
+        // directly as the already-unprivileged invoking process.
+        Command::new(path).args(args).status().map_err(|e| {
+            DomainError::AdapterFailure(format!("failed to run {}: {e}", path.display()))
+        })
+    }
+
+    fn invoking_home_dir(&self) -> Result<PathBuf, DomainError> {
+        if let Some(home) = std::env::var_os("HOME") {
+            return Ok(PathBuf::from(home));
+        }
+
+        // Mirrors `invoking_identity()`'s own precedent of shelling out for
+        // identity info it can't get any other way.
+        let uid = invoking_identity()?.uid;
+        let output = Command::new("getent")
+            .args(["passwd", &uid])
+            .output()
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!("failed to run getent passwd: {e}"))
+            })?;
+
+        if !output.status.success() {
+            return Err(DomainError::AdapterFailure(format!(
+                "getent passwd {uid} failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+
+        // Only the first line, same guard as `mount_point_of` a few lines
+        // below: a passwd entry with an embedded newline shouldn't corrupt
+        // the parsed field.
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .split(':')
+            .nth(5)
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                DomainError::AdapterFailure(format!(
+                    "getent passwd {uid} output missing a home directory field"
+                ))
+            })
+    }
+
+    fn mount_point_of(&self, mapper: &MapperHandle) -> Result<PathBuf, DomainError> {
+        let device_node = mapper.device_node();
+
+        let findmnt_output = Command::new("findmnt")
+            .args(["-n", "-o", "TARGET"])
+            .arg(&device_node)
+            .output()
+            .map_err(|e| DomainError::AdapterFailure(format!("failed to run findmnt: {e}")))?;
+
+        // Only the first line: a device mounted at more than one target
+        // would otherwise hand `umount` a multi-line argument with an
+        // embedded newline (review finding, 2026-07-26).
+        let mountpoint = String::from_utf8_lossy(&findmnt_output.stdout)
+            .lines()
+            .next()
+            .unwrap_or("")
+            .trim()
+            .to_string();
+
+        if !findmnt_output.status.success() || mountpoint.is_empty() {
+            return Err(DomainError::AdapterFailure(format!(
+                "{} is not currently mounted",
+                device_node.display()
+            )));
+        }
+
+        Ok(PathBuf::from(mountpoint))
+    }
+
+    fn unmount_bind_hook_destination(&self, dest: &Path) -> Result<(), DomainError> {
+        let output = privileged("umount")
+            .arg(dest)
+            .output()
+            .map_err(|e| DomainError::AdapterFailure(format!("failed to run umount: {e}")))?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(DomainError::AdapterFailure(format!(
+                "umount failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )))
+        }
     }
 }
 
