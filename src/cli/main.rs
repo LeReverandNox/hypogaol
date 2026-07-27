@@ -367,6 +367,14 @@ pub fn unlock_success_message(read_only: bool, mountpoint: &Path) -> String {
 /// inherited stdio, same accepted limitation as `enroll`'s
 /// `systemd-cryptenroll` prompt, and is left untranslated here (Story 1.8's
 /// job, not this one's).
+/// Shared `warn` seam for `unlock`/`close`'s hooks step (AD-19) — prints the
+/// translated `HookWarning` to stderr. A plain `fn` rather than a closure
+/// defined at each call site, since both callers built the identical
+/// one-liner independently.
+fn print_hook_warning(w: HookWarning) {
+    eprintln!("{}", ux::translate_hook_warning(&w));
+}
+
 fn run_unlock(path: PathBuf, read_only: bool, skip_hooks: bool) {
     let adapter = ExecAdapter::default();
 
@@ -377,9 +385,14 @@ fn run_unlock(path: PathBuf, read_only: bool, skip_hooks: bool) {
 
     println!("{}", unlock_intro_message(read_only));
 
-    let warn = |w: HookWarning| eprintln!("{}", ux::translate_hook_warning(&w));
     match unlock::run(
-        &path, read_only, skip_hooks, &warn, &adapter, &adapter, &adapter,
+        &path,
+        read_only,
+        skip_hooks,
+        &print_hook_warning,
+        &adapter,
+        &adapter,
+        &adapter,
     ) {
         Ok(mountpoint) => println!("{}", unlock_success_message(read_only, &mountpoint)),
         Err(err) => {
@@ -503,8 +516,14 @@ fn run_close(path: PathBuf, skip_hooks: bool) {
 
     println!("Closing this tomb.");
 
-    let warn = |w: HookWarning| eprintln!("{}", ux::translate_hook_warning(&w));
-    match close::run(&path, skip_hooks, &warn, &adapter, &adapter, &adapter) {
+    match close::run(
+        &path,
+        skip_hooks,
+        &print_hook_warning,
+        &adapter,
+        &adapter,
+        &adapter,
+    ) {
         Ok(()) => println!("Tomb closed."),
         Err(err) => {
             eprintln!("{}", ux::translate(&err));
