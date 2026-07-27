@@ -26,12 +26,12 @@ so that I can check what's enrolled without unlocking the tomb.
   - [x] `LuksBackend::list_fido2_keyslots` (`src/ports/luks_backend.rs:30`) already reads fresh from the header via `cryptsetup luksDump --dump-json-metadata` (`src/adapters/exec/mod.rs:917-957`, `dump_json_metadata`) with no `luksOpen`/mount call anywhere in that path — AC #1's "without performing any unlock/open call" is already true of the existing adapter method; this task only wires a new workflow entry point to it, it does not change the adapter.
   - [x] Register the new module in `src/domain/workflows/mod.rs:1-6` (add `pub mod info;` alphabetically before `pub mod resize;`).
 
-- [ ] Task 2: Wire the `info` CLI subcommand (AC #1, #3)
-  - [ ] In `src/cli/main.rs`, add an `Info` variant to `Commands` (after `Resize`, `src/cli/main.rs:87-97`), taking one positional `path: PathBuf` field with `#[arg(allow_hyphen_values = true)]`, same shape as `Close`/`Resize`. Doc-comment: `/// Show a tomb's technical info, including its enrolled FIDO2 keys`.
-  - [ ] Add `use crate::domain::workflows::info;` to the import block (`src/cli/main.rs:10-15`, alphabetically between `enroll` and `resize`).
-  - [ ] Add a `run_info(path: PathBuf)` function mirroring `run_close`'s shape (`src/cli/main.rs:441-458`): build `ExecAdapter::default()`, call `preflight::check` first (early exit via `ux::translate` + `process::exit(1)` on failure, matching every other `run_*` function's convention), then call `info::run(&path, &adapter, &adapter, &adapter)`. On `Ok(keyslots)`, print a header line naming the tomb path followed by one indented line per keyslot showing only its `key_label` (e.g. `"Enrolled FIDO2 keys for {path}:"` then `"  - {key_label}"` per entry) — no `credential_id`/`created_at`/`filesystem` in the output (AC #2). On `Err`, same `ux::translate` + `exit(1)` pattern as every other command. No "Running info..." intro line is needed before the call — unlike `unlock`/`resize`, info never touches a physical FIDO2 key, so there's no touch/PIN prompt to warn about beforehand (same reasoning `run_close`'s doc comment already gives for skipping that intro).
-  - [ ] Add `Commands::Info { path } => run_info(path)` to the `match` in `run()` (`src/cli/main.rs:487-540`).
-  - [ ] No target-type branching anywhere in this path (`info::run` takes one `path` for both file- and device-backed targets, same as `revoke`/`close`) — AC #3 is satisfied by construction, not by an explicit check.
+- [x] Task 2: Wire the `info` CLI subcommand (AC #1, #3)
+  - [x] In `src/cli/main.rs`, add an `Info` variant to `Commands` (after `Resize`, `src/cli/main.rs:87-97`), taking one positional `path: PathBuf` field with `#[arg(allow_hyphen_values = true)]`, same shape as `Close`/`Resize`. Doc-comment: `/// Show a tomb's technical info, including its enrolled FIDO2 keys`.
+  - [x] Add `use crate::domain::workflows::info;` to the import block (`src/cli/main.rs:10-15`, alphabetically between `enroll` and `resize`).
+  - [x] Add a `run_info(path: PathBuf)` function mirroring `run_close`'s shape (`src/cli/main.rs:441-458`): build `ExecAdapter::default()`, call `preflight::check` first (early exit via `ux::translate` + `process::exit(1)` on failure, matching every other `run_*` function's convention), then call `info::run(&path, &adapter, &adapter, &adapter)`. On `Ok(keyslots)`, print a header line naming the tomb path followed by one indented line per keyslot showing only its `key_label` (e.g. `"Enrolled FIDO2 keys for {path}:"` then `"  - {key_label}"` per entry) — no `credential_id`/`created_at`/`filesystem` in the output (AC #2). On `Err`, same `ux::translate` + `exit(1)` pattern as every other command. No "Running info..." intro line is needed before the call — unlike `unlock`/`resize`, info never touches a physical FIDO2 key, so there's no touch/PIN prompt to warn about beforehand (same reasoning `run_close`'s doc comment already gives for skipping that intro).
+  - [x] Add `Commands::Info { path } => run_info(path)` to the `match` in `run()` (`src/cli/main.rs:487-540`).
+  - [x] No target-type branching anywhere in this path (`info::run` takes one `path` for both file- and device-backed targets, same as `revoke`/`close`) — AC #3 is satisfied by construction, not by an explicit check.
 
 - [ ] Task 3: Marker-bleed check for any new failure text (AC: none directly — CAP-5/NFR3 quality bar, flagged repeatedly by the Epic 2/3 retros as the most-repeated bug class in this codebase)
   - [ ] This story introduces no new `AdapterFailure` string shape — a failed `cryptsetup luksDump` on a non-existent or non-LUKS2 path already falls through `dump_json_metadata`'s existing error path (reused unmodified by `list_fido2_keyslots`) into the existing generic `"cryptsetup"` bucket in `src/cli/ux.rs`. Confirm this holds once Task 1/2 land rather than assuming it; if `luksDump` against a bad path produces a distinct string that doesn't already match an existing bucket, add a dedicated branch ordered before the generic ones, following the exact precedent of every prior story's marker-bleed fix.
@@ -103,8 +103,10 @@ Unit tests against the shared fakes in `tests/unit/fakes.rs` (no fake changes ne
 ### Completion Notes List
 
 - Task 1: Added `domain::workflows::info::run`, mirroring `revoke.rs`'s preflight-then-`list_fido2_keyslots` shape. No new port method, type, or `DomainError` variant. Registered `pub mod info;` in `workflows/mod.rs`. `cargo build` passes.
+- Task 2: Wired `Commands::Info { path }` and `run_info`, mirroring `run_close`'s preflight-then-call-then-report shape. Output prints only `key_label` per keyslot (AC #2), no target-type branching (AC #3). `cargo build` passes.
 
 ### File List
 
 - src/domain/workflows/info.rs (NEW)
 - src/domain/workflows/mod.rs (UPDATE)
+- src/cli/main.rs (UPDATE)
