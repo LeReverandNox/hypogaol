@@ -33,7 +33,7 @@ Create refuses outright rather than risking your data: it won't touch a file-bac
 
 ### Hooks (optional)
 
-If a tomb has a `bind-hooks` file in its root (a two-column list: a path relative to the tomb, and where under your `$HOME` it should appear) and/or an executable `exec-hooks` file, tomb-fido2 runs them automatically on unlock and close. On unlock, it bind-mounts each valid entry, then invokes `exec-hooks open <mountpoint>`. On close, it reverses both: un-bind-mounting first, then invoking `exec-hooks close <mountpoint> <tomb-name> <loopback-device> <mapper-device>`. Pass `--skip-hooks` to skip both for one invocation.
+If a tomb has a `bind-hooks` file in its root (a two-column list: a path relative to the tomb, and where under your `$HOME` it should appear) and/or an executable `exec-hooks` file, tomb-fido2 runs them automatically on unlock and close. On unlock, it bind-mounts each valid entry, then invokes `exec-hooks open <mountpoint>`. On close, it runs `exec-hooks close <mountpoint> <tomb-name> <loopback-device> <mapper-device>` first, then un-bind-mounts each destination, before unmounting the tomb itself. Pass `--skip-hooks` to an `unlock`/`close` command to skip both for that invocation; a read-only unlock always skips hooks, flag or not.
 
 Adapted from [dyne/tomb](https://dyne.org/docs/tomb/manpage/#hooks)'s hook model, with stricter guardrails: a `bind-hooks` entry that tries to escape the tomb or your home directory is skipped with a warning rather than applied, and `exec-hooks` only runs if it's a regular, non-world-writable file owned by you or root with the executable bit set — anything else is refused outright. This is the one place tomb-fido2 ever runs code it didn't write itself, so it's checked accordingly.
 
