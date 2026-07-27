@@ -179,6 +179,34 @@ fn create_with_user_verification_true_threads_it_to_bootstrap_enrollment() {
 }
 
 #[test]
+fn create_device_with_user_verification_true_threads_it_to_bootstrap_enrollment() {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing().with_device_capacity(MIN_TOMB_SIZE_BYTES * 2);
+
+    let fixture = RealFixtureFile::create("device-user-verification-true");
+    let target = CreateTarget::Device {
+        path: fixture.0.clone(),
+        size: None,
+        confirmed: true,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        true,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(fido2.user_verification_received(), Some(true));
+}
+
+#[test]
 fn enroll_failure_closes_the_mapping_and_removes_the_backing_file() {
     let log = new_call_log();
     let luks = FakeLuksBackend::passing().with_log(log.clone());
