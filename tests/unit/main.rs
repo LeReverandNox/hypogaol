@@ -3,6 +3,7 @@ mod close;
 mod create;
 mod enroll;
 mod fakes;
+mod hooks;
 mod info;
 mod keyslot_guard;
 mod mapping_name;
