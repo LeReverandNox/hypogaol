@@ -71,6 +71,15 @@ development_status:
   3-3-unlock-a-tomb-read-only: done
   epic-3-retrospective: done
 
+  epic-4: backlog
+  4-1-view-a-tombs-enrolled-keys-info: backlog
+  4-2-real-progress-reporting-for-create-resize: backlog
+  4-3-enroll-a-fido2-key-with-user-verification: backlog
+  4-4-per-tomb-bind-hooks-exec-hooks-automation: backlog
+  4-5-close-every-open-tomb-close-all: backlog
+  4-6-emergency-slam: backlog
+  epic-4-retrospective: optional
+
 action_items:
   - epic: 1
     action: "Fix mount-point ownership: chown to invoking uid/gid before chmod 0700 in FilesystemBackend::mount (currently root-owned, root-only)"
