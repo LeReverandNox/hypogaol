@@ -175,3 +175,78 @@ fn resize_device_backed_skips_growing_backing_file() {
         ]
     );
 }
+
+#[test]
+fn create_does_not_fire_creating_filesystem_when_enroll_fails() {
+    // A stage's message must never fire for work that never actually
+    // completed — a failure between two stage boundaries should record only
+    // the stages up to and including the one whose port call is about to
+    // fail, never the ones after it.
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing().with_failure_at("enroll_fido2_key");
+    let fs = FakeFilesystemBackend::passing();
+
+    let fixture = RealFixtureFile::create("progress-create-enroll-failure");
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_TOMB_SIZE_BYTES,
+    };
+
+    let stages: Rc<RefCell<Vec<CreateStage>>> = Rc::new(RefCell::new(Vec::new()));
+    let recorder = stages.clone();
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        Fido2DeviceSelection::Interactive,
+        &|stage| recorder.borrow_mut().push(stage),
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_err(), "expected Err, got {result:?}");
+    assert_eq!(
+        *stages.borrow(),
+        vec![
+            CreateStage::AllocatingBackingFile,
+            CreateStage::FormattingLuks2,
+            CreateStage::EnrollingFido2Key,
+        ],
+        "CreatingFilesystem must not fire once enroll_fido2_key has failed"
+    );
+}
+
+#[test]
+fn resize_does_not_fire_growing_filesystem_when_luks_resize_fails() {
+    let luks = FakeLuksBackend::passing().with_failure_at("resize");
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing()
+        .with_is_block_device(false)
+        .with_filesystem_size(4096);
+
+    let fixture =
+        RealFixtureFile::create_with_contents("progress-resize-luks-resize-failure", &[0u8; 4096]);
+
+    let stages: Rc<RefCell<Vec<ResizeStage>>> = Rc::new(RefCell::new(Vec::new()));
+    let recorder = stages.clone();
+
+    let result = resize::run(
+        &fixture.0,
+        8192,
+        &|stage| recorder.borrow_mut().push(stage),
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_err(), "expected Err, got {result:?}");
+    assert_eq!(
+        *stages.borrow(),
+        vec![
+            ResizeStage::GrowingBackingFile,
+            ResizeStage::ResizingLuks2Mapping,
+        ],
+        "GrowingFilesystem must not fire once luks.resize has failed"
+    );
+}
