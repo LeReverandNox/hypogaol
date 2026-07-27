@@ -1,6 +1,6 @@
 ---
 id: SPEC-tomb-fido2
-companions: [hooks.md]
+companions: [hooks.md, ../../planning-artifacts/architecture/architecture-tomb-fido2-2026-07-22/ARCHITECTURE-SPINE.md]
 sources: [../../brainstorming/brainstorm-tomb-fido2-2026-07-21/brainstorm-intent.md, ../../brainstorming/brainstorm-tomb-fido2-2026-07-27/brainstorm-intent-epic4.md]
 ---
 

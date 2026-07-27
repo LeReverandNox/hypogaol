@@ -25,6 +25,7 @@
             cryptsetup
             systemd
             libfido2
+            psmisc # fuser/kill, slam's busy-mount escalation (AD-18)
           ];
 
           RUST_BACKTRACE = "1";

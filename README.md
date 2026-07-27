@@ -16,14 +16,26 @@ TrueCrypt's abrupt 2014 shutdown is the cautionary reference here. tomb-fido2 be
 | **Unlock** | Unlock a LUKS2 volume with a FIDO2 security key, mounted and ready in the same operation. No prior FIDO2 knowledge required — tomb-fido2 tells you exactly what to do ("Please touch your security key," never "Awaiting UP"). |
 | **Read-only unlock** | Unlock and mount a tomb so both the LUKS2 mapping and the filesystem refuse writes — stronger than a plain read-only mount over a writable volume. |
 | **Close** | Unmount and re-lock an open tomb — the symmetric counterpart to unlock. |
-| **Enroll** | Add another FIDO2 key as an alternate unlock method on an already-unlocked volume (LUKS2 supports up to 32 keyslots). Useful for a backup key stored elsewhere. |
+| **Enroll** | Add another FIDO2 key as an alternate unlock method on an already-unlocked volume (LUKS2 supports up to 32 keyslots). Useful for a backup key stored elsewhere. Optionally require user-verification (fingerprint/PIN, not just touch) on that key — whether it's this enrollment or a tomb's first key at creation. |
 | **Revoke** | Remove a single FIDO2 key's ability to unlock the volume. tomb-fido2 refuses to remove your last remaining valid key — raw `cryptsetup` will happily let you lock yourself out; tomb-fido2 won't. |
 | **Resize** | Grow an existing tomb's volume and filesystem in place, no re-enrollment needed. Grow-only — shrinking isn't supported. |
+| **Info** | See a tomb's enrolled FIDO2 keys and their labels without unlocking it. |
+| **Close all** | Close every tomb-fido2-managed tomb currently open, in one command. |
+| **Slam** | The panic button: close everything, and for any tomb whose mount is stuck behind a busy process, escalate through `SIGTERM` → `SIGHUP` → `SIGKILL` against it automatically. Fires instantly, no confirmation prompt. |
+| **Hooks** | Per-tomb bind-mounts and an open/close script, run automatically on unlock and close — e.g. auto-mounting `~/.gnupg` from inside the tomb, or firing your own automation. Skippable per invocation. |
 | **Pre-flight check** | Before any operation, verifies your system actually supports what's about to happen (LUKS2 + FIDO2 support, required binaries, kernel features) and fails cleanly with an actionable message — never mid-operation. |
+
+Create and resize both report each real stage as it happens (allocating, formatting, enrolling the key, and so on) rather than a single "please wait."
 
 Works identically against a raw partition or a loop-mounted file, for every operation above — a capability the original Tomb never had. Resize is the one exception for raw partitions: tomb-fido2 grows the LUKS2 volume and filesystem into existing free space, but doesn't repartition — you still need to grow the partition itself first with your tool of choice.
 
 Create refuses outright rather than risking your data: it won't touch a file-backed destination that already exists, or a device/partition that already carries a LUKS2 header. Because picking the wrong device is a real, higher-stakes mistake than a typo'd file path, creating on a raw device/partition always shows an explicit wipe warning and requires your confirmation before formatting anything — even when no existing LUKS2 header was found.
+
+### Hooks (optional)
+
+If a tomb has a `bind-hooks` file in its root (a two-column list: a path relative to the tomb, and where under your `$HOME` it should appear) and/or an executable `exec-hooks` file, tomb-fido2 runs them automatically on unlock and close. On unlock, it bind-mounts each valid entry, then invokes `exec-hooks open <mountpoint>`. On close, it reverses both: un-bind-mounting first, then invoking `exec-hooks close <mountpoint> <tomb-name> <loopback-device> <mapper-device>`. Pass `--skip-hooks` to skip both for one invocation.
+
+Adapted from [dyne/tomb](https://dyne.org/docs/tomb/manpage/#hooks)'s hook model, with stricter guardrails: a `bind-hooks` entry that tries to escape the tomb or your home directory is skipped with a warning rather than applied, and `exec-hooks` only runs if it's a regular, non-world-writable file owned by you or root with the executable bit set — anything else is refused outright. This is the one place tomb-fido2 ever runs code it didn't write itself, so it's checked accordingly.
 
 ## What it deliberately does *not* do
 
@@ -54,6 +66,12 @@ Creating a brand-new tomb has one narrow, unavoidable exception to "FIDO2 only":
 
 Wherever a secret (an existing unlock passphrase, a FIDO2 PIN) might need to be typed, tomb-fido2 hands the terminal directly to the underlying tool rather than reading it itself — that secret never passes through tomb-fido2's own memory.
 
+User-verification enrollment (requiring your key's own fingerprint/PIN check, not just a touch) is configured once, at enroll time — the requirement lives on the FIDO2 credential itself, so unlock needs no separate flag to honor it.
+
+tomb-fido2 never runs entirely as root; only the specific steps that need it (opening/closing the LUKS2 mapping, mounting) individually elevate via `sudo`, prompted right when they're reached. That also means `exec-hooks` (see [Hooks](#hooks-optional) above) always runs as you, not as root, even mid-operation — it was never elevated to begin with.
+
+Close-all and slam find every currently open tomb by asking the kernel directly (which dm-crypt mappings exist right now) — never a stored list of "known tombs." Slam in particular is the one command that skips every confirmation prompt on purpose: it's the emergency button, and stopping to ask defeats the point.
+
 ### Break-glass recovery (no tomb-fido2 required)
 
 If this binary is lost, corrupted, or you simply don't trust it anymore, your volume is still yours. Everything tomb-fido2 does day-to-day — unlocking, mounting, closing — can be done with stock `cryptsetup`, `mount`/`umount`, and `fido2-token` alone:
@@ -78,6 +96,9 @@ cryptsetup luksDump /path/to/device-or-file
 
 # List connected FIDO2 devices (for reference during manual recovery):
 fido2-token -L
+
+# List every currently open tomb-fido2 mapping (what close-all/slam do internally):
+dmsetup ls | grep '^vault-'
 ```
 
 `cryptsetup open` automatically detects and uses any `systemd-fido2` token stored in the LUKS2 header — it will prompt you to touch your key the same way tomb-fido2 does, because it's the same underlying mechanism. No tomb-fido2 binary, no external notes, no dependency on this project surviving. (Creating a new tomb and resizing one are setup/maintenance operations, not crisis-day operations — they aren't covered by break-glass recovery — you'd only run them while tomb-fido2 itself is available.)
