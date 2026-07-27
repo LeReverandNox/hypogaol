@@ -4,7 +4,7 @@ baseline_commit: 088d063a93c2f919c5c1bc57112bed196514f6cb
 
 # Story 4.1: View a Tomb's Enrolled Keys (Info)
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -98,6 +98,8 @@ Unit tests against the shared fakes in `tests/unit/fakes.rs` (no fake changes ne
 
 ### Agent Model Used
 
+Claude Sonnet 5 (claude-sonnet-5)
+
 ### Debug Log References
 
 ### Completion Notes List
@@ -117,3 +119,7 @@ Unit tests against the shared fakes in `tests/unit/fakes.rs` (no fake changes ne
 - tests/unit/main.rs (UPDATE)
 - tests/unit/cli.rs (UPDATE)
 - tests/hardware/main.rs (UPDATE)
+
+### Change Log
+
+- 2026-07-27: Implemented Story 4.1 end to end — `domain::workflows::info`, the `info` CLI subcommand, unit tests, and hardware tests. All ACs satisfied; 126 unit tests + 2 hardware tests passing; clippy clean.
