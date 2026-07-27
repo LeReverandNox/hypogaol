@@ -2,6 +2,8 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
+use crate::domain::hooks::HookRejectionReason;
+
 #[derive(Debug, Error)]
 pub enum DomainError {
     #[error("missing required dependencies: {}", .0.join(", "))]
@@ -50,4 +52,10 @@ pub enum DomainError {
 
     #[error("no FIDO2 key labeled {0:?} is enrolled on this tomb")]
     KeyNotFound(String),
+
+    #[error("exec-hooks at {} was rejected: {reason:?}", .path.display())]
+    HookRejected {
+        path: PathBuf,
+        reason: HookRejectionReason,
+    },
 }
