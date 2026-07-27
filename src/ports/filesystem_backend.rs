@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
+use std::process::ExitStatus;
 
 use crate::domain::errors::DomainError;
-use crate::domain::types::{Filesystem, MapperHandle};
+use crate::domain::types::{Filesystem, HookFileMeta, MapperHandle};
 
 pub trait FilesystemBackend {
     /// `Err` carries one human-readable string per missing/unsupported dependency
@@ -69,4 +70,42 @@ pub trait FilesystemBackend {
     /// of the same tomb gets the plain basename back rather than permanently
     /// falling back to a collision-suffixed name.
     fn umount(&self, mapper: &MapperHandle) -> Result<(), DomainError>;
+
+    /// Bind-mounts `source` onto `dest` (`mount --bind`) — privileged, one
+    /// per valid `bind-hooks` entry (AC #1).
+    fn bind_mount(&self, source: &Path, dest: &Path) -> Result<(), DomainError>;
+
+    /// `stat`/`lstat` facts about a candidate `exec-hooks` file (AC #3) — an
+    /// unprivileged query, no `mount`/`umount`-style privilege needed.
+    fn hook_file_metadata(&self, path: &Path) -> Result<HookFileMeta, DomainError>;
+
+    /// Runs `path` with `args` as the already-unprivileged invoking process —
+    /// deliberately **not** privileged (AC #3's "never elevated"), no
+    /// explicit privilege-drop needed since this process never escalated to
+    /// begin with. `Err` only if the process fails to spawn at all; a
+    /// nonzero exit from the hook script itself is not an `Err` — `domain`
+    /// inspects the returned `ExitStatus` and reports a non-fatal
+    /// `HookWarning::ExecHookNonZeroExit`, never aborting the workflow.
+    fn run_hook(&self, path: &Path, args: &[&str]) -> Result<ExitStatus, DomainError>;
+
+    /// The invoking user's home directory — reads `$HOME`, falling back to a
+    /// passwd lookup by uid if unset.
+    fn invoking_home_dir(&self) -> Result<PathBuf, DomainError>;
+
+    /// `mapper`'s live mount point, via the kernel's own mount table (AD-12)
+    /// — a pure query, wrapping the exact `findmnt` logic `umount` already
+    /// uses internally. Lets `close::run` learn the mountpoint up front to
+    /// build hook file paths and `run_hook`'s `close` argument, without
+    /// `AD-12` ever storing one.
+    fn mount_point_of(&self, mapper: &MapperHandle) -> Result<PathBuf, DomainError>;
+
+    /// Unmounts a single `bind-hooks` destination directly (`umount <dest>`,
+    /// no `findmnt` resolution — the caller already knows `dest` *is* the
+    /// mountpoint, straight out of the `bind-hooks` file) and does not
+    /// remove it afterward (unlike `umount`'s own mount-point directory: a
+    /// bind-hook destination is user-owned and pre-existing under `$HOME`,
+    /// never created by this tool). Used only by `close::run`'s bind-hooks
+    /// teardown step, once per parsed entry; individual failures are the
+    /// caller's to ignore (AC #5).
+    fn unmount_bind_hook_destination(&self, dest: &Path) -> Result<(), DomainError>;
 }
