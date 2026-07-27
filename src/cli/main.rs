@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 
 use crate::adapters::exec::ExecAdapter;
 use crate::cli::ux;
+use crate::domain::hooks::HookWarning;
 use crate::domain::preflight;
 use crate::domain::progress::{CreateStage, ResizeStage};
 use crate::domain::types::{CreateTarget, Filesystem};
@@ -44,6 +45,10 @@ enum Commands {
         /// and filesystem level
         #[arg(long)]
         read_only: bool,
+
+        /// Skip bind-hooks and exec-hooks processing for this command.
+        #[arg(long)]
+        skip_hooks: bool,
     },
 
     /// Enroll an additional FIDO2 key on an existing tomb
@@ -90,6 +95,10 @@ enum Commands {
         /// Path to the existing tomb's backing file or device
         #[arg(allow_hyphen_values = true)]
         path: PathBuf,
+
+        /// Skip bind-hooks and exec-hooks processing for this command.
+        #[arg(long)]
+        skip_hooks: bool,
     },
 
     /// Grow an existing tomb's volume and filesystem to a larger size
@@ -358,7 +367,7 @@ pub fn unlock_success_message(read_only: bool, mountpoint: &Path) -> String {
 /// inherited stdio, same accepted limitation as `enroll`'s
 /// `systemd-cryptenroll` prompt, and is left untranslated here (Story 1.8's
 /// job, not this one's).
-fn run_unlock(path: PathBuf, read_only: bool) {
+fn run_unlock(path: PathBuf, read_only: bool, skip_hooks: bool) {
     let adapter = ExecAdapter::default();
 
     if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
@@ -368,7 +377,10 @@ fn run_unlock(path: PathBuf, read_only: bool) {
 
     println!("{}", unlock_intro_message(read_only));
 
-    match unlock::run(&path, read_only, &adapter, &adapter, &adapter) {
+    let warn = |w: HookWarning| eprintln!("{}", ux::translate_hook_warning(&w));
+    match unlock::run(
+        &path, read_only, skip_hooks, &warn, &adapter, &adapter, &adapter,
+    ) {
         Ok(mountpoint) => println!("{}", unlock_success_message(read_only, &mountpoint)),
         Err(err) => {
             eprintln!("{}", ux::translate(&err));
@@ -481,7 +493,7 @@ fn run_revoke(path: PathBuf, label: String) {
 /// `revoke`'s irreversible-key warning, closing is fully reversible (a normal
 /// `unlock` with the same FIDO2 key gets you back in), so it doesn't fit the
 /// pattern that justifies those two interactive gates.
-fn run_close(path: PathBuf) {
+fn run_close(path: PathBuf, skip_hooks: bool) {
     let adapter = ExecAdapter::default();
 
     if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
@@ -491,7 +503,8 @@ fn run_close(path: PathBuf) {
 
     println!("Closing this tomb.");
 
-    match close::run(&path, &adapter, &adapter, &adapter) {
+    let warn = |w: HookWarning| eprintln!("{}", ux::translate_hook_warning(&w));
+    match close::run(&path, skip_hooks, &warn, &adapter, &adapter, &adapter) {
         Ok(()) => println!("Tomb closed."),
         Err(err) => {
             eprintln!("{}", ux::translate(&err));
@@ -611,7 +624,11 @@ pub fn run() {
                 );
             }
         },
-        Commands::Unlock { path, read_only } => run_unlock(path, read_only),
+        Commands::Unlock {
+            path,
+            read_only,
+            skip_hooks,
+        } => run_unlock(path, read_only, skip_hooks),
         Commands::Enroll {
             path,
             label,
@@ -623,7 +640,7 @@ pub fn run() {
             run_enroll(path, label, selection, user_verification);
         }
         Commands::Revoke { path, label } => run_revoke(path, label),
-        Commands::Close { path } => run_close(path),
+        Commands::Close { path, skip_hooks } => run_close(path, skip_hooks),
         Commands::Resize { path, size } => run_resize(path, size),
         Commands::Info { path } => run_info(path),
     }
