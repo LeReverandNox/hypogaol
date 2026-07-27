@@ -38,7 +38,11 @@ pub trait Fido2Backend {
     /// key") roles. `user_verification` maps to
     /// `--fido2-with-user-verification=yes|no` (AD-16): when `true`,
     /// unlocking with this key later requires the device's own
-    /// fingerprint/PIN check, not touch alone.
+    /// fingerprint/PIN check, not touch alone. Implementations must also
+    /// disable clientPin-based verification when `true` (e.g. real
+    /// hardware's `--fido2-with-client-pin=false`) — otherwise a token that
+    /// supports clientPin satisfies "uv" via a host-typed PIN prompt instead
+    /// of its own on-device check, defeating the point of requesting it.
     fn enroll_fido2_key(
         &self,
         mapper: &MapperHandle,
