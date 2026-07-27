@@ -42,7 +42,15 @@ pub fn run(
     };
 
     if !skip_hooks {
-        run_hooks_step(&mapper, warn, fs)?;
+        match run_hooks_step(&mapper, warn, fs) {
+            Ok(()) => {}
+            // Same tolerance as the `umount` match below: a prior `close`
+            // that already unmounted (but failed before `luks.close`) must
+            // stay retry-self-healing even now that the hooks step also
+            // resolves the mountpoint up front (review finding, 2026-07-28).
+            Err(DomainError::AdapterFailure(msg)) if msg.contains("not currently mounted") => {}
+            Err(err) => return Err(err),
+        }
     }
 
     match fs.umount(&mapper) {
