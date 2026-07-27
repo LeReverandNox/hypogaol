@@ -1989,6 +1989,107 @@ fn enroll_with_user_verification_on_a_uv_capable_key_disables_client_pin() {
     UnlockCleanup::new(mountpoint, name).run();
 }
 
+/// Companion to `enroll_with_user_verification_on_a_uv_capable_key_disables_client_pin`:
+/// that test only exercises a single-key bootstrap enrollment. This one
+/// proves the second-key path — enrolling a UV-required key while
+/// authenticated by an already-enrolled, non-UV key — actually succeeds
+/// end-to-end, and that doing so leaves the *existing* key's own
+/// `fido2-uv-required`/`fido2-clientPin-required` fields untouched (no
+/// cross-contamination between the two tokens' credential metadata).
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and TWO distinct
+/// physical FIDO2 security keys — the PRIMARY (any key, no UV method
+/// required) and the BACKUP (must have a genuine on-device user-verification
+/// method, e.g. a fingerprint sensor). Touch the PRIMARY key when
+/// `create::run` prompts, touch the PRIMARY key again to authorize the
+/// second enrollment, then verify (fingerprint) on the BACKUP key. Follow
+/// the swap prompts to confirm both keys independently unlock afterward.
+#[test]
+#[ignore]
+fn enroll_with_user_verification_authenticated_by_an_existing_key_succeeds_and_leaves_it_unchanged()
+{
+    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-uv-mixed-auth");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("tomb.img");
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::File {
+        path: path.clone(),
+        size: 32 * 1024 * 1024,
+    };
+
+    println!("Creating tomb WITHOUT --user-verification — touch the PRIMARY key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    println!(
+        "Enrolling a BACKUP key WITH --user-verification — touch the PRIMARY key first to \
+         authorize, then verify (fingerprint) on the BACKUP key. If the BACKUP key has no \
+         on-device UV method, use the non-UV-capable failure test instead."
+    );
+    let result = enroll::run(
+        &path,
+        "backup".to_string(),
+        Fido2DeviceSelection::Interactive,
+        true,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "enroll::run failed: {result:?}");
+
+    let keyslots = adapter
+        .list_fido2_keyslots(&path)
+        .expect("list_fido2_keyslots failed");
+    assert_eq!(
+        keyslots.len(),
+        2,
+        "expected exactly two live FIDO2 keyslots after enrolling the backup key, got {keyslots:?}"
+    );
+
+    let (backup_uv_required, backup_client_pin_required) =
+        dumped_uv_fields_for_label(&path, "backup");
+    assert!(
+        backup_uv_required,
+        "expected fido2-uv-required=true on the newly enrolled backup token"
+    );
+    assert!(
+        !backup_client_pin_required,
+        "expected fido2-clientPin-required=false on the newly enrolled backup token"
+    );
+
+    let (primary_uv_required, _) = dumped_uv_fields_for_label(&path, "primary");
+    assert!(
+        !primary_uv_required,
+        "expected the PRIMARY key's own fido2-uv-required to remain false — enrolling the \
+         backup key with --user-verification must not alter the primary token's credential \
+         metadata"
+    );
+
+    pause("Unplug the BACKUP key now, leaving only the PRIMARY key plugged in.");
+    println!("Unlocking with the PRIMARY key — touch it when prompted.");
+    let mountpoint = unlock::run(&path, false, &adapter, &adapter, &adapter)
+        .expect("unlock::run with the primary key failed");
+    let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
+    UnlockCleanup::new(mountpoint, name.clone()).run();
+
+    pause("Now unplug the PRIMARY key and plug in ONLY the BACKUP key.");
+    println!("Unlocking with the BACKUP key — verify on-device (fingerprint) when prompted.");
+    let mountpoint = unlock::run(&path, false, &adapter, &adapter, &adapter)
+        .expect("unlock::run with the backup key failed");
+    UnlockCleanup::new(mountpoint, name).run();
+}
+
 /// The deliberate-failure counterpart to
 /// `enroll_with_user_verification_on_a_uv_capable_key_disables_client_pin`:
 /// a token with no on-device UV method (a standard, non-biometric security
