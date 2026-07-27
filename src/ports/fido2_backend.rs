@@ -35,11 +35,15 @@ pub trait Fido2Backend {
     /// `metadata`'s fields onto that same token object (AD-2). `selection`
     /// identifies which physical device(s) fill the "new key" (and, when an
     /// existing enrolled key must authenticate the operation, "existing
-    /// key") roles.
+    /// key") roles. `user_verification` maps to
+    /// `--fido2-with-user-verification=yes|no` (AD-16): when `true`,
+    /// unlocking with this key later requires the device's own
+    /// fingerprint/PIN check, not touch alone.
     fn enroll_fido2_key(
         &self,
         mapper: &MapperHandle,
         metadata: KeyMetadata,
         selection: Fido2DeviceSelection,
+        user_verification: bool,
     ) -> Result<(), DomainError>;
 }
