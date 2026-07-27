@@ -143,6 +143,7 @@ None — no debugging required; implementation matched the story's Dev Notes and
 - Task 9: Inspected the diff — no new `AdapterFailure` string or `DomainError` variant introduced; `user_verification` is a plain `bool` outside the `cli::ux` marker-matching path.
 - Full regression: `cargo test --lib --tests` — 128 passed, 0 failed, 0 ignored (hardware tests remain `#[ignore]`d, unaffected in scope by this story per its Dev Notes).
 - Real-hardware verification of an actual UV-enrolled key requiring fingerprint/PIN at unlock (vs. touch-only) is a manual step for LeReverandNox — see the hardware test command below.
+- Post-review addition (LeReverandNox, 2026-07-27): two new `#[ignore]`d hardware tests in `tests/hardware/main.rs` covering the clientPin-disable fix above — `enroll_with_user_verification_on_a_uv_capable_key_disables_client_pin` (requires a biometric-capable key; asserts `fido2-uv-required=true`/`fido2-clientPin-required=false` read directly off the enrolled token's LUKS2 JSON metadata via a new `dumped_uv_fields_for_label` helper — these are the real field names, confirmed via `strings` on `libcryptsetup-token-systemd-fido2.so`, not guessed) and `enroll_with_user_verification_on_a_non_uv_capable_key_fails_cleanly` (requires a non-biometric key; asserts `enroll::run` fails outright and the tomb is left untouched — one live keyslot, still labeled `"primary"`, still unlockable). Both compile and are correctly `--ignored` by default; `cargo test --lib --tests` still 128 passed, 0 failed.
 
 ### File List
 

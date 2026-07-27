@@ -1874,3 +1874,203 @@ fn info_works_unmodified_against_a_device_backed_tomb() {
         String::from_utf8_lossy(&detach.stderr)
     );
 }
+
+/// Reads a security token's `key_label`/`fido2-uv-required`/
+/// `fido2-clientPin-required` fields directly off the LUKS2 JSON token area —
+/// same `--dump-json-metadata` approach `enroll_adds_an_independent_second_key_without_corrupting_the_primary`
+/// uses for `key_label`, extended to the two FIDO2 UV fields
+/// `systemd-cryptenroll`/`cryptsetup`'s own `libcryptsetup-token-systemd-fido2`
+/// plugin writes into every `systemd-fido2` token (confirmed by inspecting
+/// that plugin's shared object: it stores exactly these two boolean fields,
+/// `fido2-uv-required` and `fido2-clientPin-required`, alongside
+/// `fido2-up-required`). Reading these back is a genuine end-to-end
+/// assertion of Story 4.3's post-review fix — not a proxy — because they're
+/// the real, on-disk credential fields `systemd-fido2`'s unlock-time PAM/
+/// cryptsetup token plugin reads to decide whether to prompt for a PIN at
+/// all, independent of whatever this process observed at enroll time.
+fn dumped_uv_fields_for_label(path: &std::path::Path, key_label: &str) -> (bool, bool) {
+    let dump = Command::new("cryptsetup")
+        .arg("luksDump")
+        .arg("--dump-json-metadata")
+        .arg(path)
+        .output()
+        .expect("failed to run cryptsetup luksDump");
+    assert!(dump.status.success(), "cryptsetup luksDump failed");
+
+    let metadata: serde_json::Value =
+        serde_json::from_slice(&dump.stdout).expect("failed to parse luksDump JSON output");
+    let tokens = metadata
+        .get("tokens")
+        .and_then(|t| t.as_object())
+        .expect("no \"tokens\" object in luksDump JSON output");
+
+    let token = tokens
+        .values()
+        .find(|token| token.get("key_label").and_then(|v| v.as_str()) == Some(key_label))
+        .unwrap_or_else(|| panic!("no token found with key_label {key_label:?} in {tokens:?}"));
+
+    let uv_required = token
+        .get("fido2-uv-required")
+        .and_then(|v| v.as_bool())
+        .expect("token has no boolean \"fido2-uv-required\" field");
+    let client_pin_required = token
+        .get("fido2-clientPin-required")
+        .and_then(|v| v.as_bool())
+        .expect("token has no boolean \"fido2-clientPin-required\" field");
+    (uv_required, client_pin_required)
+}
+
+/// End-to-end verification of Story 4.3's post-review fix (LeReverandNox,
+/// 2026-07-27 dogfooding): enrolling with `--user-verification` must not
+/// merely ask `systemd-cryptenroll` for UV, it must also disable `clientPin`
+/// (`fido2_verification_args` in `src/adapters/exec/mod.rs`) so a UV-capable
+/// token proves verification via its own fingerprint sensor rather than a
+/// host-typed PIN. Reads both booleans directly off the enrolled token's
+/// LUKS2 JSON metadata (`dumped_uv_fields_for_label`) rather than relying on
+/// a human watching for a PIN prompt — a real, deterministic, automatable
+/// assertion of the actual on-disk credential, not an observation proxy.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and a FIDO2
+/// security key with a genuine on-device user-verification method (e.g. a
+/// fingerprint sensor — a YubiKey Bio or similar). Touch/verify when
+/// `create::run` prompts. If your key has no such method, use
+/// `enroll_with_user_verification_on_a_non_uv_capable_key_fails_cleanly`
+/// below instead — this scenario cannot pass on a PIN-only token, since
+/// disabling `clientPin` removes the only UV method such a token has.
+#[test]
+#[ignore]
+fn enroll_with_user_verification_on_a_uv_capable_key_disables_client_pin() {
+    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-uv-capable");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("tomb.img");
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::File {
+        path: path.clone(),
+        size: 32 * 1024 * 1024,
+    };
+
+    println!(
+        "Creating tomb with --user-verification — verify on-device (fingerprint) when prompted, \
+         not a typed PIN."
+    );
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        true,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(
+        result.is_ok(),
+        "create::run failed: {result:?} — if your key has no on-device UV method (no fingerprint \
+         sensor), this failure is expected; use the non-UV-capable test instead"
+    );
+
+    let (uv_required, client_pin_required) = dumped_uv_fields_for_label(&path, "primary");
+    assert!(
+        uv_required,
+        "expected fido2-uv-required=true on the enrolled token after --user-verification"
+    );
+    assert!(
+        !client_pin_required,
+        "expected fido2-clientPin-required=false — clientPin must be disabled when UV is \
+         requested, so verification happens on-device (fingerprint) instead of via a typed PIN"
+    );
+
+    println!("Confirming the tomb still unlocks — verify on-device (fingerprint) when prompted.");
+    let mountpoint = unlock::run(&path, false, &adapter, &adapter, &adapter)
+        .expect("unlock::run failed after UV-required enrollment");
+    let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
+    UnlockCleanup::new(mountpoint, name).run();
+}
+
+/// The deliberate-failure counterpart to
+/// `enroll_with_user_verification_on_a_uv_capable_key_disables_client_pin`:
+/// a token with no on-device UV method (a standard, non-biometric security
+/// key — the common case) asked to enroll with `--user-verification` must
+/// fail enrollment outright, not silently fall back to PIN-based
+/// verification. That silent fallback is exactly the bug the post-review fix
+/// closed (disabling `clientPin` removes the only UV method such a token
+/// has, so `systemd-cryptenroll` has no way left to satisfy "uv" and must
+/// refuse). A clean, explicit failure here — leaving the tomb exactly as it
+/// was before the attempt — is the correct, intended outcome, not a defect.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and a FIDO2
+/// security key with NO on-device UV method (no fingerprint sensor — most
+/// standard security keys qualify). Touch the key for the first (successful,
+/// non-UV) enrollment; the second (UV) enrollment attempt is expected to
+/// fail before or without a touch prompt completing successfully.
+#[test]
+#[ignore]
+fn enroll_with_user_verification_on_a_non_uv_capable_key_fails_cleanly() {
+    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-uv-incapable");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("tomb.img");
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::File {
+        path: path.clone(),
+        size: 32 * 1024 * 1024,
+    };
+
+    println!("Creating tomb WITHOUT --user-verification — touch the key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    println!(
+        "Attempting to enroll a second key WITH --user-verification on a non-UV-capable key — \
+         touch the PRIMARY key to authorize if prompted; this enrollment is expected to fail."
+    );
+    let result = enroll::run(
+        &path,
+        "backup".to_string(),
+        Fido2DeviceSelection::Interactive,
+        true,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(
+        result.is_err(),
+        "expected enroll::run to fail requesting --user-verification on a non-UV-capable key, got \
+         Ok(()) — if your key DOES have an on-device UV method (fingerprint), use the UV-capable \
+         test instead"
+    );
+
+    // The failed attempt must leave the tomb exactly as it was — no partial
+    // keyslot, same rollback discipline `enroll_fido2_key`'s own failure path
+    // (rolling back a metadata-write failure) already guarantees.
+    let keyslots = adapter
+        .list_fido2_keyslots(&path)
+        .expect("list_fido2_keyslots failed");
+    assert_eq!(
+        keyslots.len(),
+        1,
+        "a failed UV enrollment must not leave a partial keyslot behind, got {keyslots:?}"
+    );
+    assert_eq!(
+        keyslots[0].key_label, "primary",
+        "the original primary key's label must survive an untouched, got {keyslots:?}"
+    );
+
+    println!("Confirming the primary key still unlocks the tomb — touch it when prompted.");
+    let mountpoint = unlock::run(&path, false, &adapter, &adapter, &adapter)
+        .expect("unlock::run with the primary key failed after a rejected UV enrollment");
+    let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
+    UnlockCleanup::new(mountpoint, name).run();
+}
