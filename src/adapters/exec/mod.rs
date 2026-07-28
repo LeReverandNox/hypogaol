@@ -12,7 +12,7 @@ use zeroize::Zeroizing;
 use crate::domain::errors::DomainError;
 use crate::domain::mapping_name;
 use crate::domain::types::{
-    Filesystem, HookFileMeta, KeyMetadata, KeyslotInfo, KeyslotRef, MapperHandle,
+    Filesystem, HookFileMeta, KeyMetadata, KeyslotInfo, KeyslotRef, MapperHandle, Pid, Signal,
 };
 use crate::ports::fido2_backend::{Fido2Backend, Fido2DeviceSelection};
 use crate::ports::filesystem_backend::FilesystemBackend;
@@ -1426,6 +1426,8 @@ impl FilesystemBackend for ExecAdapter {
             "umount",
             "findmnt",
             "id",
+            "fuser",
+            "kill",
         ] {
             if !binary_on_path(binary) {
                 missing.push(format!("{binary} binary not found on PATH"));
@@ -2065,6 +2067,52 @@ impl FilesystemBackend for ExecAdapter {
         } else {
             Err(DomainError::AdapterFailure(format!(
                 "umount failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )))
+        }
+    }
+
+    fn processes_using(&self, mountpoint: &Path) -> Result<Vec<Pid>, DomainError> {
+        // A nonzero exit is not this call's own error — `fuser` exits 1 when
+        // no process matches (the normal "no holders" case). Only a spawn
+        // failure is this method's `Err` (AD-18).
+        let output = privileged("fuser")
+            .arg("-m")
+            .arg(mountpoint)
+            .output()
+            .map_err(|e| DomainError::AdapterFailure(format!("failed to run fuser: {e}")))?;
+
+        // `fuser` writes only the matched PIDs to stdout (whitespace-
+        // separated); everything else goes to stderr (fuser(1) OUTPUT
+        // section). Tokens that don't parse are skipped defensively.
+        let pids = String::from_utf8_lossy(&output.stdout)
+            .split_whitespace()
+            .filter_map(|token| token.parse::<u32>().ok())
+            .map(Pid)
+            .collect();
+
+        Ok(pids)
+    }
+
+    fn signal_process(&self, pid: Pid, signal: Signal) -> Result<(), DomainError> {
+        let signal_name = match signal {
+            Signal::Sigterm => "TERM",
+            Signal::Sighup => "HUP",
+            Signal::Sigkill => "KILL",
+        };
+
+        let output = privileged("kill")
+            .arg(format!("-{signal_name}"))
+            .arg(pid.0.to_string())
+            .output()
+            .map_err(|e| DomainError::AdapterFailure(format!("failed to run kill: {e}")))?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(DomainError::AdapterFailure(format!(
+                "kill -{signal_name} {} failed: {}",
+                pid.0,
                 String::from_utf8_lossy(&output.stderr).trim()
             )))
         }
