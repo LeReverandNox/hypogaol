@@ -1203,18 +1203,33 @@ impl LuksBackend for ExecAdapter {
                 )));
             }
 
-            let text = String::from_utf8_lossy(&status_output.stdout);
-            let source_path = text
-                .lines()
-                .find_map(|line| {
-                    let (key, value) = line.split_once(':')?;
-                    (key.trim() == "device").then(|| value.trim().to_string())
+            // For a file-backed tomb, `device:` reports the opaque
+            // `/dev/loopN` node cryptsetup opened internally — the original
+            // backing file only appears on its own separate `loop:` line
+            // (confirmed against real hardware, 2026-07-28: `device:
+            // /dev/loop0` alongside `loop: /path/to/tomb.img`; the Dev
+            // Notes' cryptsetup(8) citation describes this `loop:` field,
+            // not `device:`, which this call originally misread). A
+            // device-backed tomb has no loop device at all, so it has no
+            // `loop:` line and `device:` directly holds the correct raw
+            // device/partition path — hence `loop:` is preferred when
+            // present, falling back to `device:` otherwise.
+            fn field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+                text.lines().find_map(|line| {
+                    let (line_key, value) = line.split_once(':')?;
+                    (line_key.trim() == key).then(|| value.trim())
                 })
+            }
+
+            let text = String::from_utf8_lossy(&status_output.stdout);
+            let source_path = field(&text, "loop")
+                .or_else(|| field(&text, "device"))
                 .ok_or_else(|| {
                     DomainError::AdapterFailure(format!(
                         "cryptsetup status {name} output missing a parsable device: line"
                     ))
-                })?;
+                })?
+                .to_string();
 
             mappings.push(MapperHandle {
                 name,
