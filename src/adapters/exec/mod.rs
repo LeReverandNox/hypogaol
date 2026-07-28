@@ -1214,19 +1214,12 @@ impl LuksBackend for ExecAdapter {
             // `loop:` line and `device:` directly holds the correct raw
             // device/partition path — hence `loop:` is preferred when
             // present, falling back to `device:` otherwise.
-            fn field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
-                text.lines().find_map(|line| {
-                    let (line_key, value) = line.split_once(':')?;
-                    (line_key.trim() == key).then(|| value.trim())
-                })
-            }
-
             let text = String::from_utf8_lossy(&status_output.stdout);
-            let source_path = field(&text, "loop")
-                .or_else(|| field(&text, "device"))
+            let source_path = cryptsetup_status_field(&text, "loop")
+                .or_else(|| cryptsetup_status_field(&text, "device"))
                 .ok_or_else(|| {
                     DomainError::AdapterFailure(format!(
-                        "cryptsetup status {name} output missing a parsable device: line"
+                        "cryptsetup status {name} output missing a parsable loop: or device: line"
                     ))
                 })?
                 .to_string();
@@ -1239,6 +1232,16 @@ impl LuksBackend for ExecAdapter {
 
         Ok(mappings)
     }
+}
+
+/// Finds `key`'s trimmed value on a `cryptsetup status` output line of the
+/// form `"  key:  value"`. Used by `list_open_mappings` to prefer `loop:`
+/// over `device:` when recovering a mapping's original `source_path`.
+fn cryptsetup_status_field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+    text.lines().find_map(|line| {
+        let (line_key, value) = line.split_once(':')?;
+        (line_key.trim() == key).then(|| value.trim())
+    })
 }
 
 impl Fido2Backend for ExecAdapter {
@@ -2235,5 +2238,32 @@ mod tests {
             1024,
             "the symlink target must be left untouched"
         );
+    }
+
+    #[test]
+    fn cryptsetup_status_field_prefers_loop_over_device_for_file_backed_tomb() {
+        let text = "/dev/mapper/vault-0123456789abcdef is active.\n  type:    LUKS2\n  cipher:  aes-xts-plain64\n  device:  /dev/loop0\n  loop:    /home/user/tombs/tomb.img\n  sector size:  512\n";
+
+        assert_eq!(
+            cryptsetup_status_field(text, "loop"),
+            Some("/home/user/tombs/tomb.img")
+        );
+        assert_eq!(cryptsetup_status_field(text, "device"), Some("/dev/loop0"));
+    }
+
+    #[test]
+    fn cryptsetup_status_field_falls_back_to_device_for_device_backed_tomb() {
+        let text = "/dev/mapper/vault-fedcba9876543210 is active.\n  type:    LUKS2\n  device:  /dev/sdb1\n  sector size:  512\n";
+
+        assert_eq!(cryptsetup_status_field(text, "loop"), None);
+        assert_eq!(cryptsetup_status_field(text, "device"), Some("/dev/sdb1"));
+    }
+
+    #[test]
+    fn cryptsetup_status_field_returns_none_when_key_absent() {
+        let text = "/dev/mapper/vault-0000000000000000 is active.\n  type:    LUKS2\n";
+
+        assert_eq!(cryptsetup_status_field(text, "loop"), None);
+        assert_eq!(cryptsetup_status_field(text, "device"), None);
     }
 }
