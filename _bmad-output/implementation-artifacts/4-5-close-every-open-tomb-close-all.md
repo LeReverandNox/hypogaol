@@ -1,6 +1,10 @@
+---
+baseline_commit: 1306fcb2dedc7bd19848e16fc3d6390946e0d80c
+---
+
 # Story 4.5: Close Every Open Tomb (Close-All)
 
-Status: ready-for-dev
+Status: review
 
 ## Story
 
@@ -17,25 +21,25 @@ so that I don't have to close them one by one when I'm done using several.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 0: Read every file this story touches before changing anything** (prevents guessing at current shapes)
+- [x] **Task 0: Read every file this story touches before changing anything** (prevents guessing at current shapes)
   - Read in full: `src/ports/luks_backend.rs`, `src/domain/workflows/close.rs`, `src/domain/mapping_name.rs`, `src/domain/workflows/mod.rs`, `src/domain/errors.rs`, `src/cli/main.rs` (the `Close` variant, `run_close`, dispatch), `src/adapters/exec/mod.rs` (`LuksBackend impl` ~line 763-1058, `privileged()` ~line 45, `check_prerequisites` for all three ports), `tests/unit/fakes.rs` (`FakeLuksBackend`, `FakeFilesystemBackend`), `tests/unit/close.rs`, `tests/unit/workflows.rs`, `flake.nix`.
 
-- [ ] **Task 1: `LuksBackend::list_open_mappings()` port method (AC #1)**
+- [x] **Task 1: `LuksBackend::list_open_mappings()` port method (AC #1)**
   - Add to `src/ports/luks_backend.rs`: `fn list_open_mappings(&self) -> Result<Vec<MapperHandle>, DomainError>;` with a doc comment stating this is AD-17's live-discovery method — never a registry — and that it recovers each mapping's original `source_path` from `cryptsetup status`'s reported device, not a raw `/dev/loopN` node (see Dev Notes: cryptsetup(8) confirms `status` reports the loop *backing file*, not the loop device itself, for a file-backed mapping).
   - In `src/domain/mapping_name.rs`, change `const MAPPING_NAME_PREFIX` to `pub(crate) const MAPPING_NAME_PREFIX` so `adapters::exec` can filter by it (currently private to the module).
 
-- [ ] **Task 2: Implement `list_open_mappings` in `ExecAdapter` (AC #1)**
+- [x] **Task 2: Implement `list_open_mappings` in `ExecAdapter` (AC #1)**
   - Run `dmsetup ls`. Parse stdout: each mapping's name is the first whitespace-delimited field per line; treat an empty/no-entries result as zero mappings, not an error (confirm the exact no-entries string dmsetup prints against real `dmsetup ls` output during hardware verification — not confirmed in this story's authoring sandbox, no privileged `dmsetup`/`cryptsetup` access available there).
   - Keep only names starting with `"{MAPPING_NAME_PREFIX}-"` (the literal prefix plus separator — matches `mapping_name::mapping_name`'s own `format!("{MAPPING_NAME_PREFIX}-{hash:016x}")`, so an unrelated mapping name that merely starts with `"vault"` without the following `-` is correctly excluded).
   - For each surviving name, run `cryptsetup status <name>`, find the line whose trimmed key (text before the first `:`) is `device`, and use its trimmed value as `source_path`. A `cryptsetup status` failure for one discovered name (e.g. a race where it closed between the `dmsetup ls` and this call) propagates as this whole call's `Err` — do not silently skip it; this codebase already accepts this narrow TOCTOU window as a deferred, low-likelihood risk (ARCHITECTURE-SPINE.md's Deferred section), not something this story needs to newly handle per-entry.
   - Add `"dmsetup"` to `LuksBackend::check_prerequisites`'s checked binaries (`src/adapters/exec/mod.rs` ~line 764-789) — see Dev Notes: this is a genuine new dependency this story introduces that epics.md's Epic 4 dependency list omitted.
   - Add `lvm2` (the package providing `dmsetup` — confirmed not bundled with the `cryptsetup` package in nixpkgs) to `flake.nix`'s devShell `packages`, with a comment mirroring `psmisc`'s existing AD-18 comment.
 
-- [ ] **Task 3: Extract a shared `close_mapping` helper from `close::run` (AC #1)**
+- [x] **Task 3: Extract a shared `close_mapping` helper from `close::run` (AC #1)**
   - In `src/domain/workflows/close.rs`, split `run`'s body (everything after building `mapper`) into a new `pub(crate) fn close_mapping(mapper: &MapperHandle, skip_hooks: bool, warn: &dyn Fn(HookWarning), luks: &dyn LuksBackend, fs: &dyn FilesystemBackend) -> Result<(), DomainError>` — identical logic (hooks step with its "not currently mounted" tolerance, then `fs.umount`, then `luks.close`), no behavior change. `run` becomes: `preflight::check` → derive `mapper` via `mapping_name::mapping_name(path)` → `close_mapping(&mapper, ...)`.
   - This lets `close_all` apply the *exact same* per-mapping sequence without re-deriving a mapping name from a path it doesn't have (Story's whole discovery point is that no path is needed) and without duplicating the hooks/umount/close ordering logic.
 
-- [ ] **Task 4: New `domain::workflows::close_all` module (AC #1, #2, #3, #4)**
+- [x] **Task 4: New `domain::workflows::close_all` module (AC #1, #2, #3, #4)**
   - New `src/domain/workflows/close_all.rs`:
     ```rust
     pub fn run(
@@ -50,7 +54,7 @@ so that I don't have to close them one by one when I'm done using several.
   - Body: `preflight::check(luks, fido2, fs)?;` then `let mappings = luks.list_open_mappings()?;` (a discovery failure here is the function's own `Err` — distinct from, and never confused with, a per-mapping close failure below) then map each discovered mapper through `close::close_mapping(&mapper, skip_hooks, warn, luks, fs)`, collecting `(mapper, result)` pairs into the returned `Vec` — one mapping's `Err` must never stop the loop (AC #2). An empty `mappings` list simply yields `Ok(vec![])` (AC #3).
   - Register `pub mod close_all;` in `src/domain/workflows/mod.rs`.
 
-- [ ] **Task 5: `cli` — `close-all` subcommand + `run_close_all` (AC #1, #2, #3, #4)**
+- [x] **Task 5: `cli` — `close-all` subcommand + `run_close_all` (AC #1, #2, #3, #4)**
   - In `src/cli/main.rs`'s `Commands` enum, add (clap's default kebab-case rename makes this `close-all` on the command line, no explicit rename needed):
     ```rust
     /// Close every currently open/unlocked tomb in one command
@@ -64,12 +68,12 @@ so that I don't have to close them one by one when I'm done using several.
   - Add `fn run_close_all(skip_hooks: bool)`, mirroring `run_close`'s shape (preflight check first, same `print_hook_warning` seam), then reports the batch: if the returned `Vec` is empty, print `"No tombs are currently open."` and return; otherwise print one line per mapping — `"Closed {source_path}."` on success, `"Failed to close {source_path}: {translated error}"` (via `ux::translate`) to stderr on failure — then `std::process::exit(1)` if any mapping failed, after every line has been printed (AC #2's "reports every failure alongside every success" — never exit early on the first failure). No confirmation prompt, same reasoning `run_close`'s own doc comment already gives (closing is fully reversible).
   - Wire `Commands::CloseAll { skip_hooks } => run_close_all(skip_hooks),` into `run()`'s dispatch match.
 
-- [ ] **Task 6: Extend test fakes for close-all coverage (AC #1, #2, #3)**
+- [x] **Task 6: Extend test fakes for close-all coverage (AC #1, #2, #3)**
   - `FakeLuksBackend` (`tests/unit/fakes.rs`): add `open_mappings: RefCell<Vec<MapperHandle>>` (default empty) + `pub fn with_open_mappings(self, mappings: Vec<MapperHandle>) -> Self`; implement `list_open_mappings` (log `"list_open_mappings"`, `fail_if("list_open_mappings")`, return the field).
   - The existing `fail_at: Option<&'static str>` is a single global failing-call-name — it cannot express "mapping A's `close` fails, mapping B's `close` succeeds" within one batch, which AC #2 needs. Add a second, independent mechanism: `close_failure_for: RefCell<HashSet<String>>` (matched against `MapperHandle.name`) + `pub fn with_close_failure_for(self, name: &str) -> Self`; `close()` checks this set in addition to (not instead of) `fail_at`.
   - `FakeFilesystemBackend`: same need for `umount` — `umount_failure_for: RefCell<HashSet<String>>` + `pub fn with_umount_failure_for(self, name: &str) -> Self`, checked alongside the existing `fail_at`/`umount_not_currently_mounted` logic in `umount()`.
 
-- [ ] **Task 7: Unit tests — new `tests/unit/close_all.rs` (AC #1, #2, #3, #4)**
+- [x] **Task 7: Unit tests — new `tests/unit/close_all.rs` (AC #1, #2, #3, #4)**
   - Multiple discovered mappings each get the full close sequence (hooks → umount → luks.close), matching `close.rs`'s own per-call-log-assertion style; assert each `luks.close`/`fs.umount` call actually received the mapper `list_open_mappings` returned (identity, not a re-derived name).
   - One mapping's `close_failure_for`/`umount_failure_for` failure doesn't stop the loop: assert the returned `Vec` contains that mapping's `Err` *and* every other mapping's `Ok`, and that every other mapping's port calls still happened.
   - Zero open mappings → `Ok(vec![])`; assert no `umount`/`close`/hooks-related calls happened beyond `list_open_mappings` itself.
@@ -78,10 +82,10 @@ so that I don't have to close them one by one when I'm done using several.
   - A `list_open_mappings` failure itself (`with_failure_at("list_open_mappings")`) propagates as `close_all::run`'s own `Err`, distinct in kind from a per-mapping `Err` inside the returned `Vec`.
   - Register `mod close_all;` in `tests/unit/main.rs` (alphabetically between `close` and `create`).
 
-- [ ] **Task 8: `tests/unit/workflows.rs` — close-all's preflight-gate test (AC #4)**
+- [x] **Task 8: `tests/unit/workflows.rs` — close-all's preflight-gate test (AC #4)**
   - Add `close_all_run_stops_at_preflight_before_touching_any_port`, mirroring the existing `close_run_stops_at_preflight_before_touching_any_port` (a failing `FakeLuksBackend` must short-circuit to `DomainError::PreflightFailed` before `list_open_mappings`/any workflow logic runs).
 
-- [ ] **Task 9: `cli` help text + docs pass (AC: all)**
+- [x] **Task 9: `cli` help text + docs pass (AC: all)**
   - Confirm `close-all --help` text is clear with no FIDO2/hooks jargon assumed (`cargo run -- close-all --help`), same standard Story 4.4's Task 11 applied.
   - README.md's "What it does" table already carries a "Close all" row describing this exact behavior (written ahead of implementation) — re-read it against what actually shipped and correct only if it's now inaccurate; do not restate it as new work if it already matches.
   - Run `cargo fmt`, `cargo build --tests`, `cargo test --test unit`, `cargo clippy --all-targets` (all must be clean, matching every prior Epic 4 story's exit bar) before marking this story done. `make test-hardware`'s manual run (verifying `dmsetup ls`'s real no-entries output text from Task 2, and a real multi-tomb close-all) is `LeReverandNox`'s step, not a new automated hardware test — same precedent Story 4.3/4.4 established for hardware-only verification.
@@ -161,8 +165,41 @@ Same reasoning `run_close`'s existing doc comment gives for single `close`: clos
 
 ### Agent Model Used
 
+Claude Sonnet 5 (Amelia persona, BMad dev-story workflow)
+
 ### Debug Log References
+
+None — no failing test loop or crash required debugging; implementation matched the story's Dev Notes on the first pass. One out-of-scope stray edit to `src/domain/workflows/unlock.rs` (a rustfmt reformat picked up incidentally by a full-repo `cargo fmt --check` invocation) was caught via `git diff --stat` before commit and reverted with `git checkout -- src/domain/workflows/unlock.rs`, keeping the working tree scoped to this story's Project Structure Notes list.
 
 ### Completion Notes List
 
+- AC #1: `LuksBackend::list_open_mappings` (port) + `ExecAdapter` impl added — `dmsetup ls` (run via `privileged()`, consistent with every other live device-mapper query in this adapter) filtered to `vault-`-prefixed names, then `cryptsetup status <name>`'s `device:` line recovers each mapping's `source_path`. A `cryptsetup status` failure for one name propagates as `list_open_mappings`'s own `Err`, per Dev Notes' "hard stop, never a per-entry skip" resolution.
+- AC #1: `close::run` split into path-resolution + a new `pub(crate) close_mapping` helper (hooks → umount → luks.close), reused unchanged by `close_all::run` — one implementation of the ordering, not two.
+- AC #1/#2/#3/#4: new `domain::workflows::close_all::run` — preflight first, then `list_open_mappings`, then applies `close_mapping` to every discovered mapping via `.map(...).collect()`, so one mapping's `Err` can never short-circuit the batch (`Iterator::map` isn't `Result`-short-circuiting here since the closure itself never returns `Result`). Empty discovery yields `Ok(vec![])`.
+- AC #1: CLI `close-all` subcommand + `run_close_all` — no `path` arg (discovery needs none), reports every mapping's outcome (success to stdout, failure with `ux::translate`'d message to stderr) before a single `std::process::exit(1)` if any failed, never exiting early. "No tombs are currently open." for the empty case.
+- Dependency gap resolved in code: `dmsetup` added to `LuksBackend::check_prerequisites`, `lvm2` added to `flake.nix`'s devShell (provides `dmsetup`, confirmed not bundled with nixpkgs' `cryptsetup` package).
+- Test fakes extended per Task 6: `FakeLuksBackend::with_open_mappings`/`with_close_failure_for`, `FakeFilesystemBackend::with_umount_failure_for` — the name-keyed failure sets are additive to the existing global `fail_at`, so no existing test needed to change.
+- New `tests/unit/close_all.rs` (7 tests) covers: full batch close sequence with mapper identity assertions, one mapping's `close` failure not stopping the batch, one mapping's `umount` failure not stopping the batch, zero-mappings empty-Ok, preflight short-circuit, `skip_hooks` applying to every mapping in the batch, and `list_open_mappings`'s own failure propagating distinctly from a per-mapping failure.
+- `tests/unit/workflows.rs` gained `close_all_run_stops_at_preflight_before_touching_any_port`, mirroring the existing per-workflow preflight-gate tests.
+- Added a `CloseAllResults` type alias in `close_all.rs` to clear a new clippy "very complex type" lint the story's literal signature would otherwise trip — same underlying `Vec<(MapperHandle, Result<(), DomainError>)>` type, no signature change in substance.
+- README.md's existing "Close all" row and break-glass `dmsetup ls | grep '^vault-'` example were re-checked against the shipped implementation and found already accurate — no changes needed.
+- Full validation clean: `cargo fmt` (story-touched files only — `unlock.rs`'s pre-existing, out-of-scope formatting drift confirmed present on baseline and left untouched), `cargo build --tests`, `cargo test --test unit` (166 passed), `cargo clippy --all-targets` (0 errors, same 4 pre-existing warnings as baseline, 0 new).
+- Not run in this sandbox (no privileged `dmsetup`/`cryptsetup` access): `make test-hardware`'s manual verification of `dmsetup ls`'s real no-entries output text and a real multi-tomb close-all — flagged in Task 2/9 as `LeReverandNox`'s step, same precedent as Stories 4.3/4.4.
+- Process note: task-by-task atomic commits were not made live during implementation — all production and test code was written in one continuous pass, then committed retroactively in task-ordered, file-scoped commits after the fact (see git log), same precedent Story 4.4's own Completion Notes recorded. Tests, checkboxes, and this record all reflect the actual, verified end state.
+
 ### File List
+
+- `src/ports/luks_backend.rs` (M) — `list_open_mappings` method added to `LuksBackend` trait.
+- `src/domain/mapping_name.rs` (M) — `MAPPING_NAME_PREFIX` changed to `pub(crate)`.
+- `src/domain/workflows/close.rs` (M) — `run` split into path-resolution + new `pub(crate) close_mapping` helper.
+- `src/domain/workflows/close_all.rs` (A) — new batch-close workflow.
+- `src/domain/workflows/mod.rs` (M) — registers `pub mod close_all;`.
+- `src/adapters/exec/mod.rs` (M) — `list_open_mappings` impl (`dmsetup ls` + `cryptsetup status` parsing), `dmsetup` added to `check_prerequisites`.
+- `src/cli/main.rs` (M) — `CloseAll` variant, `run_close_all`, dispatch wiring.
+- `flake.nix` (M) — `lvm2` added to devShell packages.
+- `tests/unit/fakes.rs` (M) — `FakeLuksBackend`/`FakeFilesystemBackend` extended (`with_open_mappings`, `with_close_failure_for`, `with_umount_failure_for`, `list_open_mappings` impl).
+- `tests/unit/close_all.rs` (A) — new unit test suite for `close_all::run` (7 tests).
+- `tests/unit/main.rs` (M) — registers `mod close_all;`.
+- `tests/unit/workflows.rs` (M) — new preflight-gate test for `close_all::run`.
+- `_bmad-output/implementation-artifacts/4-5-close-every-open-tomb-close-all.md` (M) — story file itself (frontmatter, tasks, Dev Agent Record, Change Log, Status).
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` (M) — story status transitions.
