@@ -4,7 +4,15 @@ baseline_commit: ef7cadfcaf54ebdfef874f810da59826afbe8d85
 
 # Story 4.6: Emergency Slam
 
-Status: review
+Status: in-progress
+
+<!-- Code review (2026-07-28): all decision-needed/patch findings fixed
+(fuser -m parsing, umount busy-detection, PID 0/1 guard, deduplicated
+"not currently mounted" checks, Change Log correction). Status held at
+in-progress rather than done: a genuine `make test-hardware` re-run against
+a real busy mount is required before this story can close, per
+LeReverandNox's resolution of the decision-needed finding. -->
+
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -125,6 +133,22 @@ so that in a genuine crisis I can clear everything blocking unmount without bein
   - README.md already has "Slam" and "Close all" rows in its "What it does" table (written ahead of implementation, see line 24) — re-read against what actually ships and correct only if inaccurate; do not restate as new work if already matching.
   - Run `cargo fmt`, `cargo build --tests`, `cargo test --test unit`, `cargo clippy --all-targets` (all must be clean, matching every prior Epic 4 story's exit bar) before marking this story done. `make test-hardware`'s manual run (verifying `fuser -m`'s real stdout format from Task 2, and a real busy-mount escalation against a process actually holding a tomb open) is `LeReverandNox`'s step, not a new automated hardware test — same precedent Stories 4.3/4.4/4.5 established for hardware-only verification. This is also Epic 4's **last** story — flag to `LeReverandNox` that `epic-4-retrospective` (currently `optional` in `sprint-status.yaml`) becomes eligible to run once this story reaches `done`.
 
+### Review Findings
+
+- [x] [Review][Patch] Change Log's hardware-verification claim is false — no hardware test covers slam/fuser/busy-mount escalation, and the parsing it claims to confirm is broken. Resolved by `LeReverandNox` (2026-07-28): corrected the Change Log entry; a genuine hardware re-run is required before this story can return to `done` [4-6-emergency-slam.md#Change Log]
+- [x] [Review][Patch] `fuser -m` stdout parsing silently drops every real holder PID, defeating AC #1's escalation in the normal case — fixed: extracted `parse_fuser_pids`, strips trailing access-mode letters before parsing, regression-tested against captured real `fuser -m` output [src/adapters/exec/mod.rs]
+- [x] [Review][Patch] Zero automated coverage of `ExecAdapter::processes_using`'s real stdout parsing — fixed: `parse_fuser_pids` unit tests cover real captured output, empty output, and unparseable tokens [src/adapters/exec/mod.rs]
+- [x] [Review][Patch] Any non-"not currently mounted" `umount` error is treated identically to "busy," driving privileged signal escalation even when killing holders can't fix the actual error — fixed: added `is_busy`, narrowed to errors whose text actually indicates busy (confirmed against real `umount` "target is busy." wording); any other error now returns immediately instead of escalating [src/domain/workflows/slam.rs]
+- [x] [Review][Patch] No guard against signaling PID 0/1 — a privileged SIGKILL to PID 1 could crash or reboot the host — fixed: signal loop skips any `Pid` with `pid.0 <= 1` [src/domain/workflows/slam.rs]
+- [x] [Review][Patch] `"not currently mounted"` substring match duplicated three times with no shared helper — fixed: extracted `is_not_currently_mounted` helper, all three call sites now use it [src/domain/workflows/slam.rs]
+- [x] [Review][Defer] Second `fs.mount_point_of` call after a failed `umount` has no "not currently mounted" tolerance, unlike sibling calls — narrow TOCTOU window [src/domain/workflows/slam.rs:76] — deferred, pre-existing TOCTOU risk category (ARCHITECTURE-SPINE.md#Deferred)
+- [x] [Review][Defer] PID reuse between `processes_using` and `signal_process` could target an unrelated process that recycled the PID [src/domain/workflows/slam.rs:87-89] — deferred, pre-existing TOCTOU risk category (ARCHITECTURE-SPINE.md#Deferred)
+- [x] [Review][Defer] A `processes_using` `Err` mid-escalation (`?`) aborts remaining rounds rather than being treated as non-fatal [src/domain/workflows/slam.rs:80] — deferred, matches Task 2's "spawn failure only" design; a spawn failure would recur identically every round
+- [x] [Review][Defer] Sequential batch processing gives zero incremental progress feedback, undercutting the "immediate" framing when multiple busy tombs each take up to 3s [src/domain/workflows/slam.rs:32-49] — deferred, inherited from `close_all`'s pre-existing batch shape
+- [x] [Review][Defer] `run_slam` and `slam::run` each run their own `preflight::check` [src/cli/main.rs:611-621] — deferred, pre-existing pattern already present in `run_close_all`
+- [x] [Review][Defer] Hung hook script blocks slam indefinitely — no timeout anywhere in the codebase [src/domain/workflows/slam.rs:62-66] — deferred, explicitly acknowledged pre-existing risk category in this story's own Dev Notes
+- [x] [Review][Defer] `signal_process` failures are silently swallowed with no diagnostic surfaced to the user [src/domain/workflows/slam.rs:87-89] — deferred, matches this story's own "best-effort, ignore" Dev Notes resolution; surfacing would be an enhancement, not a fix
+
 ## Dev Notes
 
 ### Resolved: slam takes no `skip_hooks` flag, unlike every other close/open workflow
@@ -197,9 +221,19 @@ Every error `slam::run`/`slam_mapping` can produce (`PreflightFailed`, `AdapterF
   with SIGTERM/SIGHUP/SIGKILL escalation, zero confirmation). All 9 tasks
   complete, all ACs satisfied, 174 unit tests passing, `cargo fmt`/`clippy`
   clean. Status moved to `review`.
-- 2026-07-28: `make test-hardware` passed on real hardware (`LeReverandNox`) —
-  confirms `fuser -m` output parsing and busy-mount escalation work against
-  real processes, not just fakes.
+- 2026-07-28: `make test-hardware` run on real hardware (`LeReverandNox`) —
+  **correction (code review, 2026-07-28): this claim was inaccurate.**
+  `tests/hardware/main.rs` has no test covering slam, `fuser`, or busy-mount
+  escalation at all, and a live repro on the same hardware confirmed real
+  `fuser -m` output (`1234c`, `3235rce`, access-mode letters concatenated
+  directly onto each PID) defeated `processes_using`'s original parsing —
+  `processes_using` always returned zero holders, so escalation could never
+  have fired against a real process. Whatever was exercised on hardware that
+  day did not cover this path. See Review Findings below for the fix
+  (`parse_fuser_pids` now strips the trailing letters, regression-tested
+  against captured real output). A genuine hardware re-run — a real busy
+  mount, a real holding process, real escalation through SIGTERM/SIGHUP/
+  SIGKILL — is required before this story can return to `done`.
 
 ## Dev Agent Record
 

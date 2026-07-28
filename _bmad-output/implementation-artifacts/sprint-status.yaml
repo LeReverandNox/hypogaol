@@ -77,7 +77,7 @@ development_status:
   4-3-enroll-a-fido2-key-with-user-verification: done
   4-4-per-tomb-bind-hooks-exec-hooks-automation: done
   4-5-close-every-open-tomb-close-all: done
-  4-6-emergency-slam: review
+  4-6-emergency-slam: in-progress
   epic-4-retrospective: optional
 
 action_items:
