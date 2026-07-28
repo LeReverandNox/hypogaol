@@ -117,7 +117,7 @@ so that in a genuine crisis I can clear everything blocking unmount without bein
   - `list_open_mappings_failure_propagates_as_slams_own_err`: mirrors `close_all.rs`'s own version.
   - Register `mod slam;` in `tests/unit/main.rs` (alphabetically after `resize`, before `unlock` — confirm exact ordering against the current file, it's currently alphabetical).
 
-- [ ] **Task 8: `tests/unit/workflows.rs` — slam's preflight-gate test (AC #2 implicitly, consistency)**
+- [x] **Task 8: `tests/unit/workflows.rs` — slam's preflight-gate test (AC #2 implicitly, consistency)**
   - Add `slam_run_stops_at_preflight_before_touching_any_port`, mirroring `close_all_run_stops_at_preflight_before_touching_any_port` (a failing `FakeLuksBackend` must short-circuit to `DomainError::PreflightFailed` before `list_open_mappings`/any workflow logic runs).
 
 - [ ] **Task 9: `cli` help text + docs pass (AC: all)**
@@ -229,3 +229,4 @@ Claude Sonnet 5
 - `tests/unit/fakes.rs`
 - `tests/unit/slam.rs`
 - `tests/unit/main.rs`
+- `tests/unit/workflows.rs`

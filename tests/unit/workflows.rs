@@ -1,6 +1,6 @@
 use tomb_fido2::domain::errors::DomainError;
 use tomb_fido2::domain::types::{CreateTarget, Filesystem};
-use tomb_fido2::domain::workflows::{close, close_all, create, resize, unlock};
+use tomb_fido2::domain::workflows::{close, close_all, create, resize, slam, unlock};
 use tomb_fido2::ports::fido2_backend::Fido2DeviceSelection;
 
 use crate::fakes::{no_progress, FakeFido2Backend, FakeFilesystemBackend, FakeLuksBackend};
@@ -78,6 +78,17 @@ fn close_all_run_stops_at_preflight_before_touching_any_port() {
     let fs = FakeFilesystemBackend::passing();
 
     let result = close_all::run(false, &|_| {}, &luks, &fido2, &fs);
+
+    assert!(matches!(result, Err(DomainError::PreflightFailed(_))));
+}
+
+#[test]
+fn slam_run_stops_at_preflight_before_touching_any_port() {
+    let luks = FakeLuksBackend::failing(&["cryptsetup"]);
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let result = slam::run(&|_| {}, &luks, &fido2, &fs);
 
     assert!(matches!(result, Err(DomainError::PreflightFailed(_))));
 }
