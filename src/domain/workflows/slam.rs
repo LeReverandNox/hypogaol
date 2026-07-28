@@ -48,6 +48,24 @@ pub fn run(
         .collect())
 }
 
+/// True when an `AdapterFailure`'s message is the idempotent "already
+/// unmounted" marker `close_mapping` also tolerates for a prior partial
+/// close.
+fn is_not_currently_mounted(err: &DomainError) -> bool {
+    matches!(err, DomainError::AdapterFailure(msg) if msg.contains("not currently mounted"))
+}
+
+/// True when an `AdapterFailure`'s message indicates the mount target is
+/// actually busy (confirmed real `umount` wording: "target is busy.",
+/// util-linux 2.42; matched case-insensitively to also cover older
+/// "device is busy" phrasing). Any other `umount` failure — permission,
+/// I/O, a missing mapping — can't be fixed by signaling holders, so it must
+/// not drive the escalation loop below (review finding, 2026-07-28: the
+/// original code escalated on *any* non-"not currently mounted" error).
+fn is_busy(err: &DomainError) -> bool {
+    matches!(err, DomainError::AdapterFailure(msg) if msg.to_lowercase().contains("busy"))
+}
+
 /// The per-mapping slam sequence: hooks step once, then `umount`, escalating
 /// through signals if busy (AC #1, #3).
 fn slam_mapping(
@@ -61,16 +79,14 @@ fn slam_mapping(
     // for a prior partial close.
     match run_hooks_step(mapper, warn, fs) {
         Ok(()) => {}
-        Err(DomainError::AdapterFailure(msg)) if msg.contains("not currently mounted") => {}
+        Err(err) if is_not_currently_mounted(&err) => {}
         Err(err) => return Err(err),
     }
 
     match fs.umount(mapper) {
         Ok(()) => luks.close(mapper),
-        Err(DomainError::AdapterFailure(msg)) if msg.contains("not currently mounted") => {
-            luks.close(mapper)
-        }
-        Err(err) => {
+        Err(err) if is_not_currently_mounted(&err) => luks.close(mapper),
+        Err(err) if is_busy(&err) => {
             // Busy — fall through to the escalation loop below, keeping this
             // as the last-seen error in case every signal fails to clear it.
             let mountpoint = fs.mount_point_of(mapper)?;
@@ -85,23 +101,28 @@ fn slam_mapping(
                 }
 
                 for pid in holders {
-                    let _ = fs.signal_process(pid, signal);
+                    // Never signal PID 0/1 (init) — a privileged SIGKILL to
+                    // PID 1 can crash or reboot the host (review finding,
+                    // 2026-07-28). `fuser -m` should never report either for
+                    // a tomb's mountpoint; skip defensively if it ever does.
+                    if pid.0 > 1 {
+                        let _ = fs.signal_process(pid, signal);
+                    }
                 }
 
                 std::thread::sleep(ESCALATION_PAUSE);
 
                 match fs.umount(mapper) {
                     Ok(()) => return luks.close(mapper),
-                    Err(DomainError::AdapterFailure(msg))
-                        if msg.contains("not currently mounted") =>
-                    {
-                        return luks.close(mapper);
-                    }
+                    Err(err) if is_not_currently_mounted(&err) => return luks.close(mapper),
                     Err(err) => last_err = err,
                 }
             }
 
             Err(last_err)
         }
+        // Some other `umount` failure that escalation can't fix — report it
+        // immediately instead of signaling unrelated holders.
+        Err(err) => Err(err),
     }
 }
