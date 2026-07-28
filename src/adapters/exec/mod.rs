@@ -1244,6 +1244,29 @@ fn cryptsetup_status_field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
     })
 }
 
+/// Parses `fuser -m`'s stdout into holder PIDs (used by `processes_using`,
+/// AD-18). `fuser` writes only the matched PIDs to stdout (everything else
+/// goes to stderr, fuser(1) OUTPUT section), but — unless `-v` is given —
+/// each PID has one or more access-type letters (`c`, `e`, `f`, `F`, `m`,
+/// `r`) appended directly with no separating whitespace, e.g. `1234c` or
+/// `3235rce` (confirmed against a real psmisc build, review finding
+/// 2026-07-28 — the original `token.parse::<u32>()` rejected every real
+/// token, always yielding zero holders). Strip the trailing letters before
+/// parsing; a token that still doesn't parse as `u32` is skipped
+/// defensively.
+fn parse_fuser_pids(stdout: &str) -> Vec<Pid> {
+    stdout
+        .split_whitespace()
+        .filter_map(|token| {
+            token
+                .trim_end_matches(|c: char| !c.is_ascii_digit())
+                .parse::<u32>()
+                .ok()
+        })
+        .map(Pid)
+        .collect()
+}
+
 impl Fido2Backend for ExecAdapter {
     fn check_prerequisites(&self) -> Result<(), Vec<String>> {
         let mut missing = Vec::new();
@@ -2082,16 +2105,7 @@ impl FilesystemBackend for ExecAdapter {
             .output()
             .map_err(|e| DomainError::AdapterFailure(format!("failed to run fuser: {e}")))?;
 
-        // `fuser` writes only the matched PIDs to stdout (whitespace-
-        // separated); everything else goes to stderr (fuser(1) OUTPUT
-        // section). Tokens that don't parse are skipped defensively.
-        let pids = String::from_utf8_lossy(&output.stdout)
-            .split_whitespace()
-            .filter_map(|token| token.parse::<u32>().ok())
-            .map(Pid)
-            .collect();
-
-        Ok(pids)
+        Ok(parse_fuser_pids(&String::from_utf8_lossy(&output.stdout)))
     }
 
     fn signal_process(&self, pid: Pid, signal: Signal) -> Result<(), DomainError> {
@@ -2313,5 +2327,29 @@ mod tests {
 
         assert_eq!(cryptsetup_status_field(text, "loop"), None);
         assert_eq!(cryptsetup_status_field(text, "device"), None);
+    }
+
+    #[test]
+    fn parse_fuser_pids_strips_access_mode_letters_from_real_psmisc_output() {
+        // Captured from a real `fuser -m` run (psmisc 23.7): each PID has
+        // one or more access-type letters appended with no separating
+        // whitespace — review finding 2026-07-28, the original
+        // `token.parse::<u32>()` rejected every one of these.
+        let stdout = "2880re  3050e  14354rm 3235rce 385737c";
+
+        assert_eq!(
+            parse_fuser_pids(stdout),
+            vec![Pid(2880), Pid(3050), Pid(14354), Pid(3235), Pid(385737)]
+        );
+    }
+
+    #[test]
+    fn parse_fuser_pids_returns_empty_for_no_holders() {
+        assert_eq!(parse_fuser_pids(""), vec![]);
+    }
+
+    #[test]
+    fn parse_fuser_pids_skips_tokens_that_are_not_pids_even_after_stripping() {
+        assert_eq!(parse_fuser_pids("not-a-pid 1234c"), vec![Pid(1234)]);
     }
 }
