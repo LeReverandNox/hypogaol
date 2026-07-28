@@ -26,6 +26,7 @@
             systemd
             libfido2
             psmisc # fuser/kill, slam's busy-mount escalation (AD-18)
+            lvm2 # dmsetup, close-all's live mapping discovery (AD-17)
           ];
 
           RUST_BACKTRACE = "1";

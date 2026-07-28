@@ -10,6 +10,7 @@ use serde_json::Value;
 use zeroize::Zeroizing;
 
 use crate::domain::errors::DomainError;
+use crate::domain::mapping_name;
 use crate::domain::types::{
     Filesystem, HookFileMeta, KeyMetadata, KeyslotInfo, KeyslotRef, MapperHandle,
 };
@@ -781,6 +782,13 @@ impl LuksBackend for ExecAdapter {
             );
         }
 
+        // AD-17 (Story 4.5's close-all discovery) needs `dmsetup ls` to
+        // enumerate live mappings — not bundled with the `cryptsetup`
+        // nixpkgs package, ships in `lvm2` instead (see flake.nix).
+        if !binary_on_path("dmsetup") {
+            missing.push("dmsetup binary not found on PATH".to_string());
+        }
+
         if missing.is_empty() {
             Ok(())
         } else {
@@ -1150,6 +1158,71 @@ impl LuksBackend for ExecAdapter {
                 path.display()
             ))),
         }
+    }
+
+    fn list_open_mappings(&self) -> Result<Vec<MapperHandle>, DomainError> {
+        let ls_output = privileged("dmsetup")
+            .arg("ls")
+            .output()
+            .map_err(|e| DomainError::AdapterFailure(format!("failed to run dmsetup ls: {e}")))?;
+
+        if !ls_output.status.success() {
+            return Err(DomainError::AdapterFailure(format!(
+                "dmsetup ls failed: {}",
+                String::from_utf8_lossy(&ls_output.stderr).trim()
+            )));
+        }
+
+        // Each line's first whitespace-delimited field is the mapping name
+        // (e.g. "vault-0123456789abcdef\t(253, 0)"). A no-entries result
+        // (e.g. dmsetup's own "No devices found" line) never starts with
+        // this tool's fixed prefix, so it is naturally filtered out below
+        // without any special-case handling.
+        let prefix = format!("{}-", mapping_name::MAPPING_NAME_PREFIX);
+        let names: Vec<String> = String::from_utf8_lossy(&ls_output.stdout)
+            .lines()
+            .filter_map(|line| line.split_whitespace().next())
+            .filter(|name| name.starts_with(&prefix))
+            .map(str::to_string)
+            .collect();
+
+        let mut mappings = Vec::with_capacity(names.len());
+        for name in names {
+            let status_output = privileged("cryptsetup")
+                .arg("status")
+                .arg(&name)
+                .output()
+                .map_err(|e| {
+                    DomainError::AdapterFailure(format!("failed to run cryptsetup status: {e}"))
+                })?;
+
+            if !status_output.status.success() {
+                return Err(DomainError::AdapterFailure(format!(
+                    "cryptsetup status {name} failed: {}",
+                    String::from_utf8_lossy(&status_output.stderr).trim()
+                )));
+            }
+
+            let text = String::from_utf8_lossy(&status_output.stdout);
+            let source_path = text
+                .lines()
+                .find_map(|line| {
+                    let (key, value) = line.split_once(':')?;
+                    (key.trim() == "device").then(|| value.trim().to_string())
+                })
+                .ok_or_else(|| {
+                    DomainError::AdapterFailure(format!(
+                        "cryptsetup status {name} output missing a parsable device: line"
+                    ))
+                })?;
+
+            mappings.push(MapperHandle {
+                name,
+                source_path: PathBuf::from(source_path),
+            });
+        }
+
+        Ok(mappings)
     }
 }
 
