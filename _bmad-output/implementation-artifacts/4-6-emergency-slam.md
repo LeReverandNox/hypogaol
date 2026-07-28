@@ -197,6 +197,9 @@ Every error `slam::run`/`slam_mapping` can produce (`PreflightFailed`, `AdapterF
   with SIGTERM/SIGHUP/SIGKILL escalation, zero confirmation). All 9 tasks
   complete, all ACs satisfied, 174 unit tests passing, `cargo fmt`/`clippy`
   clean. Status moved to `review`.
+- 2026-07-28: `make test-hardware` passed on real hardware (`LeReverandNox`) —
+  confirms `fuser -m` output parsing and busy-mount escalation work against
+  real processes, not just fakes.
 
 ## Dev Agent Record
 
@@ -237,6 +240,10 @@ Claude Sonnet 5
   real busy-mount escalation against a process actually holding a tomb open.
   Once this story reaches `done`, `epic-4-retrospective` (currently `optional`
   in `sprint-status.yaml`) becomes eligible to run.
+- **2026-07-28, `LeReverandNox`**: `make test-hardware` run on real hardware —
+  all hardware tests pass, confirming `fuser -m`'s real stdout format (Task 2)
+  and a real busy-mount escalation against a process actually holding a tomb
+  open. No code changes required.
 
 ### File List
 
