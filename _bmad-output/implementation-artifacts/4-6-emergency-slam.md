@@ -4,14 +4,14 @@ baseline_commit: ef7cadfcaf54ebdfef874f810da59826afbe8d85
 
 # Story 4.6: Emergency Slam
 
-Status: in-progress
+Status: done
 
 <!-- Code review (2026-07-28): all decision-needed/patch findings fixed
 (fuser -m parsing, umount busy-detection, PID 0/1 guard, deduplicated
-"not currently mounted" checks, Change Log correction). Status held at
-in-progress rather than done: a genuine `make test-hardware` re-run against
-a real busy mount is required before this story can close, per
-LeReverandNox's resolution of the decision-needed finding. -->
+"not currently mounted" checks, Change Log correction). Status was held at
+in-progress pending a genuine hardware re-run; LeReverandNox ran the new
+slam_escalates_through_signals_to_close_a_tomb_with_a_process_holding_it_open
+hardware test and it passed, so the story now closes for real. -->
 
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
@@ -239,6 +239,15 @@ Every error `slam::run`/`slam_mapping` can produce (`PreflightFailed`, `AdapterF
   (`tests/hardware/main.rs`), closing the "no automated hardware coverage"
   gap above — now part of `make test-hardware` going forward. Waiting on
   `LeReverandNox` to run it.
+- 2026-07-28: `LeReverandNox` ran
+  `slam_escalates_through_signals_to_close_a_tomb_with_a_process_holding_it_open`
+  on real hardware — **passed.** Confirms `parse_fuser_pids` correctly
+  parses real `fuser -m` output, `is_busy`'s escalation gate fires
+  correctly, and a real process holding a tomb's mountpoint open is
+  escalated through SIGTERM → SIGHUP → SIGKILL and genuinely killed, with
+  the tomb fully closed afterward. This is the genuine hardware
+  verification the earlier, inaccurate Change Log entry claimed. Status
+  moved to `done`.
 
 ## Dev Agent Record
 
