@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 
 use crate::domain::errors::DomainError;
-use crate::domain::types::{Filesystem, HookFileMeta, MapperHandle};
+use crate::domain::types::{Filesystem, HookFileMeta, MapperHandle, Pid, Signal};
 
 pub trait FilesystemBackend {
     /// `Err` carries one human-readable string per missing/unsupported dependency
@@ -108,4 +108,17 @@ pub trait FilesystemBackend {
     /// teardown step, once per parsed entry; individual failures are the
     /// caller's to ignore (AC #5).
     fn unmount_bind_hook_destination(&self, dest: &Path) -> Result<(), DomainError>;
+
+    /// Every process ID currently holding `mountpoint` open (`fuser -m`),
+    /// used by slam's busy-mount escalation (AD-18) to know who to signal.
+    /// `Ok(vec![])` means nothing holds it open — not an error — since the
+    /// escalation loop uses an empty result as its own "no holders remain,
+    /// stop escalating" exit condition.
+    fn processes_using(&self, mountpoint: &Path) -> Result<Vec<Pid>, DomainError>;
+
+    /// Sends `signal` to `pid` (`kill -s <signal> <pid>`). Best-effort from
+    /// the caller's perspective — slam's escalation loop ignores a single
+    /// failed signal (e.g. the process already exited between
+    /// `processes_using` and this call) rather than treating it as fatal.
+    fn signal_process(&self, pid: Pid, signal: Signal) -> Result<(), DomainError>;
 }

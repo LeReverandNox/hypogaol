@@ -23,10 +23,10 @@ so that in a genuine crisis I can clear everything blocking unmount without bein
 
 ## Tasks / Subtasks
 
-- [ ] **Task 0: Read every file this story touches before changing anything** (prevents guessing at current shapes)
+- [x] **Task 0: Read every file this story touches before changing anything** (prevents guessing at current shapes)
   - Read in full: `src/ports/filesystem_backend.rs`, `src/domain/types.rs`, `src/domain/workflows/close.rs`, `src/domain/workflows/close_all.rs`, `src/domain/workflows/mod.rs`, `src/domain/errors.rs`, `src/domain/preflight.rs`, `src/cli/main.rs` (the `CloseAll`/`Close` variants, `run_close_all`, `run_close`, `print_hook_warning`, dispatch), `src/adapters/exec/mod.rs` (`privileged()` ~line 45, `FilesystemBackend::check_prerequisites` ~line 1416-1436, `umount` ~line 1885, `mount_point_of` ~line 2028, `list_open_mappings` ~line 1163 for the discovery-loop style this story's `slam::run` mirrors), `tests/unit/fakes.rs` (`FakeLuksBackend`, `FakeFilesystemBackend`), `tests/unit/close_all.rs`, `tests/unit/workflows.rs`, `flake.nix`.
 
-- [ ] **Task 1: `Pid`/`Signal` domain types + two new `FilesystemBackend` port methods (AC #1)**
+- [x] **Task 1: `Pid`/`Signal` domain types + two new `FilesystemBackend` port methods (AC #1)**
   - Add to `src/domain/types.rs`, mirroring `KeyslotRef(pub u32)`'s style:
     ```rust
     /// A holding process's PID, as reported by `fuser -m` (AD-18) — used only
