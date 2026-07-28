@@ -1,5 +1,15 @@
 # Deferred Work
 
+## Deferred from: code review of 4-6-emergency-slam (2026-07-28)
+
+- Second `fs.mount_point_of` call after a failed `umount` has no "not currently mounted" tolerance, unlike sibling calls — narrow TOCTOU window. [src/domain/workflows/slam.rs:76]
+- PID reuse between `processes_using` and `signal_process` could target an unrelated process that recycled the PID. [src/domain/workflows/slam.rs:87-89]
+- A `processes_using` `Err` mid-escalation (`?`) aborts remaining rounds rather than being treated as non-fatal — matches Task 2's "spawn failure only" design; a spawn failure would recur identically every round. [src/domain/workflows/slam.rs:80]
+- Sequential batch processing gives zero incremental progress feedback, undercutting the "immediate" framing when multiple busy tombs each take up to 3s — inherited from `close_all`'s pre-existing batch shape. [src/domain/workflows/slam.rs:32-49]
+- `run_slam` and `slam::run` each run their own `preflight::check` — pre-existing pattern already present in `run_close_all`. [src/cli/main.rs:611-621]
+- Hung hook script blocks slam indefinitely — no timeout anywhere in the codebase; explicitly acknowledged as a pre-existing risk category in this story's own Dev Notes. [src/domain/workflows/slam.rs:62-66]
+- `signal_process` failures are silently swallowed with no diagnostic surfaced to the user — matches this story's own "best-effort, ignore" Dev Notes resolution; surfacing would be an enhancement, not a fix. [src/domain/workflows/slam.rs:87-89]
+
 ## Deferred from: code review of 4-3-enroll-a-fido2-key-with-user-verification (2026-07-27)
 
 - `run_create`/`create::run` now carry two untyped `bool` parameters (`user_verification`, `announce`) with no compiler-enforced distinction — pre-existing pattern (`announce: bool` predates this diff), not introduced by Story 4.3. [src/cli/main.rs:292]
