@@ -99,10 +99,10 @@ pub fn run(
         Ok(()) => luks
             .close(&mapper)
             .map_err(|err| grow_succeeded_close_failed(new_size, err)),
-        Err(err) => {
-            let _ = luks.close(&mapper);
-            Err(err)
-        }
+        Err(err) => Err(match luks.close(&mapper) {
+            Ok(()) => err,
+            Err(close_err) => err.with_rollback_cleanup_failure(close_err),
+        }),
     }
 }
 

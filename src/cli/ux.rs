@@ -87,6 +87,14 @@ pub fn translate(err: &DomainError) -> String {
                 path.display()
             )
         }
+        DomainError::RollbackCleanupAlsoFailed {
+            original,
+            close_detail,
+        } => format!(
+            "{} (On top of that, tomb-fido2 couldn't re-lock the LUKS2 mapping while cleaning \
+             up: {close_detail} — it may have been left open; run `close` to check.)",
+            translate(original)
+        ),
     }
 }
 

@@ -58,4 +58,26 @@ pub enum DomainError {
         path: PathBuf,
         reason: HookRejectionReason,
     },
+
+    #[error("{original}")]
+    RollbackCleanupAlsoFailed {
+        original: Box<DomainError>,
+        close_detail: String,
+    },
+}
+
+impl DomainError {
+    /// Wraps `self` to note that a best-effort rollback `luks.close` also
+    /// failed while unwinding from `self`, instead of the previous discipline
+    /// of `let _ = luks.close(...)` silently dropping that detail — the
+    /// mapping may now be left open. `self` stays the primary, correctly
+    /// translated cause; `ux::translate` unwraps `original` first and appends
+    /// a note, so no existing translation (including this one) loses
+    /// fidelity by being flattened into a generic string.
+    pub fn with_rollback_cleanup_failure(self, close_err: DomainError) -> DomainError {
+        DomainError::RollbackCleanupAlsoFailed {
+            original: Box::new(self),
+            close_detail: close_err.to_string(),
+        }
+    }
 }

@@ -33,7 +33,10 @@ pub fn run(
     let mountpoint = match fs.mount(&mapper, read_only) {
         Ok(mountpoint) => mountpoint,
         Err(err) => {
-            let _ = luks.close(&mapper);
+            let err = match luks.close(&mapper) {
+                Ok(()) => err,
+                Err(close_err) => err.with_rollback_cleanup_failure(close_err),
+            };
             return Err(err);
         }
     };
@@ -65,19 +68,26 @@ fn run_hooks_step(
     // cleanup attempt being ignored. Shared by every failure path below (not
     // just a guardrail rejection): any hook-step error after the primary
     // mount has succeeded must leave nothing dangling (AC #4's framing).
-    let rollback = |applied: &[PathBuf]| {
+    // Bind-mount and primary-umount failures stay silently best-effort as
+    // before; only the final `luks.close` is surfaced, since that's the one
+    // whose silent failure previously left the LUKS2 mapping itself
+    // indefinitely open with no trace in the error the user actually sees.
+    let rollback = |applied: &[PathBuf]| -> Option<DomainError> {
         for dest in applied {
             let _ = fs.unmount_bind_hook_destination(dest);
         }
         let _ = fs.umount(mapper);
-        let _ = luks.close(mapper);
+        luks.close(mapper).err()
+    };
+    let with_rollback = |err: DomainError, applied: &[PathBuf]| match rollback(applied) {
+        Some(close_err) => err.with_rollback_cleanup_failure(close_err),
+        None => err,
     };
 
     let home = match fs.invoking_home_dir() {
         Ok(home) => home,
         Err(err) => {
-            rollback(&[]);
-            return Err(err);
+            return Err(with_rollback(err, &[]));
         }
     };
 
@@ -88,24 +98,21 @@ fn run_hooks_step(
         let meta = match fs.hook_file_metadata(&exec_hooks_path) {
             Ok(meta) => meta,
             Err(err) => {
-                rollback(&applied_bind_mounts);
-                return Err(err);
+                return Err(with_rollback(err, &applied_bind_mounts));
             }
         };
         if let Some(reason) = hooks::exec_hook_rejection(&meta) {
-            rollback(&applied_bind_mounts);
-            return Err(DomainError::HookRejected {
+            let err = DomainError::HookRejected {
                 path: exec_hooks_path,
                 reason,
-            });
+            };
+            return Err(with_rollback(err, &applied_bind_mounts));
         }
 
-        let status = match fs.run_hook(&exec_hooks_path, &["open", &mountpoint.to_string_lossy()])
-        {
+        let status = match fs.run_hook(&exec_hooks_path, &["open", &mountpoint.to_string_lossy()]) {
             Ok(status) => status,
             Err(err) => {
-                rollback(&applied_bind_mounts);
-                return Err(err);
+                return Err(with_rollback(err, &applied_bind_mounts));
             }
         };
         if !status.success() {

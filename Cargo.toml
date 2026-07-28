@@ -3,6 +3,7 @@ name = "tomb-fido2"
 version = "0.0.0"
 edition = "2021"
 publish = false
+license = "GPL-3.0-or-later"
 repository = "https://github.com/LeReverandNox/tomb-fido2"
 
 # publish = false hides this crate from cargo-dist by default (it only considers

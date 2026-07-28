@@ -46,6 +46,8 @@ Adapted from [dyne/tomb](https://dyne.org/docs/tomb/manpage/#hooks)'s hook model
 
 ## Installation
 
+**Requires `sudo` access.** Device-backed operations (opening/closing a LUKS2 mapping, mounting/unmounting) individually elevate via `sudo`, prompted interactively right when each step is reached — never for the whole process up front, and never for operations that don't need it (e.g. `info`, `exec-hooks`). This means you need `sudo` configured for your user; a passwordless `sudo` rule is not required, since each prompt is interactive.
+
 Prebuilt binaries are published on [GitHub Releases](../../releases) for each tagged version.
 
 To build locally instead:

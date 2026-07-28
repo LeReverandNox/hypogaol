@@ -179,10 +179,10 @@ fn bootstrap_and_provision(
     );
     match result {
         Ok(()) => luks.close(&mapper),
-        Err(err) => {
-            let _ = luks.close(&mapper);
-            Err(err)
-        }
+        Err(err) => Err(match luks.close(&mapper) {
+            Ok(()) => err,
+            Err(close_err) => err.with_rollback_cleanup_failure(close_err),
+        }),
     }
 }
 
