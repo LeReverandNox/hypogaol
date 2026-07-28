@@ -234,6 +234,11 @@ Every error `slam::run`/`slam_mapping` can produce (`PreflightFailed`, `AdapterF
   against captured real output). A genuine hardware re-run — a real busy
   mount, a real holding process, real escalation through SIGTERM/SIGHUP/
   SIGKILL — is required before this story can return to `done`.
+- 2026-07-28: Added a real `#[ignore]` hardware test,
+  `slam_escalates_through_signals_to_close_a_tomb_with_a_process_holding_it_open`
+  (`tests/hardware/main.rs`), closing the "no automated hardware coverage"
+  gap above — now part of `make test-hardware` going forward. Waiting on
+  `LeReverandNox` to run it.
 
 ## Dev Agent Record
 
@@ -293,3 +298,4 @@ Claude Sonnet 5
 - `tests/unit/slam.rs`
 - `tests/unit/main.rs`
 - `tests/unit/workflows.rs`
+- `tests/hardware/main.rs` (added during code review, 2026-07-28)
