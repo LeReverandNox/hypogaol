@@ -555,7 +555,7 @@ fn run_close_all(skip_hooks: bool) {
         std::process::exit(1);
     }
 
-    println!("Closing every open tomb.");
+    println!("Checking for open tombs to close.");
 
     match close_all::run(
         skip_hooks,
