@@ -25,3 +25,10 @@ cargo-dist-version = "0.32.0"
 ci = ["github"]
 create-release = false
 targets = ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu"]
+
+# cargo-dist builds with `--profile dist` by convention; without this section
+# cargo rejects the build outright with "profile `dist` is not defined"
+# (confirmed by the first real end-to-end run of this pipeline, 2026-07-28 —
+# never caught before because it had never been exercised past `dist plan`).
+[profile.dist]
+inherits = "release"
