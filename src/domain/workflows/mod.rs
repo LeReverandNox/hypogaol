@@ -5,4 +5,5 @@ pub mod enroll;
 pub mod info;
 pub mod resize;
 pub mod revoke;
+pub mod slam;
 pub mod unlock;

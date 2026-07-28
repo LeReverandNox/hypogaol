@@ -25,7 +25,9 @@
             cryptsetup
             systemd
             libfido2
-            psmisc # fuser/kill, slam's busy-mount escalation (AD-18)
+            psmisc # fuser, slam's busy-mount escalation (AD-18); kill itself
+                   # comes from util-linux-minimal, already pulled in
+                   # transitively (confirmed via `nix develop`, 2026-07-28)
             lvm2 # dmsetup, close-all's live mapping discovery (AD-17)
           ];
 

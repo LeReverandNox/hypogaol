@@ -5,7 +5,7 @@ use std::rc::Rc;
 
 use tomb_fido2::domain::errors::DomainError;
 use tomb_fido2::domain::types::{
-    Filesystem, HookFileMeta, KeyMetadata, KeyslotInfo, KeyslotRef, MapperHandle,
+    Filesystem, HookFileMeta, KeyMetadata, KeyslotInfo, KeyslotRef, MapperHandle, Pid, Signal,
 };
 use tomb_fido2::ports::fido2_backend::{Fido2Backend, Fido2DeviceSelection};
 use tomb_fido2::ports::filesystem_backend::FilesystemBackend;
@@ -403,6 +403,18 @@ pub struct FakeFilesystemBackend {
     // `umount_not_currently_mounted` — same rationale as
     // `FakeLuksBackend::close_failure_for`.
     umount_failure_for: RefCell<HashSet<String>>,
+    // Story 4.6 (slam): `processes_using`'s return value — empty by default,
+    // so existing tests that don't care about slam's escalation are
+    // unaffected.
+    processes_using_result: RefCell<Vec<Pid>>,
+    // Story 4.6: each `umount` call decrements this (while > 0) and returns a
+    // generic busy `AdapterFailure` — distinct from `umount_not_currently_mounted`,
+    // which must look like a real busy-mount failure, not the idempotent-retry
+    // marker. Once it reaches 0, `umount` falls through to the existing checks
+    // unaffected. Default 0 means zero existing tests change behavior.
+    umount_fail_times: Cell<u32>,
+    // Story 4.6: every `(Pid, Signal)` passed to `signal_process`, in order.
+    last_signal_calls: RefCell<Vec<(Pid, Signal)>>,
 }
 
 /// A valid, unrejectable `exec-hooks` file's metadata (AC #3's guardrail
@@ -440,6 +452,9 @@ impl FakeFilesystemBackend {
             last_run_hook: RefCell::new(None),
             path_exists_sequence: RefCell::new(None),
             umount_failure_for: RefCell::new(HashSet::new()),
+            processes_using_result: RefCell::new(Vec::new()),
+            umount_fail_times: Cell::new(0),
+            last_signal_calls: RefCell::new(Vec::new()),
         }
     }
 
@@ -464,6 +479,9 @@ impl FakeFilesystemBackend {
             last_run_hook: RefCell::new(None),
             path_exists_sequence: RefCell::new(None),
             umount_failure_for: RefCell::new(HashSet::new()),
+            processes_using_result: RefCell::new(Vec::new()),
+            umount_fail_times: Cell::new(0),
+            last_signal_calls: RefCell::new(Vec::new()),
         }
     }
 
@@ -598,6 +616,27 @@ impl FakeFilesystemBackend {
             Ok(())
         }
     }
+
+    /// The `Vec<Pid>` `processes_using` returns (Story 4.6, default empty).
+    pub fn with_processes_using(self, pids: Vec<Pid>) -> Self {
+        *self.processes_using_result.borrow_mut() = pids;
+        self
+    }
+
+    /// Makes the next `times` `umount` calls fail with a generic busy
+    /// `AdapterFailure` (not the `"not currently mounted"` marker), then fall
+    /// through to the existing checks once exhausted — lets a test drive
+    /// slam's escalation loop through a fixed number of busy rounds before
+    /// clearing (Story 4.6).
+    pub fn with_umount_fail_times(self, times: u32) -> Self {
+        self.umount_fail_times.set(times);
+        self
+    }
+
+    /// Every `(Pid, Signal)` passed to `signal_process`, in call order.
+    pub fn signal_calls(&self) -> Vec<(Pid, Signal)> {
+        self.last_signal_calls.borrow().clone()
+    }
 }
 
 impl FilesystemBackend for FakeFilesystemBackend {
@@ -678,6 +717,13 @@ impl FilesystemBackend for FakeFilesystemBackend {
     fn umount(&self, mapper: &MapperHandle) -> Result<(), DomainError> {
         self.log.borrow_mut().push("umount".to_string());
         *self.last_umount.borrow_mut() = Some(mapper.clone());
+        if self.umount_fail_times.get() > 0 {
+            self.umount_fail_times.set(self.umount_fail_times.get() - 1);
+            return Err(DomainError::AdapterFailure(format!(
+                "{} is busy (test)",
+                mapper.name
+            )));
+        }
         if self.umount_not_currently_mounted {
             return Err(DomainError::AdapterFailure(format!(
                 "{} is not currently mounted",
@@ -744,6 +790,18 @@ impl FilesystemBackend for FakeFilesystemBackend {
             .borrow_mut()
             .push("unmount_bind_hook_destination".to_string());
         self.fail_if("unmount_bind_hook_destination")
+    }
+
+    fn processes_using(&self, _mountpoint: &Path) -> Result<Vec<Pid>, DomainError> {
+        self.log.borrow_mut().push("processes_using".to_string());
+        self.fail_if("processes_using")?;
+        Ok(self.processes_using_result.borrow().clone())
+    }
+
+    fn signal_process(&self, pid: Pid, signal: Signal) -> Result<(), DomainError> {
+        self.log.borrow_mut().push("signal_process".to_string());
+        self.last_signal_calls.borrow_mut().push((pid, signal));
+        self.fail_if("signal_process")
     }
 }
 

@@ -71,3 +71,18 @@ pub struct HookFileMeta {
     pub owned_by_invoking_user_or_root: bool,
     pub is_world_writable: bool,
 }
+
+/// A holding process's PID, as reported by `fuser -m` (AD-18) — used only
+/// by slam's busy-mount escalation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Pid(pub u32);
+
+/// The three signals slam's escalation loop sends, in order (AD-18) — a
+/// typed enum so only `adapters::exec` maps each variant to its `kill -s`
+/// argument; `domain` never handles a raw signal name/number.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Signal {
+    Sigterm,
+    Sighup,
+    Sigkill,
+}

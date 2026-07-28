@@ -12,6 +12,7 @@ mod preflight;
 mod progress;
 mod resize;
 mod revoke;
+mod slam;
 mod unlock;
 mod ux;
 mod workflows;

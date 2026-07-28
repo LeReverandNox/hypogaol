@@ -16,6 +16,7 @@ use crate::domain::workflows::enroll;
 use crate::domain::workflows::info;
 use crate::domain::workflows::resize;
 use crate::domain::workflows::revoke;
+use crate::domain::workflows::slam;
 use crate::domain::workflows::unlock;
 use crate::ports::fido2_backend::Fido2DeviceSelection;
 
@@ -120,6 +121,10 @@ enum Commands {
         #[arg(long, value_parser = parse_size)]
         size: u64,
     },
+
+    /// Emergency: force-close every open tomb immediately, escalating past
+    /// any busy mount, with zero confirmation
+    Slam,
 
     /// Show a tomb's technical info, including its enrolled FIDO2 keys
     Info {
@@ -596,6 +601,56 @@ fn run_close_all(skip_hooks: bool) {
     }
 }
 
+/// Builds the adapter, runs `slam::run`, and reports the result. Mirrors
+/// `run_close_all`'s shape: preflight check first, same `print_hook_warning`
+/// seam, same per-mapping success/failure reporting loop with a single
+/// `std::process::exit(1)` after every line is printed — but with **no**
+/// confirmation prompt of any kind and no pre-run "checking" framing (AC #2):
+/// the intro line reads as immediate/urgent plain language (NFR3), never
+/// implying a pause or a check step exists.
+fn run_slam() {
+    let adapter = ExecAdapter::default();
+
+    if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
+        eprintln!("{}", ux::translate(&err));
+        std::process::exit(1);
+    }
+
+    println!("Slamming every open tomb — closing immediately, no confirmation.");
+
+    match slam::run(&print_hook_warning, &adapter, &adapter, &adapter) {
+        Ok(results) => {
+            if results.is_empty() {
+                println!("No tombs are currently open.");
+                return;
+            }
+
+            let mut any_failed = false;
+            for (mapper, result) in results {
+                match result {
+                    Ok(()) => println!("Closed {}.", mapper.source_path.display()),
+                    Err(err) => {
+                        any_failed = true;
+                        eprintln!(
+                            "Failed to close {}: {}",
+                            mapper.source_path.display(),
+                            ux::translate(&err)
+                        );
+                    }
+                }
+            }
+
+            if any_failed {
+                std::process::exit(1);
+            }
+        }
+        Err(err) => {
+            eprintln!("{}", ux::translate(&err));
+            std::process::exit(1);
+        }
+    }
+}
+
 /// Builds the adapter, runs `resize::run`, and reports the result. Mirrors
 /// `run_close`'s shape: preflight check first, then a plain-language intro
 /// (FR5/NFR3) — but unlike `close`, `resize` calls `luks.open` (a real FIDO2
@@ -725,6 +780,7 @@ pub fn run() {
         Commands::Revoke { path, label } => run_revoke(path, label),
         Commands::Close { path, skip_hooks } => run_close(path, skip_hooks),
         Commands::CloseAll { skip_hooks } => run_close_all(skip_hooks),
+        Commands::Slam => run_slam(),
         Commands::Resize { path, size } => run_resize(path, size),
         Commands::Info { path } => run_info(path),
     }
