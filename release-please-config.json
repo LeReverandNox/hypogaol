@@ -1,6 +1,6 @@
 {
   "release-type": "rust",
-  "draft": true,
+  "draft": false,
   "packages": {
     ".": {}
   }
