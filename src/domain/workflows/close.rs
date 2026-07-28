@@ -41,8 +41,23 @@ pub fn run(
         source_path: path.to_path_buf(),
     };
 
+    close_mapping(&mapper, skip_hooks, warn, luks, fs)
+}
+
+/// The shared per-mapping close sequence (hooks, then `umount`, then
+/// `luks.close`) — extracted so `close_all::run` (Story 4.5) can apply the
+/// exact same ordering to each mapping `LuksBackend::list_open_mappings`
+/// discovers, without re-deriving a mapping name from a path it doesn't
+/// have. `close::run` above is now just path-resolution followed by this.
+pub(crate) fn close_mapping(
+    mapper: &MapperHandle,
+    skip_hooks: bool,
+    warn: &dyn Fn(HookWarning),
+    luks: &dyn LuksBackend,
+    fs: &dyn FilesystemBackend,
+) -> Result<(), DomainError> {
     if !skip_hooks {
-        match run_hooks_step(&mapper, warn, fs) {
+        match run_hooks_step(mapper, warn, fs) {
             Ok(()) => {}
             // Same tolerance as the `umount` match below: a prior `close`
             // that already unmounted (but failed before `luks.close`) must
@@ -53,13 +68,13 @@ pub fn run(
         }
     }
 
-    match fs.umount(&mapper) {
+    match fs.umount(mapper) {
         Ok(()) => {}
         Err(DomainError::AdapterFailure(msg)) if msg.contains("not currently mounted") => {}
         Err(err) => return Err(err),
     }
 
-    luks.close(&mapper)
+    luks.close(mapper)
 }
 
 /// Runs `exec-hooks` (hard-gated) then unmounts every still-mounted
