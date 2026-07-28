@@ -78,7 +78,7 @@ development_status:
   4-4-per-tomb-bind-hooks-exec-hooks-automation: done
   4-5-close-every-open-tomb-close-all: done
   4-6-emergency-slam: done
-  epic-4-retrospective: optional
+  epic-4-retrospective: done
 
 action_items:
   - epic: 1
@@ -100,11 +100,11 @@ action_items:
   - epic: 1
     action: "Document the sudo requirement for device-backed operations in --help/README before Epic 2's revoke/enroll touch real devices"
     owner: "unassigned"
-    status: open
+    status: done
   - epic: 1
-    action: "Add a LICENSE file and a branch-protection rule requiring CI to pass before merge"
+    action: "Add a LICENSE file and a branch-protection rule requiring CI to pass before merge. RESOLVED 2026-07-28 (Epic 4 retro): LICENSE done (GPL-3.0-or-later, commit 38ac76a); branch-protection dropped as not applicable — LeReverandNox is not on a GitHub Team/Enterprise plan and cannot configure branch-protection rules on a personal account"
     owner: "LeReverandNox"
-    status: open
+    status: done
   - epic: 1
     action: "Resolve the open design question on real step-by-step progress reporting during create/unlock"
     owner: "unassigned"
@@ -122,26 +122,34 @@ action_items:
     owner: "Amelia"
     status: in-progress
   - epic: 3
-    action: "Document the sudo requirement for device-backed operations in --help/README"
+    action: "Document the sudo requirement for device-backed operations in --help/README. DONE 2026-07-28 (Epic 4 retro), commit 38ac76a"
     owner: "Amelia"
-    status: open
+    status: done
   - epic: 3
-    action: "Add a LICENSE file and a branch-protection rule requiring CI to pass before merge"
+    action: "Add a LICENSE file and a branch-protection rule requiring CI to pass before merge. RESOLVED 2026-07-28 (Epic 4 retro): LICENSE done (GPL-3.0-or-later, commit 38ac76a); branch-protection dropped as not applicable — LeReverandNox is not on a GitHub Team/Enterprise plan"
     owner: "LeReverandNox"
-    status: open
+    status: done
   - epic: 3
-    action: "Resolve the progress-reporting design question - decide whether to fold into Epic 4 scoping or resolve standalone before Epic 4 starts"
+    action: "Resolve the progress-reporting design question - decide whether to fold into Epic 4 scoping or resolve standalone before Epic 4 starts. RESOLVED — Story 4.2 was itself this action item"
     owner: "LeReverandNox"
-    status: open
+    status: done
   - epic: 3
-    action: "Decide once, deliberately, whether the repeatedly-deferred swallowed-luks.close-on-rollback pattern (create.rs, resize.rs, unlock.rs) needs fixing or is fine to leave, instead of a fourth workflow deferring it again unexamined"
+    action: "Decide once, deliberately, whether the repeatedly-deferred swallowed-luks.close-on-rollback pattern (create.rs, resize.rs, unlock.rs) needs fixing or is fine to leave, instead of a fourth workflow deferring it again unexamined. RESOLVED 2026-07-28 (Epic 4 retro): fixed via a new DomainError::RollbackCleanupAlsoFailed variant that wraps the original error and appends the close failure detail, rather than swallowing it or flattening into the marker-sensitive AdapterFailure bucket. Commit 38ac76a"
     owner: "Amelia"
-    status: open
+    status: done
   - epic: 3
     action: "Exercise release automation end-to-end against a real tag at least once before treating it as production-ready"
     owner: "LeReverandNox"
-    status: open
+    status: in-progress
   - epic: 3
     action: "BUG (found during Story 4.3's hardware run, 2026-07-27): resize::run's tier-2 grow-only check (resize.rs's grow_open_mapping, fs.filesystem_size comparison) fails to reject a same-size resize request on a small (32 MiB) file-backed tomb — tests/hardware/main.rs's resize_rejects_a_shrink_request_and_leaves_the_tomb_untouched failed with 'expected DomainError::ResizeMustGrow, got Ok(())'. Root cause unconfirmed but suspected: mkfs.ext4 overhead on a near-minimum-size tomb makes the filesystem's own reported size close enough to the full backing-file size that new_size <= live_current_size no longer holds. Introduced in Story 3.2 (PR #29) — unrelated to Story 4.3's changes (neither resize.rs nor this test's assertions were touched by 4.3). Other 17/18 hardware tests passed."
     owner: "unassigned"
     status: open
+  - epic: 4
+    action: "Watch for 'new pure parsing/logic function ships without a unit test' as an explicit recurring-pattern check, the same way marker-bleed is checked — it hit three times in Epic 4 (4.3's fido2_verification_args, 4.5's loop:/device: field parser, 4.6's fuser -m PID parser), each caught only in review"
+    owner: "Amelia"
+    status: open
+  - epic: 4
+    action: "Push commit 38ac76a to main, merge the resulting release-please PR, and confirm v0.1.0 publishes with artifacts attached via cargo-dist — first real exercise of the release pipeline"
+    owner: "LeReverandNox"
+    status: in-progress
