@@ -83,7 +83,7 @@ pub(crate) fn close_mapping(
 /// nothing to roll back: it returns immediately, before touching `umount` or
 /// `luks.close` at all (AC #4's rollback is `unlock`'s concern, not this
 /// one's).
-fn run_hooks_step(
+pub(crate) fn run_hooks_step(
     mapper: &MapperHandle,
     warn: &dyn Fn(HookWarning),
     fs: &dyn FilesystemBackend,
