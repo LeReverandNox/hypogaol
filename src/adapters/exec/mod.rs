@@ -10,6 +10,7 @@ use serde_json::Value;
 use zeroize::Zeroizing;
 
 use crate::domain::errors::DomainError;
+use crate::domain::mapping_name;
 use crate::domain::types::{
     Filesystem, HookFileMeta, KeyMetadata, KeyslotInfo, KeyslotRef, MapperHandle,
 };
@@ -781,6 +782,13 @@ impl LuksBackend for ExecAdapter {
             );
         }
 
+        // AD-17 (Story 4.5's close-all discovery) needs `dmsetup ls` to
+        // enumerate live mappings — not bundled with the `cryptsetup`
+        // nixpkgs package, ships in `lvm2` instead (see flake.nix).
+        if !binary_on_path("dmsetup") {
+            missing.push("dmsetup binary not found on PATH".to_string());
+        }
+
         if missing.is_empty() {
             Ok(())
         } else {
@@ -1151,6 +1159,89 @@ impl LuksBackend for ExecAdapter {
             ))),
         }
     }
+
+    fn list_open_mappings(&self) -> Result<Vec<MapperHandle>, DomainError> {
+        let ls_output = privileged("dmsetup")
+            .arg("ls")
+            .output()
+            .map_err(|e| DomainError::AdapterFailure(format!("failed to run dmsetup ls: {e}")))?;
+
+        if !ls_output.status.success() {
+            return Err(DomainError::AdapterFailure(format!(
+                "dmsetup ls failed: {}",
+                String::from_utf8_lossy(&ls_output.stderr).trim()
+            )));
+        }
+
+        // Each line's first whitespace-delimited field is the mapping name
+        // (e.g. "vault-0123456789abcdef\t(253, 0)"). A no-entries result
+        // (e.g. dmsetup's own "No devices found" line) never starts with
+        // this tool's fixed prefix, so it is naturally filtered out below
+        // without any special-case handling.
+        let prefix = format!("{}-", mapping_name::MAPPING_NAME_PREFIX);
+        let names: Vec<String> = String::from_utf8_lossy(&ls_output.stdout)
+            .lines()
+            .filter_map(|line| line.split_whitespace().next())
+            .filter(|name| name.starts_with(&prefix))
+            .map(str::to_string)
+            .collect();
+
+        let mut mappings = Vec::with_capacity(names.len());
+        for name in names {
+            let status_output = privileged("cryptsetup")
+                .arg("status")
+                .arg(&name)
+                .output()
+                .map_err(|e| {
+                    DomainError::AdapterFailure(format!("failed to run cryptsetup status: {e}"))
+                })?;
+
+            if !status_output.status.success() {
+                return Err(DomainError::AdapterFailure(format!(
+                    "cryptsetup status {name} failed: {}",
+                    String::from_utf8_lossy(&status_output.stderr).trim()
+                )));
+            }
+
+            // For a file-backed tomb, `device:` reports the opaque
+            // `/dev/loopN` node cryptsetup opened internally — the original
+            // backing file only appears on its own separate `loop:` line
+            // (confirmed against real hardware, 2026-07-28: `device:
+            // /dev/loop0` alongside `loop: /path/to/tomb.img`; the Dev
+            // Notes' cryptsetup(8) citation describes this `loop:` field,
+            // not `device:`, which this call originally misread). A
+            // device-backed tomb has no loop device at all, so it has no
+            // `loop:` line and `device:` directly holds the correct raw
+            // device/partition path — hence `loop:` is preferred when
+            // present, falling back to `device:` otherwise.
+            let text = String::from_utf8_lossy(&status_output.stdout);
+            let source_path = cryptsetup_status_field(&text, "loop")
+                .or_else(|| cryptsetup_status_field(&text, "device"))
+                .ok_or_else(|| {
+                    DomainError::AdapterFailure(format!(
+                        "cryptsetup status {name} output missing a parsable loop: or device: line"
+                    ))
+                })?
+                .to_string();
+
+            mappings.push(MapperHandle {
+                name,
+                source_path: PathBuf::from(source_path),
+            });
+        }
+
+        Ok(mappings)
+    }
+}
+
+/// Finds `key`'s trimmed value on a `cryptsetup status` output line of the
+/// form `"  key:  value"`. Used by `list_open_mappings` to prefer `loop:`
+/// over `device:` when recovering a mapping's original `source_path`.
+fn cryptsetup_status_field<'a>(text: &'a str, key: &str) -> Option<&'a str> {
+    text.lines().find_map(|line| {
+        let (line_key, value) = line.split_once(':')?;
+        (line_key.trim() == key).then(|| value.trim())
+    })
 }
 
 impl Fido2Backend for ExecAdapter {
@@ -2147,5 +2238,32 @@ mod tests {
             1024,
             "the symlink target must be left untouched"
         );
+    }
+
+    #[test]
+    fn cryptsetup_status_field_prefers_loop_over_device_for_file_backed_tomb() {
+        let text = "/dev/mapper/vault-0123456789abcdef is active.\n  type:    LUKS2\n  cipher:  aes-xts-plain64\n  device:  /dev/loop0\n  loop:    /home/user/tombs/tomb.img\n  sector size:  512\n";
+
+        assert_eq!(
+            cryptsetup_status_field(text, "loop"),
+            Some("/home/user/tombs/tomb.img")
+        );
+        assert_eq!(cryptsetup_status_field(text, "device"), Some("/dev/loop0"));
+    }
+
+    #[test]
+    fn cryptsetup_status_field_falls_back_to_device_for_device_backed_tomb() {
+        let text = "/dev/mapper/vault-fedcba9876543210 is active.\n  type:    LUKS2\n  device:  /dev/sdb1\n  sector size:  512\n";
+
+        assert_eq!(cryptsetup_status_field(text, "loop"), None);
+        assert_eq!(cryptsetup_status_field(text, "device"), Some("/dev/sdb1"));
+    }
+
+    #[test]
+    fn cryptsetup_status_field_returns_none_when_key_absent() {
+        let text = "/dev/mapper/vault-0000000000000000 is active.\n  type:    LUKS2\n";
+
+        assert_eq!(cryptsetup_status_field(text, "loop"), None);
+        assert_eq!(cryptsetup_status_field(text, "device"), None);
     }
 }

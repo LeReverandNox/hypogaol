@@ -1,5 +1,5 @@
 use std::cell::{Cell, RefCell};
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -44,6 +44,14 @@ pub struct FakeLuksBackend {
     // reusing an earlier result (AC #3). `None` means "always return
     // `keyslots`" (the common case).
     keyslots_sequence: RefCell<Option<VecDeque<Vec<KeyslotInfo>>>>,
+    // `list_open_mappings`'s return value (Story 4.5) — empty by default, so
+    // existing tests that don't care about close-all discovery are unaffected.
+    open_mappings: RefCell<Vec<MapperHandle>>,
+    // Per-mapping selective `close` failure (Story 4.5, AC #2), keyed by
+    // `MapperHandle.name`, checked alongside (not instead of) `fail_at` —
+    // `fail_at` alone can't express "mapping A's close fails, mapping B's in
+    // the same batch succeeds".
+    close_failure_for: RefCell<HashSet<String>>,
 }
 
 impl FakeLuksBackend {
@@ -69,6 +77,8 @@ impl FakeLuksBackend {
             last_resize: RefCell::new(None),
             read_filesystem: Filesystem::Ext4,
             keyslots_sequence: RefCell::new(None),
+            open_mappings: RefCell::new(Vec::new()),
+            close_failure_for: RefCell::new(HashSet::new()),
         }
     }
 
@@ -86,6 +96,8 @@ impl FakeLuksBackend {
             last_resize: RefCell::new(None),
             read_filesystem: Filesystem::Ext4,
             keyslots_sequence: RefCell::new(None),
+            open_mappings: RefCell::new(Vec::new()),
+            close_failure_for: RefCell::new(HashSet::new()),
         }
     }
 
@@ -163,6 +175,22 @@ impl FakeLuksBackend {
         self
     }
 
+    /// The `Vec<MapperHandle>` `list_open_mappings` returns (Story 4.5,
+    /// default empty).
+    pub fn with_open_mappings(self, mappings: Vec<MapperHandle>) -> Self {
+        *self.open_mappings.borrow_mut() = mappings;
+        self
+    }
+
+    /// Makes `close` fail only for the mapping named `name`, leaving every
+    /// other mapping's `close` call in the same batch unaffected — see the
+    /// `close_failure_for` field doc for why `with_failure_at("close")` alone
+    /// can't express this (Story 4.5, AC #2).
+    pub fn with_close_failure_for(self, name: &str) -> Self {
+        self.close_failure_for.borrow_mut().insert(name.to_string());
+        self
+    }
+
     fn fail_if(&self, call: &'static str) -> Result<(), DomainError> {
         if self.fail_at == Some(call) {
             Err(DomainError::AdapterFailure(format!("{call} failed (test)")))
@@ -226,6 +254,12 @@ impl LuksBackend for FakeLuksBackend {
     fn close(&self, mapper: &MapperHandle) -> Result<(), DomainError> {
         self.log.borrow_mut().push("close".to_string());
         *self.last_close.borrow_mut() = Some(mapper.clone());
+        if self.close_failure_for.borrow().contains(&mapper.name) {
+            return Err(DomainError::AdapterFailure(format!(
+                "close failed (test) for {}",
+                mapper.name
+            )));
+        }
         self.fail_if("close")
     }
 
@@ -249,6 +283,12 @@ impl LuksBackend for FakeLuksBackend {
         self.log.borrow_mut().push("read_filesystem".to_string());
         self.fail_if("read_filesystem")?;
         Ok(self.read_filesystem)
+    }
+
+    fn list_open_mappings(&self) -> Result<Vec<MapperHandle>, DomainError> {
+        self.log.borrow_mut().push("list_open_mappings".to_string());
+        self.fail_if("list_open_mappings")?;
+        Ok(self.open_mappings.borrow().clone())
     }
 }
 
@@ -358,6 +398,11 @@ pub struct FakeFilesystemBackend {
     // separate `path_exists` calls that must be able to disagree (e.g. AC
     // #2's "source exists but dest doesn't" case).
     path_exists_sequence: RefCell<Option<VecDeque<bool>>>,
+    // Per-mapping selective `umount` failure (Story 4.5, AC #2), keyed by
+    // `MapperHandle.name`, checked alongside (not instead of) `fail_at`/
+    // `umount_not_currently_mounted` — same rationale as
+    // `FakeLuksBackend::close_failure_for`.
+    umount_failure_for: RefCell<HashSet<String>>,
 }
 
 /// A valid, unrejectable `exec-hooks` file's metadata (AC #3's guardrail
@@ -394,6 +439,7 @@ impl FakeFilesystemBackend {
             run_hook_exit_code: Cell::new(Some(0)),
             last_run_hook: RefCell::new(None),
             path_exists_sequence: RefCell::new(None),
+            umount_failure_for: RefCell::new(HashSet::new()),
         }
     }
 
@@ -417,6 +463,7 @@ impl FakeFilesystemBackend {
             run_hook_exit_code: Cell::new(Some(0)),
             last_run_hook: RefCell::new(None),
             path_exists_sequence: RefCell::new(None),
+            umount_failure_for: RefCell::new(HashSet::new()),
         }
     }
 
@@ -468,6 +515,16 @@ impl FakeFilesystemBackend {
     /// path (review finding, 2026-07-26).
     pub fn with_umount_not_currently_mounted(mut self) -> Self {
         self.umount_not_currently_mounted = true;
+        self
+    }
+
+    /// Makes `umount` fail only for the mapping named `name`, leaving every
+    /// other mapping's `umount` call in the same batch unaffected — same
+    /// rationale as `FakeLuksBackend::with_close_failure_for` (Story 4.5, AC #2).
+    pub fn with_umount_failure_for(self, name: &str) -> Self {
+        self.umount_failure_for
+            .borrow_mut()
+            .insert(name.to_string());
         self
     }
 
@@ -624,6 +681,12 @@ impl FilesystemBackend for FakeFilesystemBackend {
         if self.umount_not_currently_mounted {
             return Err(DomainError::AdapterFailure(format!(
                 "{} is not currently mounted",
+                mapper.name
+            )));
+        }
+        if self.umount_failure_for.borrow().contains(&mapper.name) {
+            return Err(DomainError::AdapterFailure(format!(
+                "umount failed (test) for {}",
                 mapper.name
             )));
         }
