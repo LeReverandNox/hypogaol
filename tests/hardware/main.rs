@@ -1,10 +1,11 @@
+use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 use std::process::Command;
 
 use tomb_fido2::adapters::exec::ExecAdapter;
 use tomb_fido2::domain::mapping_name;
 use tomb_fido2::domain::types::{CreateTarget, Filesystem};
-use tomb_fido2::domain::workflows::{close, create, enroll, info, resize, revoke, unlock};
+use tomb_fido2::domain::workflows::{close, create, enroll, info, resize, revoke, slam, unlock};
 use tomb_fido2::ports::fido2_backend::Fido2DeviceSelection;
 use tomb_fido2::ports::luks_backend::LuksBackend;
 
@@ -1429,6 +1430,131 @@ fn close_works_unmodified_against_a_device_backed_tomb() {
         detach.status.success(),
         "losetup -d failed: {}",
         String::from_utf8_lossy(&detach.stderr)
+    );
+}
+
+/// End-to-end emergency-slam verification (Story 4.6, AC #1): create a real
+/// file-backed tomb, unlock it, then hold its mountpoint busy with a real
+/// process that ignores SIGTERM/SIGHUP (`exec`'d after `trap '' TERM HUP`,
+/// so only SIGKILL can end it) — forcing `slam::run` through the full
+/// three-round escalation instead of clearing on the first signal.
+///
+/// This is the exact scenario the 2026-07-28 code review found broken: the
+/// original `processes_using` silently dropped every real `fuser -m` PID
+/// (psmisc appends access-mode letters directly onto each PID with no
+/// separating whitespace, e.g. `1234c`, which `u32::parse` rejected
+/// outright), so escalation could never fire against a live process. This
+/// test only passes if `fuser -m`'s real output is parsed correctly *and*
+/// the holder is genuinely killed — not just coincidentally gone.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and a real FIDO2
+/// security key present, ready to be touched when prompted.
+#[test]
+#[ignore]
+fn slam_escalates_through_signals_to_close_a_tomb_with_a_process_holding_it_open() {
+    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-slam");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("tomb.img");
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::File {
+        path: path.clone(),
+        size: 64 * 1024 * 1024,
+    };
+
+    println!("Creating tomb — touch the key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    println!("Unlocking — touch the key when prompted.");
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
+        .expect("unlock::run failed");
+    let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
+    let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
+
+    assert_actually_mounted(&device_node, &mountpoint);
+
+    // `exec` replaces the shell's own process image with `sleep`, so there is
+    // exactly one process (no fork/child ambiguity) and its ignored TERM/HUP
+    // disposition (set by `trap`) survives the `exec` — POSIX guarantees
+    // SIG_IGN is preserved across exec. Its `cwd` inside the mountpoint is
+    // exactly what `fuser -m` reports as access-mode `c`.
+    let mut holder = Command::new("sh")
+        .args(["-c", "trap '' TERM HUP; exec sleep 30"])
+        .current_dir(&mountpoint)
+        .spawn()
+        .expect("failed to spawn a process to hold the mount open");
+    let holder_pid = holder.id();
+
+    // Give the shell a moment to actually exec and chdir before slam looks
+    // for holders.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    assert!(
+        matches!(holder.try_wait(), Ok(None)),
+        "the holder process (PID {holder_pid}) exited before slam even ran"
+    );
+
+    println!(
+        "Running slam — should escalate SIGTERM -> SIGHUP -> SIGKILL to clear the busy mount."
+    );
+    let started = std::time::Instant::now();
+    let results = slam::run(&|_| {}, &adapter, &adapter, &adapter).expect("slam::run failed");
+    let elapsed = started.elapsed();
+
+    assert_eq!(
+        results.len(),
+        1,
+        "expected exactly one open tomb, got {results:?}"
+    );
+    let (mapper, outcome) = &results[0];
+    assert_eq!(mapper.source_path, path);
+    assert!(
+        outcome.is_ok(),
+        "expected slam to close the tomb, got {outcome:?}"
+    );
+
+    // SIGTERM's round and SIGHUP's round each pause `ESCALATION_PAUSE` (1s)
+    // before retrying `umount` — both are ignored by the holder, so at least
+    // two full pauses must have elapsed before SIGKILL's round could clear
+    // it. A shorter elapsed time means escalation didn't actually happen
+    // (e.g. `processes_using` silently returned zero holders again and the
+    // mapping was wrongly reported as an immediate failure — except this
+    // assertion only runs once `outcome.is_ok()` above already held).
+    assert!(
+        elapsed >= std::time::Duration::from_secs(2),
+        "expected slam to pause through at least two escalation rounds before SIGKILL cleared it, only took {elapsed:?}"
+    );
+
+    let exit_status = holder.wait().expect("failed to reap the holder process");
+    assert!(
+        !exit_status.success(),
+        "expected the holder process (PID {holder_pid}) to be killed, not exit cleanly"
+    );
+    assert_eq!(
+        exit_status.signal(),
+        Some(9),
+        "expected the holder (PID {holder_pid}) to die by SIGKILL specifically, since SIGTERM/SIGHUP were trapped — got {exit_status:?}"
+    );
+
+    assert!(
+        std::fs::metadata(&mountpoint).is_err(),
+        "expected the mount-point directory {} to be removed after slam",
+        mountpoint.display()
+    );
+    assert!(
+        !device_node.exists(),
+        "expected the dm-crypt mapping {} to be gone after slam",
+        device_node.display()
     );
 }
 
