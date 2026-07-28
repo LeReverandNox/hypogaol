@@ -68,10 +68,12 @@ pub trait LuksBackend {
     /// every currently open dm-crypt mapping carrying this tool's fixed
     /// mapping-name prefix, never a stored registry. Each returned
     /// `MapperHandle`'s `source_path` is recovered from `cryptsetup
-    /// status`'s reported `device:` line, not a raw `/dev/loopN` node:
-    /// `cryptsetup(8)`'s "Notes on loopback device use" section confirms
-    /// `status` reports the loop *backing file* (the original path) for a
-    /// file-backed mapping, and the raw device/partition path directly for a
-    /// device-backed one.
+    /// status`'s `loop:` line when present — the real backing file for a
+    /// file-backed mapping, since `device:` there is only the opaque
+    /// `/dev/loopN` node cryptsetup opened internally (confirmed against
+    /// real hardware, 2026-07-28) — falling back to `device:` for a
+    /// device-backed mapping, which has no loop device and so no `loop:`
+    /// line at all, leaving `device:` holding the correct raw
+    /// device/partition path directly.
     fn list_open_mappings(&self) -> Result<Vec<MapperHandle>, DomainError>;
 }
