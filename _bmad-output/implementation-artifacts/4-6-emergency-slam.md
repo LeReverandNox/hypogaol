@@ -68,7 +68,7 @@ so that in a genuine crisis I can clear everything blocking unmount without bein
 - [x] **Task 3: Expose `close::run_hooks_step` for reuse (AC #3)**
   - In `src/domain/workflows/close.rs`, change `fn run_hooks_step(...)` (currently private) to `pub(crate) fn run_hooks_step(...)` — no other change. This is the exact function `close_mapping` already calls for the hooks step; `slam::run` (Task 4) needs to call it once per mapping too, before its own escalation loop, without duplicating the hooks/bind-hooks-teardown logic.
 
-- [ ] **Task 4: New `domain::workflows::slam` module (AC #1, #2, #3, #4)**
+- [x] **Task 4: New `domain::workflows::slam` module (AC #1, #2, #3, #4)**
   - New `src/domain/workflows/slam.rs`:
     ```rust
     pub fn run(
