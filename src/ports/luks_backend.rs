@@ -63,4 +63,15 @@ pub trait LuksBackend {
     /// AC #5) — never re-asked of the user or sniffed via `blkid`. A pure
     /// header/token read; does not require the mapping to be open.
     fn read_filesystem(&self, path: &Path) -> Result<Filesystem, DomainError>;
+
+    /// AD-17's live-discovery method for `close-all`/`slam` — enumerates
+    /// every currently open dm-crypt mapping carrying this tool's fixed
+    /// mapping-name prefix, never a stored registry. Each returned
+    /// `MapperHandle`'s `source_path` is recovered from `cryptsetup
+    /// status`'s reported `device:` line, not a raw `/dev/loopN` node:
+    /// `cryptsetup(8)`'s "Notes on loopback device use" section confirms
+    /// `status` reports the loop *backing file* (the original path) for a
+    /// file-backed mapping, and the raw device/partition path directly for a
+    /// device-backed one.
+    fn list_open_mappings(&self) -> Result<Vec<MapperHandle>, DomainError>;
 }

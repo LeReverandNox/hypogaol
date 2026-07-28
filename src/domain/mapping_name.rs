@@ -3,8 +3,10 @@ use std::path::Path;
 use crate::domain::errors::DomainError;
 
 /// Fixed prefix for every dm-crypt mapping name this tool creates, kept
-/// independent of the product's own (placeholder) name (AD-13).
-const MAPPING_NAME_PREFIX: &str = "vault";
+/// independent of the product's own (placeholder) name (AD-13). `pub(crate)`
+/// so `adapters::exec` can filter live `dmsetup ls` output by this same
+/// prefix when discovering open mappings (AD-17, Story 4.5).
+pub(crate) const MAPPING_NAME_PREFIX: &str = "vault";
 
 /// FNV-1a: a plain, dependency-free, cross-toolchain-stable hash. Unlike
 /// `std::collections::hash_map::DefaultHasher`, its output is not tied to a
