@@ -45,7 +45,10 @@ fn escalates_through_sigterm_sighup_sigkill_until_umount_succeeds() {
     // mount_point_of runs once for the hooks step and once, separately, for
     // escalation prep — never once per round.
     assert_eq!(
-        log.borrow().iter().filter(|c| *c == "mount_point_of").count(),
+        log.borrow()
+            .iter()
+            .filter(|c| *c == "mount_point_of")
+            .count(),
         2,
         "expected exactly two mount_point_of calls, log: {:?}",
         log.borrow()
@@ -102,7 +105,10 @@ fn hooks_step_runs_exactly_once_never_repeated_across_escalation_rounds() {
     // both hooks files absent) appears exactly once, not duplicated per
     // escalation round.
     assert_eq!(
-        log.borrow().iter().filter(|c| *c == "mount_point_of").count(),
+        log.borrow()
+            .iter()
+            .filter(|c| *c == "mount_point_of")
+            .count(),
         2,
         "expected hooks-step mount_point_of + escalation-prep mount_point_of, log: {:?}",
         log.borrow()

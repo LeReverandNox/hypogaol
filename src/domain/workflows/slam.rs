@@ -66,9 +66,9 @@ fn slam_mapping(
     }
 
     match fs.umount(mapper) {
-        Ok(()) => return luks.close(mapper),
+        Ok(()) => luks.close(mapper),
         Err(DomainError::AdapterFailure(msg)) if msg.contains("not currently mounted") => {
-            return luks.close(mapper);
+            luks.close(mapper)
         }
         Err(err) => {
             // Busy — fall through to the escalation loop below, keeping this
@@ -92,7 +92,9 @@ fn slam_mapping(
 
                 match fs.umount(mapper) {
                     Ok(()) => return luks.close(mapper),
-                    Err(DomainError::AdapterFailure(msg)) if msg.contains("not currently mounted") => {
+                    Err(DomainError::AdapterFailure(msg))
+                        if msg.contains("not currently mounted") =>
+                    {
                         return luks.close(mapper);
                     }
                     Err(err) => last_err = err,
