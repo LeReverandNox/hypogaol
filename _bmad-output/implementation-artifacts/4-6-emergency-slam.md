@@ -89,7 +89,7 @@ so that in a genuine crisis I can clear everything blocking unmount without bein
     5. After the loop ends (every signal tried and still busy, or broken early on empty holders), return the last-seen `umount` error as this mapping's `Err` (AC #4).
   - Register `pub mod slam;` in `src/domain/workflows/mod.rs`.
 
-- [ ] **Task 5: `cli` — `slam` subcommand + `run_slam` (AC #1, #2, #3, #4)**
+- [x] **Task 5: `cli` — `slam` subcommand + `run_slam` (AC #1, #2, #3, #4)**
   - In `src/cli/main.rs`'s `Commands` enum, add a zero-argument variant (no `path`, no `skip_hooks`, no confirmation flag — nothing to configure, per Task 4's design decision):
     ```rust
     /// Emergency: force-close every open tomb immediately, escalating past
