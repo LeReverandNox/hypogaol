@@ -10,6 +10,7 @@ use crate::domain::preflight;
 use crate::domain::progress::{CreateStage, ResizeStage};
 use crate::domain::types::{CreateTarget, Filesystem};
 use crate::domain::workflows::close;
+use crate::domain::workflows::close_all;
 use crate::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
 use crate::domain::workflows::enroll;
 use crate::domain::workflows::info;
@@ -97,6 +98,13 @@ enum Commands {
         path: PathBuf,
 
         /// Skip bind-hooks and exec-hooks processing for this command.
+        #[arg(long)]
+        skip_hooks: bool,
+    },
+
+    /// Close every currently open/unlocked tomb in one command
+    CloseAll {
+        /// Skip bind-hooks and exec-hooks processing for every tomb closed in this batch.
         #[arg(long)]
         skip_hooks: bool,
     },
@@ -532,6 +540,62 @@ fn run_close(path: PathBuf, skip_hooks: bool) {
     }
 }
 
+/// Builds the adapter, runs `close_all::run`, and reports the result.
+/// Mirrors `run_close`'s shape: preflight check first, same
+/// `print_hook_warning` seam, no confirmation prompt (same reasoning as
+/// `run_close`'s own doc comment — closing is fully reversible). Unlike
+/// `run_close`, failures never abort early: every discovered mapping's
+/// outcome is printed (AC #2) before `std::process::exit(1)` runs, so a
+/// batch with some failures still reports every success alongside them.
+fn run_close_all(skip_hooks: bool) {
+    let adapter = ExecAdapter::default();
+
+    if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
+        eprintln!("{}", ux::translate(&err));
+        std::process::exit(1);
+    }
+
+    println!("Closing every open tomb.");
+
+    match close_all::run(
+        skip_hooks,
+        &print_hook_warning,
+        &adapter,
+        &adapter,
+        &adapter,
+    ) {
+        Ok(results) => {
+            if results.is_empty() {
+                println!("No tombs are currently open.");
+                return;
+            }
+
+            let mut any_failed = false;
+            for (mapper, result) in results {
+                match result {
+                    Ok(()) => println!("Closed {}.", mapper.source_path.display()),
+                    Err(err) => {
+                        any_failed = true;
+                        eprintln!(
+                            "Failed to close {}: {}",
+                            mapper.source_path.display(),
+                            ux::translate(&err)
+                        );
+                    }
+                }
+            }
+
+            if any_failed {
+                std::process::exit(1);
+            }
+        }
+        Err(err) => {
+            eprintln!("{}", ux::translate(&err));
+            std::process::exit(1);
+        }
+    }
+}
+
 /// Builds the adapter, runs `resize::run`, and reports the result. Mirrors
 /// `run_close`'s shape: preflight check first, then a plain-language intro
 /// (FR5/NFR3) — but unlike `close`, `resize` calls `luks.open` (a real FIDO2
@@ -660,6 +724,7 @@ pub fn run() {
         }
         Commands::Revoke { path, label } => run_revoke(path, label),
         Commands::Close { path, skip_hooks } => run_close(path, skip_hooks),
+        Commands::CloseAll { skip_hooks } => run_close_all(skip_hooks),
         Commands::Resize { path, size } => run_resize(path, size),
         Commands::Info { path } => run_info(path),
     }
