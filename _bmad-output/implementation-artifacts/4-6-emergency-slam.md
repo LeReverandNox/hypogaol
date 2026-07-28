@@ -107,7 +107,7 @@ so that in a genuine crisis I can clear everything blocking unmount without bein
     - Import `Pid`/`Signal` from `tomb_fido2::domain::types` at the top of `fakes.rs`.
   - `FakeLuksBackend` needs no changes — `list_open_mappings`/`close`/`close_failure_for` (Story 4.5) already cover everything `slam::run`'s discovery and final-close calls need.
 
-- [ ] **Task 7: Unit tests — new `tests/unit/slam.rs` (AC #1, #3, #4)**
+- [x] **Task 7: Unit tests — new `tests/unit/slam.rs` (AC #1, #3, #4)**
   - `escalates_through_sigterm_sighup_sigkill_until_umount_succeeds`: one mapping, `with_umount_fail_times(2)` (busy on the initial attempt and the SIGTERM-round retry, succeeds on the SIGHUP-round retry — asserts escalation stops as soon as it clears, not always running all three), `with_processes_using(vec![Pid(111)])`. Assert `fs.signal_calls()` is exactly `[(Pid(111), Signal::Sigterm), (Pid(111), Signal::Sighup)]` (SIGKILL never needed) and the mapping's final result is `Ok(())`. Assert the call log shows `mount_point_of` (hooks step) exactly once and a second, separate `mount_point_of` (escalation prep) exactly once — never once per round.
   - `no_holders_remaining_stops_escalation_and_reports_that_mappings_failure`: one mapping, `with_umount_fail_times(u32::MAX)` (always busy) and default empty `processes_using`. Assert zero `signal_process` calls happened (breaks before ever signaling), and the mapping's result is `Err`.
   - `hooks_step_runs_exactly_once_never_repeated_across_escalation_rounds` (AC #3): one mapping needing 2 rounds to clear (`with_umount_fail_times(1)`, non-empty `processes_using`) with a real `bind-hooks`/`exec-hooks` setup (or simplest: assert the hooks-step's own call signature — `mount_point_of` + 2×`path_exists`, both hooks files absent — appears exactly once in the full log, not duplicated per round).
@@ -195,8 +195,37 @@ Every error `slam::run`/`slam_mapping` can produce (`PreflightFailed`, `AdapterF
 
 ### Agent Model Used
 
+Claude Sonnet 5
+
 ### Debug Log References
 
 ### Completion Notes List
 
+- Task 2: confirmed via `nix develop` that `kill` resolves on `PATH` as
+  `util-linux-minimal`'s binary (not `psmisc` as the pre-existing `flake.nix`
+  comment claimed) — no new package needed, corrected the stale comment only.
+- Task 7: deviated from the task text's literal recipe for
+  `one_mappings_never_clearing_does_not_stop_the_batch`. The task suggested
+  giving mapping A `with_umount_fail_times(u32::MAX)` alongside mapping B
+  "passing normally," but `umount_fail_times` is a single shared `Cell` on the
+  fake `FilesystemBackend` (Task 6's own spec: "a new, independent mechanism,"
+  not keyed per mapping) — since both mappings share one `fs` instance in a
+  batch, A's failure would also consume/affect B's own `umount` call, making
+  "B passes normally" unreachable as literally written. Used the existing
+  per-mapping `with_umount_failure_for(&mapper_a.name)` (Story 4.5) instead,
+  which isolates the failure to mapper_a exactly as AC #4 requires without the
+  shared-state conflict. All other tests follow the task text as written.
+
 ### File List
+
+- `src/domain/types.rs`
+- `src/ports/filesystem_backend.rs`
+- `src/adapters/exec/mod.rs`
+- `flake.nix`
+- `src/domain/workflows/close.rs`
+- `src/domain/workflows/slam.rs`
+- `src/domain/workflows/mod.rs`
+- `src/cli/main.rs`
+- `tests/unit/fakes.rs`
+- `tests/unit/slam.rs`
+- `tests/unit/main.rs`
