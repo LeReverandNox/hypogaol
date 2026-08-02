@@ -42,7 +42,7 @@ so that the domain vocabulary is generic and independent of whatever the product
     - `create_mount_point`'s `tomb_name` parameter (`src/adapters/exec/mod.rs`, see Task 4) is a separate identifier from anything in `main.rs` — don't conflate the two while renaming.
   - `src/cli/ux.rs`: every user-facing error/status string containing "tomb" (lines ~22, 26, 30, 42, 51, 65, 85, 114-126), including the `BindHookSkipReason::SourceEscapesTombRoot` match arm (rename to match Task 1's enum-variant rename) and its associated message `"its source path escapes the tomb"` → `"its source path escapes the volume"`. Leave `ux.rs:274`'s comment referencing `` `MIN_TOMB_SIZE_BYTES` `` in sync with Task 1's rename too.
 
-- [ ] **Task 3: Rename in `src/adapters/exec/mod.rs`** (AC: #1, #5)
+- [x] **Task 3: Rename in `src/adapters/exec/mod.rs`** (AC: #1, #5)
   - Doc comments and the `create_mount_point` function: rename its `tomb_name` parameter (line ~161) and every call-site local named `tomb_name` (lines ~163, 171, 1715, 1761) to `volume_name`. Update the doc comment above it (line ~157, "Creates a fresh directory named `tomb_name`...").
   - Test-only fixture literals (AC #5, deferred from Story 5.1): line ~251's `.tomb-fido2-bootstrap-{suffix_hex}` → `.volume-fido2-bootstrap-{suffix_hex}`; line ~2251's `tomb-fido2-unit-test-{name}-{suffix}` → `volume-fido2-unit-test-{name}-{suffix}`.
   - Test function names containing `_tomb` (e.g. `cryptsetup_status_field_prefers_loop_over_device_for_file_backed_tomb`, `..._device_backed_tomb`) → rename the `_tomb` suffix to `_volume`.
@@ -105,6 +105,7 @@ so that the domain vocabulary is generic and independent of whatever the product
 
 - Task 1: Case-preserving `tomb`/`Tomb`/`TOMB` -> `volume`/`Volume`/`VOLUME` rename across `src/domain/` and `src/ports/`. Includes `MIN_TOMB_SIZE_BYTES` -> `MIN_VOLUME_SIZE_BYTES` (consumers in `src/cli/main.rs`, `src/cli/ux.rs` comment, and `tests/unit/{create,cli,progress}.rs` intentionally left for Task 2/4 in the same build-passing pass) and `hooks.rs`'s `tomb_root`/`canonical_tomb_root`/`SourceEscapesTombRoot` -> `volume_root`/`canonical_volume_root`/`SourceEscapesVolumeRoot`. `cargo build` will not pass until Task 2/4 land (expected, cross-file rename).
 - Task 2: Case-preserving rename across `src/cli/main.rs` (help/doc text, user-facing strings, `MIN_TOMB_SIZE_BYTES` use-site) and `src/cli/ux.rs` (error/status strings, `SourceEscapesTombRoot` match arm now `SourceEscapesVolumeRoot`, consistent with Task 1). `cargo build` still pending Task 3/4 (`src/adapters/exec/mod.rs`'s `tomb_name` param and `tests/unit/*.rs`'s `MIN_TOMB_SIZE_BYTES` use-sites).
+- Task 3: Renamed whole file except the AC#6 carve-out at line 122 (`tomb_fido2` old crate name doc comment). `create_mount_point`'s `tomb_name` param/locals -> `volume_name`; AC#5 fixture literals at lines 251/2251 renamed; test fn names `..._file_backed_tomb`/`..._device_backed_tomb` -> `..._volume`; the `/home/user/tombs/tomb.img` parser-test fixture at 2307/2311 renamed too since it's plain domain-noun text, not old-product-name branding.
 
 ### File List
 
@@ -122,3 +123,4 @@ so that the domain vocabulary is generic and independent of whatever the product
 - src/ports/luks_backend.rs
 - src/cli/main.rs
 - src/cli/ux.rs
+- src/adapters/exec/mod.rs

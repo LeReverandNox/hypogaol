@@ -154,13 +154,13 @@ fn invoking_identity() -> Result<InvokingIdentity, DomainError> {
     })
 }
 
-/// Creates a fresh directory named `tomb_name` under `base` (AD-12: still
+/// Creates a fresh directory named `volume_name` under `base` (AD-12: still
 /// deterministic from `mapper.source_path` on the common path — no registry).
 /// Falls back to a short random-suffixed name only on an actual collision,
 /// bounded to a small number of attempts.
-fn create_mount_point(base: &Path, tomb_name: &str) -> Result<PathBuf, DomainError> {
+fn create_mount_point(base: &Path, volume_name: &str) -> Result<PathBuf, DomainError> {
     const MAX_ATTEMPTS: u32 = 3;
-    let mut candidate = base.join(tomb_name);
+    let mut candidate = base.join(volume_name);
     let mut attempt = 1;
 
     loop {
@@ -168,7 +168,7 @@ fn create_mount_point(base: &Path, tomb_name: &str) -> Result<PathBuf, DomainErr
             Ok(()) => return Ok(candidate),
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempt < MAX_ATTEMPTS => {
                 let suffix = random_hex_suffix().map_err(DomainError::AdapterFailure)?;
-                candidate = base.join(format!("{tomb_name}-{}", &suffix[..4]));
+                candidate = base.join(format!("{volume_name}-{}", &suffix[..4]));
                 attempt += 1;
             }
             Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -248,7 +248,7 @@ impl TempKeyFile {
         };
 
         let suffix_hex = random_hex_suffix()?;
-        let path = dir.join(format!(".tomb-fido2-bootstrap-{suffix_hex}"));
+        let path = dir.join(format!(".volume-fido2-bootstrap-{suffix_hex}"));
 
         let mut file = std::fs::OpenOptions::new()
             .write(true)
@@ -392,7 +392,7 @@ fn systemd_fido2_token_ids(metadata: &Value) -> Result<HashSet<String>, DomainEr
 /// Called both before and after a `systemd-cryptenroll` call so the caller
 /// can diff the two sets and identify exactly which token id is newly
 /// created — the only reliable way to tell "the token just enrolled" apart
-/// from any other `systemd-fido2` token already on the header (a tomb with
+/// from any other `systemd-fido2` token already on the header (a volume with
 /// two enrolled keys has two of them).
 fn find_systemd_fido2_token_ids(path: &Path) -> Result<HashSet<String>, DomainError> {
     systemd_fido2_token_ids(&dump_json_metadata(path)?)
@@ -414,7 +414,7 @@ fn existing_key_labels(metadata: &Value) -> Result<Vec<String>, DomainError> {
 /// Keyslot numbers `metadata`'s `token_id` token currently references — used
 /// to roll back a keyslot `systemd-cryptenroll` already created if writing
 /// its metadata afterward then fails (see `enroll_fido2_key`), rather than
-/// leaving an unlabeled, un-bookkept key on the tomb.
+/// leaving an unlabeled, un-bookkept key on the volume.
 fn keyslots_for_token(metadata: &Value, token_id: &str) -> Vec<u32> {
     tokens_object(metadata)
         .ok()
@@ -1203,14 +1203,14 @@ impl LuksBackend for ExecAdapter {
                 )));
             }
 
-            // For a file-backed tomb, `device:` reports the opaque
+            // For a file-backed volume, `device:` reports the opaque
             // `/dev/loopN` node cryptsetup opened internally — the original
             // backing file only appears on its own separate `loop:` line
             // (confirmed against real hardware, 2026-07-28: `device:
-            // /dev/loop0` alongside `loop: /path/to/tomb.img`; the Dev
+            // /dev/loop0` alongside `loop: /path/to/volume.img`; the Dev
             // Notes' cryptsetup(8) citation describes this `loop:` field,
             // not `device:`, which this call originally misread). A
-            // device-backed tomb has no loop device at all, so it has no
+            // device-backed volume has no loop device at all, so it has no
             // `loop:` line and `device:` directly holds the correct raw
             // device/partition path — hence `loop:` is preferred when
             // present, falling back to `device:` otherwise.
@@ -1296,7 +1296,7 @@ impl Fido2Backend for ExecAdapter {
 
         // Snapshotted before `systemd-cryptenroll` runs, so the new token can
         // be identified afterward by set difference rather than picking "the
-        // first" `systemd-fido2` token — a tomb can now carry more than one
+        // first" `systemd-fido2` token — a volume can now carry more than one
         // (this story's whole point), and picking the wrong one would
         // silently overwrite an existing key's metadata instead of writing
         // the new one. Empty for create's bootstrap-enroll call (no token
@@ -1312,7 +1312,7 @@ impl Fido2Backend for ExecAdapter {
             .any(|label| label == &metadata.key_label)
         {
             return Err(DomainError::AdapterFailure(format!(
-                "a key labeled {:?} is already enrolled on this tomb — choose a different label",
+                "a key labeled {:?} is already enrolled on this volume — choose a different label",
                 metadata.key_label
             )));
         }
@@ -1369,7 +1369,7 @@ impl Fido2Backend for ExecAdapter {
                 // to unlock just because no unlock method was given — it
                 // falls back to an interactive passphrase prompt instead,
                 // which can never succeed once the bootstrap passphrase
-                // keyslot has been removed (this tomb has no passphrase
+                // keyslot has been removed (this volume has no passphrase
                 // keyslot at all). Per systemd-cryptenroll(1)'s UNLOCKING
                 // section, unlocking via FIDO2 during an enroll call needs
                 // an *explicit* `--unlock-fido2-device=` path — `auto` is
@@ -1420,7 +1420,7 @@ impl Fido2Backend for ExecAdapter {
         if let Err(err) = self.write_fido2_token_metadata(path, &token_id, metadata) {
             // `systemd-cryptenroll` already created a real, working keyslot
             // above — if writing its metadata then fails, roll it back
-            // rather than leaving an unlabeled, un-bookkept key on the tomb.
+            // rather than leaving an unlabeled, un-bookkept key on the volume.
             // Best-effort: if this re-dump itself fails, the original `err`
             // is still what's returned.
             if let Ok(rollback_metadata) = dump_json_metadata(path) {
@@ -1712,7 +1712,7 @@ impl FilesystemBackend for ExecAdapter {
         // `vault`) and returns the whole name for an extensionless device
         // path (`/dev/sdb1` -> `sdb1`); falling back to the full name covers
         // the never-expected case where `file_stem()` itself returns `None`.
-        let tomb_name = mapper
+        let volume_name = mapper
             .source_path
             .file_stem()
             .unwrap_or(mapper.source_path.as_os_str())
@@ -1758,7 +1758,7 @@ impl FilesystemBackend for ExecAdapter {
             }
         }
 
-        let mountpoint = create_mount_point(&base, &tomb_name)?;
+        let mountpoint = create_mount_point(&base, &volume_name)?;
 
         // No `-t`: let mount auto-detect the filesystem type from the
         // superblock (standard kernel behavior) rather than re-deriving it
@@ -1768,7 +1768,7 @@ impl FilesystemBackend for ExecAdapter {
             // `noload`: a read-only `cryptsetup open` also makes the
             // underlying mapping unwritable, so the kernel can't auto-replay
             // an unclean ext4 journal (replay itself needs a block-device
-            // write) — without `noload`, `mount -o ro` on a tomb that wasn't
+            // write) — without `noload`, `mount -o ro` on a volume that wasn't
             // cleanly closed fails outright. `noload` skips replay, which is
             // exactly the read-only guarantee this flag exists to uphold.
             mount_cmd.args(["-o", "ro,noload"]);
@@ -1799,9 +1799,9 @@ impl FilesystemBackend for ExecAdapter {
         // below would themselves fail. Ownership/permissions on the volume's
         // root inode are whatever a prior *writable* unlock already
         // persisted there — every normal unlock chowns to the invoking user,
-        // so any tomb ever unlocked writably already carries correct
+        // so any volume ever unlocked writably already carries correct
         // ownership by the time a read-only unlock reaches this point. A
-        // tomb never unlocked writably shows root-owned, mkfs.ext4-default
+        // volume never unlocked writably shows root-owned, mkfs.ext4-default
         // (0755) permissions on its first-ever read-only unlock —
         // world-readable/traversable to every local user, not just the
         // invoking one: an accepted limitation, but one worth surfacing
@@ -1823,7 +1823,7 @@ impl FilesystemBackend for ExecAdapter {
                 .unwrap_or(true);
             if !owned_by_invoking_user {
                 eprintln!(
-                    "Warning: this tomb has never been unlocked in read-write mode, so its \
+                    "Warning: this volume has never been unlocked in read-write mode, so its \
                      contents are still owned by root with default permissions — readable by \
                      any local user, not just you. Unlock it read-write once to restrict access."
                 );
@@ -1835,7 +1835,7 @@ impl FilesystemBackend for ExecAdapter {
         // `mkfs.ext4` at `create` time, so it's currently root-owned; hand it
         // to the invoking user (identity fetched at the top of this
         // function) before restricting it below, or the invoking user would
-        // be locked out of their own just-unlocked tomb.
+        // be locked out of their own just-unlocked volume.
         match privileged("chown")
             .arg(format!("{}:{}", identity.uid, identity.gid))
             .arg(&mountpoint)
@@ -1862,8 +1862,8 @@ impl FilesystemBackend for ExecAdapter {
         // `mkfs.ext4` always creates `lost+found` as root:root — the chown
         // above only covers the mount point's own root inode, not this
         // pre-existing entry underneath it, so it would otherwise stay
-        // root-owned forever even though everything else in the tomb is now
-        // the invoking user's. Best-effort, not fatal: a tomb whose user has
+        // root-owned forever even though everything else in the volume is now
+        // the invoking user's. Best-effort, not fatal: a volume whose user has
         // since deleted `lost+found` (harmless, some people do) shouldn't
         // block unlock over it, unlike the mount point's own chown above.
         let lost_and_found = mountpoint.join("lost+found");
@@ -1875,7 +1875,7 @@ impl FilesystemBackend for ExecAdapter {
             {
                 if !output.status.success() {
                     eprintln!(
-                        "Warning: couldn't change ownership of this tomb's lost+found directory \
+                        "Warning: couldn't change ownership of this volume's lost+found directory \
                          — it will stay root-owned."
                     );
                 }
@@ -1885,7 +1885,7 @@ impl FilesystemBackend for ExecAdapter {
         // Restrict the mount point to the invoking user only. Without this,
         // the mounted filesystem's own root-inode permissions (e.g.
         // mkfs.ext4's default 0755) are what's visible at `mountpoint` — left
-        // as-is, any local user could read the just-unlocked tomb's contents
+        // as-is, any local user could read the just-unlocked volume's contents
         // under a world-traversable `/tmp`, defeating the FIDO2 gate.
         match privileged("chmod").arg("0700").arg(&mountpoint).output() {
             Ok(chmod_output) if chmod_output.status.success() => Ok(mountpoint),
@@ -1911,7 +1911,7 @@ impl FilesystemBackend for ExecAdapter {
         let device_node = mapper.device_node();
 
         // Distinct from "not currently mounted" below: no dm-crypt mapping at
-        // all means the tomb was never unlocked, or a prior `close` already
+        // all means the volume was never unlocked, or a prior `close` already
         // fully completed — neither is "just needs a retry" (review finding,
         // 2026-07-26).
         if !device_node.exists() {
@@ -2248,7 +2248,7 @@ mod tests {
     impl TempPath {
         fn unique(name: &str) -> Self {
             let suffix = random_hex_suffix().expect("failed to generate random suffix");
-            Self(std::env::temp_dir().join(format!("tomb-fido2-unit-test-{name}-{suffix}")))
+            Self(std::env::temp_dir().join(format!("volume-fido2-unit-test-{name}-{suffix}")))
         }
     }
 
@@ -2303,18 +2303,18 @@ mod tests {
     }
 
     #[test]
-    fn cryptsetup_status_field_prefers_loop_over_device_for_file_backed_tomb() {
-        let text = "/dev/mapper/vault-0123456789abcdef is active.\n  type:    LUKS2\n  cipher:  aes-xts-plain64\n  device:  /dev/loop0\n  loop:    /home/user/tombs/tomb.img\n  sector size:  512\n";
+    fn cryptsetup_status_field_prefers_loop_over_device_for_file_backed_volume() {
+        let text = "/dev/mapper/vault-0123456789abcdef is active.\n  type:    LUKS2\n  cipher:  aes-xts-plain64\n  device:  /dev/loop0\n  loop:    /home/user/volumes/volume.img\n  sector size:  512\n";
 
         assert_eq!(
             cryptsetup_status_field(text, "loop"),
-            Some("/home/user/tombs/tomb.img")
+            Some("/home/user/volumes/volume.img")
         );
         assert_eq!(cryptsetup_status_field(text, "device"), Some("/dev/loop0"));
     }
 
     #[test]
-    fn cryptsetup_status_field_falls_back_to_device_for_device_backed_tomb() {
+    fn cryptsetup_status_field_falls_back_to_device_for_device_backed_volume() {
         let text = "/dev/mapper/vault-fedcba9876543210 is active.\n  type:    LUKS2\n  device:  /dev/sdb1\n  sector size:  512\n";
 
         assert_eq!(cryptsetup_status_field(text, "loop"), None);
