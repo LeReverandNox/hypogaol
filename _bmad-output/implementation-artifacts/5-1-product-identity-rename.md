@@ -55,7 +55,7 @@ so that Cargo, the CLI, and the README present one consistent, permanent product
     - Every plain domain-noun "tomb" (the container concept — e.g. "create a brand-new tomb", "before unmounting the tomb itself", "your tomb was created with") — those are Story 5.2's job, not this story's. When a single sentence contains both a product-name self-reference and a domain-noun "tomb" (line 23's "Close every tomb-fido2-managed tomb currently open" is the clearest example; line 36's bind-hooks paragraph and line 63's/line 67's paragraphs also mix both), rename only the product-name half here and leave the domain noun for 5.2.
   - Renaming the product-name self-references here (rather than deferring them) removes the ambiguous `tomb-fido2` token from the file before Story 5.2 does its domain-noun sweep — 5.2 will then only have one meaning of "tomb" left to consider in this file, not two tangled together.
 
-- [ ] **Task 6: Update `CHANGELOG.md`'s header** (AC: #1)
+- [x] **Task 6: Update `CHANGELOG.md`'s header** (AC: #1)
   - The literal header is `# Changelog` (line 1) — it does not contain the product name, so there is nothing to rename there. Do not touch the historical entries below it (lines like "**1.5:** create a file-backed tomb ([#11](https://github.com/LeReverandNox/tomb-fido2/issues/11))...") — those are release-please-generated historical records tied to real, already-merged PR/commit URLs on the old repo path; they remain valid (GitHub redirects renamed-repo URLs) and rewriting them would falsify history for no functional benefit. Confirm this understanding rather than bulk-replacing `LeReverandNox/tomb-fido2` across the whole file.
 
 - [ ] **Task 7: Verify AD-13's guarantee holds for the CLI banner — no code change expected** (AC: #2)
@@ -105,6 +105,7 @@ Claude Sonnet 5 (claude-sonnet-5)
 - Task 3: `_bmad/bmm/config.yaml`'s `project_name` updated to `hypogaol`.
 - Task 4: `flake.nix`'s `description` string and the runtime-tools comment updated to `hypogaol`.
 - Task 5: Re-grepped `README.md` before editing to confirm the line list hadn't drifted (matched exactly). Renamed title, removed the now-false working-title disclaimer, and renamed all ~25 body-prose product-name self-references to `Hypogaol` — including the mid-sentence cases mixing product name and domain noun (e.g. line 23 "Close every **Hypogaol**-managed tomb", left `tomb` untouched). Updated the break-glass heading and its markdown anchor link to the new GitHub-generated slug (`#break-glass-recovery-no-hypogaol-required`). Left every plain domain-noun "tomb" and both `dyne/tomb` references untouched (Story 5.2's job). `make test` (174 tests) passes unchanged.
+- Task 6: Verified `CHANGELOG.md`'s header (`# Changelog`) contains no product-name literal — no edit needed. Historical entries (release-please-generated, tied to real `LeReverandNox/tomb-fido2` PR/commit URLs) left untouched per Dev Notes' historical-docs-stay-frozen guidance.
 
 ### File List
 
