@@ -58,11 +58,11 @@ so that Cargo, the CLI, and the README present one consistent, permanent product
 - [x] **Task 6: Update `CHANGELOG.md`'s header** (AC: #1)
   - The literal header is `# Changelog` (line 1) — it does not contain the product name, so there is nothing to rename there. Do not touch the historical entries below it (lines like "**1.5:** create a file-backed tomb ([#11](https://github.com/LeReverandNox/tomb-fido2/issues/11))...") — those are release-please-generated historical records tied to real, already-merged PR/commit URLs on the old repo path; they remain valid (GitHub redirects renamed-repo URLs) and rewriting them would falsify history for no functional benefit. Confirm this understanding rather than bulk-replacing `LeReverandNox/tomb-fido2` across the whole file.
 
-- [ ] **Task 7: Verify AD-13's guarantee holds for the CLI banner — no code change expected** (AC: #2)
+- [x] **Task 7: Verify AD-13's guarantee holds for the CLI banner — no code change expected** (AC: #2)
   - `src/cli/main.rs`'s `Cli` struct uses `#[derive(Parser)] #[command(version, about)]` with no explicit `name(...)` — clap's default behavior sources the binary/CLI name from `CARGO_PKG_NAME` (i.e., `env!("CARGO_PKG_NAME")` under the hood) automatically. After Task 2 renames the package, rebuild and run `cargo run -- --help` to confirm the banner now reads `hypogaol` with zero source changes in `src/cli/`.
   - If you find any hardcoded `"tomb-fido2"` (or `"tomb_fido2"`) string literal anywhere in `src/` used for the CLI name/banner/version output, that is an AD-13 violation that must be fixed as part of this AC — but a repo-wide check during story creation found none, so expect this task to be verify-only.
 
-- [ ] **Task 8: Verify CI/release config for hardcoded repo/name references** (AC: #3)
+- [x] **Task 8: Verify CI/release config for hardcoded repo/name references** (AC: #3)
   - Checked during story creation: `.github/workflows/ci.yml`, `.github/workflows/release.yml` (cargo-dist generated), `.github/workflows/release-please.yml`, `release-please-config.json`, and `.release-please-manifest.json` contain **no** hardcoded `tomb-fido2` or `LeReverandNox` literals — they all derive repo/package identity from `Cargo.toml` or GitHub Actions' own context (`${{ github.repository }}`, etc.) at run time. Re-verify this after Task 2's `Cargo.toml` rename (grep the same file set for `tomb-fido2`/`tomb_fido2`); if still clean, this AC requires no edits — do not invent changes to satisfy it.
 
 - [ ] **Task 9: Full regression pass** (AC: #1, #2, #3, #4)
@@ -106,6 +106,8 @@ Claude Sonnet 5 (claude-sonnet-5)
 - Task 4: `flake.nix`'s `description` string and the runtime-tools comment updated to `hypogaol`.
 - Task 5: Re-grepped `README.md` before editing to confirm the line list hadn't drifted (matched exactly). Renamed title, removed the now-false working-title disclaimer, and renamed all ~25 body-prose product-name self-references to `Hypogaol` — including the mid-sentence cases mixing product name and domain noun (e.g. line 23 "Close every **Hypogaol**-managed tomb", left `tomb` untouched). Updated the break-glass heading and its markdown anchor link to the new GitHub-generated slug (`#break-glass-recovery-no-hypogaol-required`). Left every plain domain-noun "tomb" and both `dyne/tomb` references untouched (Story 5.2's job). `make test` (174 tests) passes unchanged.
 - Task 6: Verified `CHANGELOG.md`'s header (`# Changelog`) contains no product-name literal — no edit needed. Historical entries (release-please-generated, tied to real `LeReverandNox/tomb-fido2` PR/commit URLs) left untouched per Dev Notes' historical-docs-stay-frozen guidance.
+- Task 7: `cargo run -- --help` now prints `Usage: hypogaol <COMMAND>` with zero `src/` changes — AD-13's placeholder-name isolation held. Confirmed no hardcoded `"tomb-fido2"`/`"tomb_fido2"` string literals anywhere in `src/`.
+- Task 8: Re-grepped `.github/workflows/{ci,release,release-please}.yml`, `release-please-config.json`, `.release-please-manifest.json` post-rename for `tomb-fido2`/`tomb_fido2`/`LeReverandNox` literals — zero matches, confirming they all derive repo/package identity from `Cargo.toml` or GitHub Actions context at run time. No edits needed.
 
 ### File List
 
