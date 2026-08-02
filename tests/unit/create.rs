@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
-use tomb_fido2::domain::errors::DomainError;
-use tomb_fido2::domain::types::{CreateTarget, Filesystem};
-use tomb_fido2::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
-use tomb_fido2::ports::fido2_backend::Fido2DeviceSelection;
+use hypogaol::domain::errors::DomainError;
+use hypogaol::domain::types::{CreateTarget, Filesystem};
+use hypogaol::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
+use hypogaol::ports::fido2_backend::Fido2DeviceSelection;
 
 use crate::fakes::{
     new_call_log, no_progress, FakeFido2Backend, FakeFilesystemBackend, FakeLuksBackend,

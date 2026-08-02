@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use tomb_fido2::domain::errors::DomainError;
-use tomb_fido2::domain::types::{MapperHandle, Pid, Signal};
-use tomb_fido2::domain::workflows::slam;
+use hypogaol::domain::errors::DomainError;
+use hypogaol::domain::types::{MapperHandle, Pid, Signal};
+use hypogaol::domain::workflows::slam;
 
 use crate::fakes::{new_call_log, FakeFido2Backend, FakeFilesystemBackend, FakeLuksBackend};
 

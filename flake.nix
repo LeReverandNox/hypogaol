@@ -1,5 +1,5 @@
 {
-  description = "tomb-fido2 development environment";
+  description = "hypogaol development environment";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -20,7 +20,7 @@
             rustfmt
             rust-analyzer
 
-            # Runtime tools tomb-fido2 orchestrates (AD-1) — not build deps,
+            # Runtime tools hypogaol orchestrates (AD-1) — not build deps,
             # only needed locally to run the hardware-gated integration suite (AD-7).
             cryptsetup
             systemd

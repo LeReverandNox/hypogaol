@@ -1,5 +1,5 @@
-use tomb_fido2::domain::errors::DomainError;
-use tomb_fido2::domain::preflight;
+use hypogaol::domain::errors::DomainError;
+use hypogaol::domain::preflight;
 
 use crate::fakes::{FakeFido2Backend, FakeFilesystemBackend, FakeLuksBackend};
 

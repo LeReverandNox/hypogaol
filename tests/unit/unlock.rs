@@ -1,10 +1,10 @@
 use std::cell::RefCell;
 use std::path::PathBuf;
 
-use tomb_fido2::domain::hooks::{BindHookSkipReason, HookWarning};
-use tomb_fido2::domain::mapping_name;
-use tomb_fido2::domain::types::HookFileMeta;
-use tomb_fido2::domain::workflows::unlock;
+use hypogaol::domain::hooks::{BindHookSkipReason, HookWarning};
+use hypogaol::domain::mapping_name;
+use hypogaol::domain::types::HookFileMeta;
+use hypogaol::domain::workflows::unlock;
 
 use crate::fakes::{new_call_log, FakeFido2Backend, FakeFilesystemBackend, FakeLuksBackend};
 

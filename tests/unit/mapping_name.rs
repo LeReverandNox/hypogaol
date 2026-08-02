@@ -1,4 +1,4 @@
-use tomb_fido2::domain::mapping_name::mapping_name;
+use hypogaol::domain::mapping_name::mapping_name;
 
 #[test]
 fn same_path_produces_the_same_name_every_time() {

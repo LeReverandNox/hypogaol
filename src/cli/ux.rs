@@ -53,7 +53,7 @@ pub fn translate(err: &DomainError) -> String {
         ),
         DomainError::PreflightFailed(missing) => {
             let mut message =
-                String::from("tomb-fido2 can't run yet — a few things are missing:");
+                String::from("Hypogaol can't run yet — a few things are missing:");
             for item in missing {
                 message.push_str("\n  - ");
                 message.push_str(item);
@@ -82,7 +82,7 @@ pub fn translate(err: &DomainError) -> String {
                 HookRejectionReason::WorldWritable => "it's writable by anyone on this system",
             };
             format!(
-                "tomb-fido2 refused to run this tomb's exec-hooks script ({}) because {clause}. \
+                "Hypogaol refused to run this tomb's exec-hooks script ({}) because {clause}. \
                  Nothing has changed.",
                 path.display()
             )
@@ -91,7 +91,7 @@ pub fn translate(err: &DomainError) -> String {
             original,
             close_detail,
         } => format!(
-            "{} (On top of that, tomb-fido2 couldn't re-lock the LUKS2 mapping while cleaning \
+            "{} (On top of that, Hypogaol couldn't re-lock the LUKS2 mapping while cleaning \
              up: {close_detail} — it may have been left open; run `close` to check.)",
             translate(original)
         ),
@@ -190,7 +190,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // a plain `revoke` failure). Checked first for the same reason as the
     // `fido2-token` bucket above.
     if inner.contains("luksDump") {
-        return "tomb-fido2 couldn't read this tomb's key information. Make sure the path points \
+        return "Hypogaol couldn't read this tomb's key information. Make sure the path points \
                 at a valid tomb, then try again."
             .to_string();
     }
@@ -238,7 +238,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // before that bucket since the wrapped detail still contains
     // "cryptsetup close" (review finding, 2026-07-26).
     if inner.contains("but failed to re-lock afterward") {
-        return "tomb-fido2 grew this tomb successfully, but couldn't re-lock its LUKS2 volume \
+        return "Hypogaol grew this tomb successfully, but couldn't re-lock its LUKS2 volume \
                 afterward. Your data and the new capacity are safe — run `close` to finish, or \
                 try `resize` again."
             .to_string();
@@ -250,7 +250,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // that bucket's touch/PIN-entry framing is meaningless for `close`, which
     // never touches a FIDO2 key (review finding, 2026-07-26).
     if inner.contains("cryptsetup close") {
-        return "tomb-fido2 couldn't re-lock this tomb's LUKS2 volume. Make sure nothing is \
+        return "Hypogaol couldn't re-lock this tomb's LUKS2 volume. Make sure nothing is \
                 still using it, then try again."
             .to_string();
     }
@@ -265,7 +265,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // timing issue (this call re-authenticates via the FIDO2 token, Task 0's
     // spike finding).
     if inner.contains("cryptsetup resize") {
-        return "tomb-fido2 couldn't resize this tomb's LUKS2 volume — your security key or its \
+        return "Hypogaol couldn't resize this tomb's LUKS2 volume — your security key or its \
                 PIN may not have been accepted in time."
             .to_string();
     }
@@ -312,7 +312,7 @@ fn translate_adapter_failure(inner: &str) -> String {
         return "This tomb doesn't look like it's currently mounted.".to_string();
     }
     if inner.contains("umount") || inner.contains("findmnt") {
-        return "tomb-fido2 couldn't unmount this tomb's filesystem. Make sure nothing is still \
+        return "Hypogaol couldn't unmount this tomb's filesystem. Make sure nothing is still \
                 using it, then try again."
             .to_string();
     }
@@ -323,7 +323,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // "mount" nor "mkfs" and would otherwise fall all the way through to
     // the unhelpful generic fallback (marker-bleed guard).
     if inner.contains("resize2fs") {
-        return "tomb-fido2 grew this tomb's volume, but couldn't grow its filesystem to match."
+        return "Hypogaol grew this tomb's volume, but couldn't grow its filesystem to match."
             .to_string();
     }
 
@@ -334,7 +334,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // the way through to the unhelpful generic fallback (marker-bleed
     // guard; review finding, 2026-07-26).
     if inner.contains("e2fsck") {
-        return "tomb-fido2 grew this tomb's volume, but couldn't check its filesystem before \
+        return "Hypogaol grew this tomb's volume, but couldn't check its filesystem before \
                 growing it to match."
             .to_string();
     }
@@ -342,7 +342,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // Mount/filesystem failures (`mkfs`, `mount`, `chmod`, mount-point
     // create/remove).
     if inner.contains("mount") || inner.contains("mkfs") {
-        return "Your tomb unlocked, but tomb-fido2 couldn't mount its filesystem.".to_string();
+        return "Your tomb unlocked, but Hypogaol couldn't mount its filesystem.".to_string();
     }
 
     // `mapping_name::mapping_name`'s canonicalization failure. The message is
@@ -351,7 +351,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // truncated at that embedded colon.
     if let Some(path) = inner.strip_prefix("failed to canonicalize ") {
         let path = path.rsplit_once(": ").map_or(path, |(path, _)| path);
-        return format!("tomb-fido2 couldn't find {path}. Check the path and try again.");
+        return format!("Hypogaol couldn't find {path}. Check the path and try again.");
     }
 
     // Device/file sizing failures (`blockdev --getsize64`,
@@ -366,7 +366,7 @@ fn translate_adapter_failure(inner: &str) -> String {
         || inner.contains("is not a regular file")
         || inner.contains("failed to open")
     {
-        return "tomb-fido2 couldn't determine or set the size needed for this tomb.".to_string();
+        return "Hypogaol couldn't determine or set the size needed for this tomb.".to_string();
     }
 
     // Fallback: keeps AC #2's "no jargon leaks" promise for the primary line

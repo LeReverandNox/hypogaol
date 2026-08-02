@@ -105,3 +105,7 @@
 
 - `list_open_mappings`'s `dmsetup ls` → `cryptsetup status` TOCTOU window hard-fails the *entire* discovery call if one mapping closes mid-scan, rather than skipping just that entry — a deliberate, documented Dev Notes decision (never intended as a per-entry-skip); the ARCHITECTURE-SPINE.md Deferred-section citation doesn't literally name this specific race, but the same "low-likelihood for a single-user cold-storage tool" reasoning it states for other concurrent-invocation races applies equally here. [src/adapters/exec/mod.rs:1199]
 - No `LC_ALL=C` (or equivalent) is pinned on the `dmsetup ls`/`cryptsetup status` subprocess calls whose textual output is parsed for field values for the first time in this codebase — a non-English locale could in principle break the `loop:`/`device:` field-name match. Same underlying gap as the 3-2 review's `dumpe2fs`-locale item (nothing pins `LC_ALL=C` on adapter subprocesses anywhere in this codebase); deferred for the same reason. [src/adapters/exec/mod.rs:1164, 1191]
+
+## Deferred from: code review of 5-1-product-identity-rename (2026-08-02)
+
+- Internal test/temp-file fixtures still embed the old product name — not user-facing, out of this story's narrow scope (Cargo/config/flake/README/CHANGELOG/CI); natural pickup for Story 5.2 since it already touches these same files for the `tomb`→`volume` domain-noun rename. [src/adapters/exec/mod.rs:251,2251; tests/hardware/main.rs; tests/unit/*.rs]

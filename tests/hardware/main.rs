@@ -2,12 +2,12 @@ use std::os::unix::process::ExitStatusExt;
 use std::path::PathBuf;
 use std::process::Command;
 
-use tomb_fido2::adapters::exec::ExecAdapter;
-use tomb_fido2::domain::mapping_name;
-use tomb_fido2::domain::types::{CreateTarget, Filesystem};
-use tomb_fido2::domain::workflows::{close, create, enroll, info, resize, revoke, slam, unlock};
-use tomb_fido2::ports::fido2_backend::Fido2DeviceSelection;
-use tomb_fido2::ports::luks_backend::LuksBackend;
+use hypogaol::adapters::exec::ExecAdapter;
+use hypogaol::domain::mapping_name;
+use hypogaol::domain::types::{CreateTarget, Filesystem};
+use hypogaol::domain::workflows::{close, create, enroll, info, resize, revoke, slam, unlock};
+use hypogaol::ports::fido2_backend::Fido2DeviceSelection;
+use hypogaol::ports::luks_backend::LuksBackend;
 
 /// No-op progress callback (separate test binary from `tests/unit`, so it
 /// gets its own copy of this helper rather than sharing `tests/unit/fakes.rs`).
@@ -1233,7 +1233,7 @@ fn revoke_aborts_on_the_last_remaining_key() {
     assert!(
         matches!(
             result,
-            Err(tomb_fido2::domain::errors::DomainError::LastKeyslotGuard)
+            Err(hypogaol::domain::errors::DomainError::LastKeyslotGuard)
         ),
         "expected DomainError::LastKeyslotGuard, got {result:?}"
     );
@@ -1838,7 +1838,7 @@ fn resize_rejects_a_request_exceeding_the_raw_devices_capacity() {
     assert!(
         matches!(
             result,
-            Err(tomb_fido2::domain::errors::DomainError::DeviceSizeExceedsCapacity { .. })
+            Err(hypogaol::domain::errors::DomainError::DeviceSizeExceedsCapacity { .. })
         ),
         "expected DomainError::DeviceSizeExceedsCapacity, got {result:?}"
     );
@@ -1907,7 +1907,7 @@ fn resize_rejects_a_shrink_request_and_leaves_the_tomb_untouched() {
     assert!(
         matches!(
             result,
-            Err(tomb_fido2::domain::errors::DomainError::ResizeMustGrow { .. })
+            Err(hypogaol::domain::errors::DomainError::ResizeMustGrow { .. })
         ),
         "expected DomainError::ResizeMustGrow, got {result:?}"
     );
