@@ -71,6 +71,13 @@ so that the domain vocabulary is generic and independent of whatever the product
   - Re-run `grep -rniE "tomb" src/ tests/ README.md _bmad-output/specs/spec-tomb-fido2/hooks.md` — every remaining hit must be one of the three explicit exceptions (AC #6: `dyne/tomb` references, and `mod.rs:122`'s carved-out product-name doc comment) or nothing; anything else is a miss.
   - Run `make test-hardware` manually at least once against real hardware (AC #2) — this is the only suite that actually creates a file named after the renamed fixtures and shells real `cryptsetup`/mapper-name commands against them, so it's the real end-to-end check that the rename didn't silently break a literal a human is meant to type by hand.
 
+### Review Findings
+
+_(chunk 1 of 2 — `src/` only; `tests/`, README.md, hooks.md reviewed in a follow-up pass)_
+
+- [x] [Review][Patch] "volume's LUKS2 volume" stutter left unfixed in 4 spots [src/cli/main.rs:95, src/cli/ux.rs:241, src/cli/ux.rs:253, src/cli/ux.rs:268]
+- [x] [Review][Patch] `cargo fmt --check` fails on 3 files touched by the rename [src/cli/main.rs:667, src/cli/ux.rs:306, src/domain/hooks.rs:135]
+
 ## Dev Notes
 
 - **Scope boundary, again the whole point.** Epic 5 splits the rebrand into four stories (per `_bmad-output/planning-artifacts/sprint-change-proposal-2026-08-02.md` §4): 5.1 = product identity (done), **5.2 = this story**, 5.3 = tagline/pronunciation/mascot top-level branding copy, 5.4 = `github-automation-reference.md` + SPEC.md/AD-13 addendum. Do not pull 5.3/5.4 work in here — leave `_bmad/custom/github-automation-reference.md` and any tagline/pronunciation copy untouched.
