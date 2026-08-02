@@ -82,11 +82,15 @@ development_status:
 
   epic-5: in-progress
   5-1-product-identity-rename: done
-  5-2-domain-term-rename-tomb-to-volume: in-progress
+  5-2-domain-term-rename-tomb-to-volume: review
   5-3-top-level-branding-copy: backlog
   5-4-update-live-planning-automation-pointers: backlog
 
 action_items:
+  - epic: 5
+    action: "Run `make test-hardware` manually against real hardware to verify Story 5.2's rename (AC #2) — no physical FIDO2 device was available in the dev-story execution environment, so only cargo build/make test/cargo build --test hardware (typecheck) were verified automatically."
+    owner: "LeReverandNox"
+    status: open
   - epic: 1
     action: "Fix mount-point ownership: chown to invoking uid/gid before chmod 0700 in FilesystemBackend::mount (currently root-owned, root-only)"
     owner: "Amelia"

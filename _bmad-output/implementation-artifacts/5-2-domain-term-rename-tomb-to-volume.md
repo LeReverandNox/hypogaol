@@ -4,7 +4,7 @@ baseline_commit: 714c282c6597735a5c8ed5c901b4e5481020e35c
 
 # Story 5.2: Domain Term Rename (tomb → volume)
 
-Status: in-progress
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -25,7 +25,7 @@ so that the domain vocabulary is generic and independent of whatever the product
 
 ## Tasks / Subtasks
 
-- [ ] **Task 0: Read every file this story touches before changing anything** (AC: #1, #3, #5)
+- [x] **Task 0: Read every file this story touches before changing anything** (AC: #1, #3, #5)
   - Read in full: every file listed in Task 1-6 below. Re-grep `-i "tomb"` in each immediately before editing it — the counts below are a snapshot from story creation and may have drifted.
   - Note the one cross-file trap up front: `MIN_TOMB_SIZE_BYTES` (defined in `src/domain/workflows/create.rs:32`) is a `pub const` consumed in `src/cli/main.rs`, `tests/unit/create.rs`, `tests/unit/cli.rs`, and `tests/unit/progress.rs`. Renaming it to `MIN_VOLUME_SIZE_BYTES` requires touching all five files atomically in the same pass or `cargo build`/`make test` won't compile in between.
 
@@ -64,7 +64,7 @@ so that the domain vocabulary is generic and independent of whatever the product
   - `_bmad-output/specs/spec-tomb-fido2/hooks.md`: rename every domain-noun "tomb" (e.g. "in the tomb's own root", "bind-mounts the tomb-relative path", "the tomb root", "escape the tomb"). Leave its `dyne/tomb` references (manpage URL, "Adapted from dyne/tomb's hooks model", the `tomb#L2824-2910` source citation) untouched — same exception as README.
   - **Note the sibling-file split:** `_bmad-output/specs/spec-tomb-fido2/SPEC.md` lives in the same directory as `hooks.md` but is one of the frozen historical docs (AC #4) — do not touch it even though it's adjacent and easy to sweep in by accident.
 
-- [ ] **Task 7: Full regression pass** (AC: #1, #2, #3, #5)
+- [x] **Task 7: Full regression pass** (AC: #1, #2, #3, #5)
   - `cargo build` succeeds with all renamed identifiers (this is what catches any `MIN_TOMB_SIZE_BYTES`/`tomb_name`/`SourceEscapesTombRoot`-style rename left half-done across files).
   - `make test` passes with the same 174 tests as before the rename (confirmed count as of story creation — reverify, don't assume it still holds after your edits).
   - `cargo run -- --help` and a manual walk of each subcommand's `--help` text shows no remaining "tomb" domain-noun wording.
@@ -109,6 +109,7 @@ so that the domain vocabulary is generic and independent of whatever the product
 - Task 4: Renamed domain-noun usages (fn names, comments, assertion strings, plain-domain-noun placeholder paths like `/tmp/tomb`, `/tomb/a.img`) across all 16 `tests/unit/*.rs` files, plus `MIN_TOMB_SIZE_BYTES` use-sites (`create.rs`, `cli.rs`, `progress.rs`) and `SourceEscapesTombRoot` use-sites (`hooks.rs`, `ux.rs`) to match Task 1/3's identifier renames. AC#5's two explicit fixtures (`mapping_name.rs:16`, `ux.rs:184`) renamed. Deliberately left untouched: every other `tomb-fido2`-branded fixture literal (temp-dir names in `enroll/close/create/hooks/unlock/progress.rs`, argv[0] in `cli.rs`) — these are old-product-name references (category 2, Story 5.1's domain, not re-opened by AC#5's closed exception list) not this story's job. `cargo build` and `make test` (174 tests) both pass clean.
 - Task 5: Blanket rename of all 116 `tomb` occurrences in `tests/hardware/main.rs` — unlike `tests/unit/*.rs`, AC#5 explicitly includes "every `tomb-fido2-hardware-test*` literal" here, so no product-name literals were left behind (this file is the exception where old-product-name fixtures ARE this story's job). `cargo build --test hardware` typechecks clean; actual `make test-hardware` run against real hardware still outstanding per AC#2/Task 7 (manual, gated, not run by CI).
 - Task 6: Renamed domain-noun "tomb" in `README.md` body and `hooks.md`, preserving the three AC#6 `dyne/tomb` carve-outs (README lines ~3/~36 links+prose, "the original Tomb never had" at ~28; `hooks.md`'s manpage URL, `tomb#L2824-2910` source citation, and 4 "stricter than dyne/tomb" guardrail headers) verbatim, including on two lines that mixed a `dyne/tomb` reference with a domain-noun sentence in the same line (targeted substring edits, not blanket line rename). `SPEC.md` (sibling frozen doc, AC#4) left untouched. **Incidental fix, same commit:** the mechanical rename exposed a real terminology collision — several places already used "volume" to mean the LUKS2 mapping specifically (distinct from the whole container being renamed from "tomb"), producing an accidental "volume's volume" duplication in 4 code spots (`src/domain/workflows/resize.rs:16`, `src/cli/main.rs:113`, `src/cli/ux.rs:326,337`) plus `README.md:19`. Reworded to "volume's LUKS2 mapping" at each site — clarifies rather than changes behavior, no test asserted on the broken duplicated phrasing.
+- Task 7: Full regression pass. `cargo build`: clean. `make test`: 174/174 passed (matches pre-rename count exactly). `cargo run -- --help` and every subcommand's `--help` (`create`/`create file`/`create device`/`unlock`/`enroll`/`revoke`/`close`/`close-all`/`resize`/`slam`/`info`) manually walked — all read "volume", zero "tomb" domain-noun wording remains. Final `grep -rniE "tomb" src/ tests/ README.md hooks.md` sweep: every surviving hit is one of the three accounted exceptions — (a) `src/adapters/exec/mod.rs:122`'s AC#6 crate-name carve-out, (b) README/hooks.md's `dyne/tomb` AC#6 carve-outs, (c) old-product-name test fixtures (`tomb-fido2-unit-test-*` temp-dir literals, `tomb-fido2` argv[0] in `cli.rs`) that AC#5's closed exception list deliberately did not reopen. **Not completed: `make test-hardware` manual run against real hardware (AC #2).** This requires a physical FIDO2 security key and root privileges to drive real `cryptsetup`/`mkfs`/`mount` against a loop device — unavailable in this execution environment. `cargo build --test hardware` confirms the suite typechecks. Flagging this as an outstanding manual step for LeReverandNox before treating the rename as fully hardware-verified, consistent with this project's existing pattern of handing hardware-dependent verification to the human owner (see sprint-status.yaml's epic-3 "Exercise release automation..." action item) rather than blocking story review.
 
 ### File List
 
@@ -146,3 +147,7 @@ so that the domain vocabulary is generic and independent of whatever the product
 - tests/hardware/main.rs
 - README.md
 - _bmad-output/specs/spec-tomb-fido2/hooks.md
+
+## Change Log
+
+- 2026-08-02: Implemented Story 5.2 — domain noun "tomb" renamed to "volume" across `src/`, `tests/unit/`, `tests/hardware/main.rs`, `README.md`, and `hooks.md`, preserving the three AC#6 carve-outs (`dyne/tomb` references, `mod.rs:122`'s old crate-name doc comment) and AC#4's frozen historical docs untouched. Fixed an incidental "volume's volume" readability duplication the rename exposed (4 code spots + README). All 8 tasks complete, all 6 ACs satisfied for the automatable portion, `cargo build` + `make test` (174 tests) green. `make test-hardware` against real hardware (AC #2) not run — no physical FIDO2 device available in this environment; flagged as an outstanding manual step. Status moved to `review`.
