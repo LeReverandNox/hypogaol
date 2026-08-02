@@ -4,7 +4,7 @@ baseline_commit: 0ce7593d9c675fae7350c3035a438f132b23add2
 
 # Story 5.1: Product Identity Rename
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -71,6 +71,12 @@ so that Cargo, the CLI, and the README present one consistent, permanent product
   - `cargo run -- --help` shows `hypogaol` in the banner (Task 7).
   - Re-run `grep -n "tomb-fido2" README.md` — it should return zero matches (every self-reference renamed in Task 5). A separate `grep -n "tomb" README.md` will still return plenty of matches (domain-noun/hooks/dyne-tomb references, all correctly left for Story 5.2) — that's expected, not a regression.
 
+### Review Findings
+
+- [x] [Review][Patch] CLI runtime error messages still self-identify as `tomb-fido2` [src/cli/ux.rs:56,85,94,193,241,253,268,315,326,337,345,354,369; tests/unit/ux.rs:232] — fixed. All 12 hardcoded `tomb-fido2` product-name self-references in `src/cli/ux.rs`'s user-facing error/status strings renamed to `Hypogaol`; the matching stale comment in `tests/unit/ux.rs:232` updated to match; the story's Task 7 Completion Note corrected to remove its false "anywhere in `src/`" claim. `tests/unit/ux.rs:184`'s fixture (`.tomb-fido2-bootstrap-abc123`) deliberately left as-is — it mirrors the still-unrenamed internal temp-file literal at `src/adapters/exec/mod.rs:251`, deferred to Story 5.2.
+- [x] [Review][Patch] `sprint-status.yaml`'s `project:` field still reads `tomb-fido2` [_bmad-output/implementation-artifacts/sprint-status.yaml:3,45] — fixed, both occurrences now read `hypogaol` to match `_bmad/bmm/config.yaml`'s `project_name`.
+- [x] [Review][Defer] Internal test/temp-file fixtures still embed the old product name [src/adapters/exec/mod.rs:251,2251, tests/hardware/main.rs, tests/unit/*.rs] — deferred, pre-existing. Not user-facing, out of this story's narrow scope (Cargo/config/flake/README/CHANGELOG/CI); natural pickup for Story 5.2 since it already touches these same files for the `tomb`→`volume` domain-noun rename.
+
 ## Dev Notes
 
 - **Scope boundary is the whole point of this story.** Epic 5 splits the rebrand into four stories deliberately (per `_bmad-output/planning-artifacts/sprint-change-proposal-2026-08-02.md` §4): 5.1 = product identity (this story — Cargo/config/flake/README-title/README-body-self-references/CHANGELOG-header/CI-verify), 5.2 = domain-noun `tomb`→`volume` rename across `src/`/`tests/`/README-body/`hooks.md`, 5.3 = tagline/pronunciation/mascot top-level branding copy, 5.4 = `github-automation-reference.md` + SPEC.md/AD-13 addendum. **Do not pull work from 5.2/5.3/5.4 into this story** — leave `hooks.md`, every domain-noun "tomb" occurrence (README or elsewhere), tagline/pronunciation copy, and `_bmad/custom/github-automation-reference.md`'s repo path untouched here. README body prose *is* in scope for this story, but narrowly: only the product-name self-references (AC #4), not the domain noun living in the same paragraphs — see Task 5's line-by-line breakdown.
@@ -106,7 +112,7 @@ Claude Sonnet 5 (claude-sonnet-5)
 - Task 4: `flake.nix`'s `description` string and the runtime-tools comment updated to `hypogaol`.
 - Task 5: Re-grepped `README.md` before editing to confirm the line list hadn't drifted (matched exactly). Renamed title, removed the now-false working-title disclaimer, and renamed all ~25 body-prose product-name self-references to `Hypogaol` — including the mid-sentence cases mixing product name and domain noun (e.g. line 23 "Close every **Hypogaol**-managed tomb", left `tomb` untouched). Updated the break-glass heading and its markdown anchor link to the new GitHub-generated slug (`#break-glass-recovery-no-hypogaol-required`). Left every plain domain-noun "tomb" and both `dyne/tomb` references untouched (Story 5.2's job). `make test` (174 tests) passes unchanged.
 - Task 6: Verified `CHANGELOG.md`'s header (`# Changelog`) contains no product-name literal — no edit needed. Historical entries (release-please-generated, tied to real `LeReverandNox/tomb-fido2` PR/commit URLs) left untouched per Dev Notes' historical-docs-stay-frozen guidance.
-- Task 7: `cargo run -- --help` now prints `Usage: hypogaol <COMMAND>` with zero `src/` changes — AD-13's placeholder-name isolation held. Confirmed no hardcoded `"tomb-fido2"`/`"tomb_fido2"` string literals anywhere in `src/`.
+- Task 7: `cargo run -- --help` now prints `Usage: hypogaol <COMMAND>` with zero `src/` changes — AD-13's placeholder-name isolation held. Confirmed no hardcoded `"tomb-fido2"`/`"tomb_fido2"` string literals used for the CLI name/banner/version output specifically. **Correction (code review, 2026-08-02):** the original claim of "no hardcoded literals anywhere in `src/`" was false — `src/cli/ux.rs` had 12 hardcoded `"tomb-fido2"` self-references in user-facing error/status strings, unrelated to the clap-derived banner. Fixed as a review patch: all 12 renamed to `Hypogaol`, plus the matching stale comment in `tests/unit/ux.rs`. The internal temp-file-name literal at `src/adapters/exec/mod.rs:251` (`.tomb-fido2-bootstrap-{suffix_hex}`) and its test-fixture counterpart were deliberately left as-is and deferred to Story 5.2 (not user-facing, out of this story's narrow scope).
 - Task 8: Re-grepped `.github/workflows/{ci,release,release-please}.yml`, `release-please-config.json`, `.release-please-manifest.json` post-rename for `tomb-fido2`/`tomb_fido2`/`LeReverandNox` literals — zero matches, confirming they all derive repo/package identity from `Cargo.toml` or GitHub Actions context at run time. No edits needed.
 - Task 9: Full regression pass — `cargo build` succeeds, `make test` (174 tests) passes, `cargo run -- --help` shows `hypogaol`, `grep -c "tomb-fido2" README.md` returns 0, `grep -c "tomb" README.md` still returns 18 (expected domain-noun/hooks/dyne-tomb references, correctly left for Story 5.2). All 4 ACs satisfied.
 
@@ -141,3 +147,4 @@ Claude Sonnet 5 (claude-sonnet-5)
 ## Change Log
 
 - 2026-08-02: Implemented Story 5.1 — product identity renamed to Hypogaol across `Cargo.toml`/`Cargo.lock`, `_bmad/bmm/config.yaml`, `flake.nix`, and `README.md`'s title/disclaimer/body self-references. AD-13's CLI-banner guarantee and CI/release config's repo-agnostic references both verified to need zero code changes. All 9 tasks complete, all 4 ACs satisfied, 174 unit tests passing. Status moved to `review`.
+- 2026-08-02: Code review — 1 decision-needed (resolved: fix in-story), 2 patches applied (`src/cli/ux.rs`'s 12 hardcoded CLI error-message self-references renamed to Hypogaol plus the matching `tests/unit/ux.rs` comment; `sprint-status.yaml`'s stale `project:` field), 1 deferred to Story 5.2 (internal temp-file/test-fixture literals). `cargo build` + `make test` (174 tests) reverified green. Status moved to `done`.
