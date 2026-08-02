@@ -143,6 +143,10 @@ Users can close an unlocked tomb (unmount + re-lock) as the clean counterpart to
 Users can inspect a tomb's enrolled keys without unlocking it, enroll keys with stronger fingerprint/PIN verification, manage every open tomb in bulk (routine close-all or panic-button slam), automate per-tomb setup/teardown via bind- and exec-hooks, and see real progress as create/resize actually happen — turning the tool from single-tomb basics into something usable for someone managing several tombs under real operational and emergency conditions.
 **FRs covered:** FR12, FR13, FR14, FR15, FR16, FR17
 
+### Epic 5: Rebrand to Hypogaol
+Users and contributors see the project consistently as Hypogaol everywhere it presents itself — package, binary, repository, README, and CLI banner — while the codebase's internal vocabulary moves from the placeholder-era "tomb" to the generic, brand-independent "volume." No functional behavior changes; see `sprint-change-proposal-2026-08-02.md` for full impact analysis and rationale.
+**FRs covered:** None — non-functional rename/rebrand, orthogonal to the SPEC's FR list. Triggered by the 2026-08-02 naming brainstorm (`_bmad-output/brainstorming/brainstorm-project-naming-2026-08-02/`).
+
 ## Epic 1: Create & Open a Tomb (Foundation)
 
 Users can create a brand-new tomb from scratch — file-backed (the tool allocates the backing file itself) or device-backed (an existing raw device/partition, with mandatory wipe confirmation) — formatting it as LUKS2, creating the chosen filesystem inside it, and bootstrap-enrolling the first FIDO2 key — then unlock it with the filesystem mounted and ready to use, all through the tool's own CLI with zero FIDO2 knowledge required. This epic also stands up the project foundation (Nix devShell, CI, release automation) and the shared infrastructure every later epic depends on: the `LuksBackend`/`Fido2Backend`/`FilesystemBackend` ports, the `domain::preflight` gate, deterministic mapping-name/mountpoint discovery (AD-12), and the CLI/UX translation boundary. Each capability story (Create file-backed, Create device-backed, Unlock) wires and exposes its own CLI subcommand incrementally as it's built; the final story in this epic consolidates full `--help` coverage and audits plain-language error translation across all of them.
@@ -634,3 +638,100 @@ So that in a genuine crisis I can clear everything blocking unmount without bein
 **Given** slam is processing several open tombs and one never clears (a process keeps re-acquiring the mount)
 **When** that happens
 **Then** it's reported as that one mapping's failure, without blocking slam from completing the rest of the batch
+
+## Epic 5: Rebrand to Hypogaol
+
+Users and contributors see the project consistently as Hypogaol everywhere it presents itself — package, binary, repository, README, and CLI banner — while the codebase's internal vocabulary moves from the placeholder-era "tomb" to the generic, brand-independent "volume." No functional behavior changes.
+
+> **Prerequisite:** the GitHub repository is renamed `tomb-fido2` → `hypogaol` (owner action, done outside this epic) before Story 5.1 lands, so link/URL updates in that story are accurate in one pass.
+>
+> **Non-goals for this epic:** rewriting Epics 1-4's text, their story files, or past retros (left as frozen historical record per AD-13's existing continuity exception); producing actual mascot/mark artwork (brand-identity.md is the reference spec for whoever eventually draws it — no story here produces image assets); any change to CAP-1..17 behavior.
+
+### Story 5.1: Product Identity Rename
+
+As a maintainer,
+I want the product's name updated to Hypogaol everywhere it's read from a single source,
+So that Cargo, the CLI, and the README present one consistent, permanent product identity instead of the `tomb-fido2` placeholder.
+
+**Acceptance Criteria:**
+
+**Given** the GitHub repository has already been renamed to `hypogaol`
+**When** Story 5.1 lands
+**Then** `Cargo.toml`'s `name` and `repository` fields, `_bmad/bmm/config.yaml`'s `project_name`, `README.md`'s title/badges, and `CHANGELOG.md`'s header all read `Hypogaol`/`hypogaol`, and `flake.nix` references are updated to match
+
+**Given** AD-13's placeholder-name isolation (CLI/binary name sourced from exactly one place — the Cargo package name)
+**When** the package name changes
+**Then** the compiled binary and `--help` banner automatically reflect the new name with no additional literal to update, confirming AD-13's guarantee held
+
+**Given** the renamed repository
+**When** any CI/release config (GitHub Actions workflows, cargo-dist config) references the old repo path or name
+**Then** those references are updated to the new path
+
+### Story 5.2: Domain Term Rename (tomb → volume)
+
+As a contributor reading or modifying the codebase,
+I want the encrypted-container concept called "volume" everywhere instead of "tomb",
+So that the domain vocabulary is generic and independent of whatever the product happens to be branded as.
+
+**Acceptance Criteria:**
+
+**Given** every `src/` module, `tests/unit`/`tests/hardware` file, and their identifiers/comments/error strings that currently say "tomb"
+**When** Story 5.2 lands
+**Then** all of them read "volume" instead, with no change in behavior
+
+**Given** the full rename
+**When** `cargo build`, `make test`, and (manually) `make test-hardware` are run afterward
+**Then** all pass with zero behavioral difference from before the rename
+
+**Given** README body text and `hooks.md`
+**When** they reference the container concept
+**Then** they also say "volume", consistent with the code
+
+**Given** historical planning docs (SPEC.md, Epics 1-4 above, ARCHITECTURE-SPINE.md, past retros)
+**When** Story 5.2 is scoped
+**Then** none of them are rewritten — they remain frozen historical record per AD-13's existing continuity exception
+
+### Story 5.3: Top-Level Branding Copy
+
+As a first-time reader of the README or `--help` output,
+I want the Hypogaol name, tagline, and pronunciation note presented clearly at the top level,
+So that the brand identity lands without any flavor leaking into functional output.
+
+**Acceptance Criteria:**
+
+**Given** the README header
+**When** Story 5.3 lands
+**Then** it carries the tagline "Sealed until touched." and a short pronunciation note for "gaol" (reads like "jail")
+
+**Given** the CLI `--help` banner
+**When** it's shown
+**Then** it may carry the tagline/name treatment, but no subcommand name, flag, or error message anywhere changes to a themed/flavored word
+
+**Given** brand-identity.md's tone boundary
+**When** any copy is added under this story
+**Then** error messages and README body text remain plain, literal, and human-friendly — verified by an explicit grep-through check, not just a stated intention
+
+### Story 5.4: Update Live Planning/Automation Pointers
+
+As a maintainer,
+I want the BMAD tooling's own config and automation references updated to the new name,
+So that future BMAD workflow runs (sprint-status, GitHub automation) operate against accurate, current pointers rather than stale `tomb-fido2` references.
+
+**Acceptance Criteria:**
+
+**Given** `_bmad/custom/github-automation-reference.md`
+**When** Story 5.4 lands
+**Then** its repo path and GitHub Project display name reflect the renamed repository
+
+**Given** SPEC.md's Constraints section and ARCHITECTURE-SPINE.md's AD-13
+**When** Story 5.4 lands
+**Then** a short addendum is appended (not a rewrite) noting the rename executed on 2026-08-02, referencing `sprint-change-proposal-2026-08-02.md`
+
+## Backlog — Unscoped Candidate Ideas (Not Yet an Epic)
+
+> Captured 2026-08-02 alongside the Hypogaol rename (Epic 5) but deliberately **not** part of it — unrelated in scope, and none of these have been through requirements elicitation yet (no FR numbers, no architecture decisions, no acceptance criteria). Listed here so they aren't lost, pending a future planning session to properly scope them into an epic.
+
+- **Custom label for the first enrolled key at volume creation** — today's bootstrap enrollment (CAP-8) presumably assigns a default `key_label`; let the user supply one at `create` time, same as a standalone `enroll` presumably already allows.
+- **Scaffold hooks template files on volume creation** — when `create` runs, optionally drop example/template `bind-hooks`/`exec-hooks` files into the new volume so users discover the hooks (CAP-16) format without consulting docs first.
+- **One-letter shorthand flags for subcommand flags** — general CLI ergonomics pass across all subcommands.
+- **Expose all `systemd-cryptenroll` FIDO2 flags during enrollment** (`--fido2-credential-algorithm`, `--fido2-salt-file`, `--fido2-parameters-in-header`, `--fido2-with-client-pin`, `--fido2-with-user-presence`) — **open question, not yet decided:** is the added surface area worth it for advanced users, given the project's existing zero-fallback/zero-cognitive-overhead design posture (NFR3/NFR5)? Needs a deliberate design decision before this can become a real story — flagged here rather than assumed in scope.
