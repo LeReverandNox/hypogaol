@@ -37,7 +37,7 @@ so that the domain vocabulary is generic and independent of whatever the product
     - `src/domain/hooks.rs`: the `tomb_root` parameter of the bind-hook containment-check function, its local `canonical_tomb_root`, and the `BindHookSkipReason::SourceEscapesTombRoot` enum variant (line ~31, constructed at line ~139/144) → `volume_root`, `canonical_volume_root`, `SourceEscapesVolumeRoot`. This variant is matched on in `src/cli/ux.rs:114` (Task 2) — rename both sides together.
     - `src/domain/workflows/close.rs:93,115`: local `tomb_name` → `volume_name`.
 
-- [ ] **Task 2: Rename in `src/cli/main.rs` and `src/cli/ux.rs`** (AC: #1)
+- [x] **Task 2: Rename in `src/cli/main.rs` and `src/cli/ux.rs`** (AC: #1)
   - `src/cli/main.rs`: every `--help`/doc-comment mention of "tomb" as the container noun (subcommand docs, arg docs), every `println!`/`format!` user-facing string ("Creating tomb...", "Tomb created at...", "Tomb unlocked...", "Closing this tomb.", "No tombs are currently open.", "Growing this tomb...", "Tomb grown to...", etc.), and the `MIN_TOMB_SIZE_BYTES` import/uses from Task 1.
     - `create_mount_point`'s `tomb_name` parameter (`src/adapters/exec/mod.rs`, see Task 4) is a separate identifier from anything in `main.rs` — don't conflate the two while renaming.
   - `src/cli/ux.rs`: every user-facing error/status string containing "tomb" (lines ~22, 26, 30, 42, 51, 65, 85, 114-126), including the `BindHookSkipReason::SourceEscapesTombRoot` match arm (rename to match Task 1's enum-variant rename) and its associated message `"its source path escapes the tomb"` → `"its source path escapes the volume"`. Leave `ux.rs:274`'s comment referencing `` `MIN_TOMB_SIZE_BYTES` `` in sync with Task 1's rename too.
@@ -104,6 +104,7 @@ so that the domain vocabulary is generic and independent of whatever the product
 ### Completion Notes List
 
 - Task 1: Case-preserving `tomb`/`Tomb`/`TOMB` -> `volume`/`Volume`/`VOLUME` rename across `src/domain/` and `src/ports/`. Includes `MIN_TOMB_SIZE_BYTES` -> `MIN_VOLUME_SIZE_BYTES` (consumers in `src/cli/main.rs`, `src/cli/ux.rs` comment, and `tests/unit/{create,cli,progress}.rs` intentionally left for Task 2/4 in the same build-passing pass) and `hooks.rs`'s `tomb_root`/`canonical_tomb_root`/`SourceEscapesTombRoot` -> `volume_root`/`canonical_volume_root`/`SourceEscapesVolumeRoot`. `cargo build` will not pass until Task 2/4 land (expected, cross-file rename).
+- Task 2: Case-preserving rename across `src/cli/main.rs` (help/doc text, user-facing strings, `MIN_TOMB_SIZE_BYTES` use-site) and `src/cli/ux.rs` (error/status strings, `SourceEscapesTombRoot` match arm now `SourceEscapesVolumeRoot`, consistent with Task 1). `cargo build` still pending Task 3/4 (`src/adapters/exec/mod.rs`'s `tomb_name` param and `tests/unit/*.rs`'s `MIN_TOMB_SIZE_BYTES` use-sites).
 
 ### File List
 
@@ -119,3 +120,5 @@ so that the domain vocabulary is generic and independent of whatever the product
 - src/domain/workflows/unlock.rs
 - src/ports/filesystem_backend.rs
 - src/ports/luks_backend.rs
+- src/cli/main.rs
+- src/cli/ux.rs

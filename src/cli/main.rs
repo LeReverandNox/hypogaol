@@ -11,7 +11,7 @@ use crate::domain::progress::{CreateStage, ResizeStage};
 use crate::domain::types::{CreateTarget, Filesystem};
 use crate::domain::workflows::close;
 use crate::domain::workflows::close_all;
-use crate::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
+use crate::domain::workflows::create::{self, MIN_VOLUME_SIZE_BYTES};
 use crate::domain::workflows::enroll;
 use crate::domain::workflows::info;
 use crate::domain::workflows::resize;
@@ -31,15 +31,15 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Create a new tomb
+    /// Create a new volume
     Create {
         #[command(subcommand)]
         mode: CreateMode,
     },
 
-    /// Unlock and mount an existing tomb
+    /// Unlock and mount an existing volume
     Unlock {
-        /// Path to the existing tomb's backing file or device
+        /// Path to the existing volume's backing file or device
         #[arg(allow_hyphen_values = true)]
         path: PathBuf,
 
@@ -53,9 +53,9 @@ enum Commands {
         skip_hooks: bool,
     },
 
-    /// Enroll an additional FIDO2 key on an existing tomb
+    /// Enroll an additional FIDO2 key on an existing volume
     Enroll {
-        /// Path to the existing tomb's backing file or device
+        /// Path to the existing volume's backing file or device
         #[arg(allow_hyphen_values = true)]
         path: PathBuf,
 
@@ -81,9 +81,9 @@ enum Commands {
         user_verification: bool,
     },
 
-    /// Revoke a FIDO2 key's keyslot from an existing tomb
+    /// Revoke a FIDO2 key's keyslot from an existing volume
     Revoke {
-        /// Path to the existing tomb's backing file or device
+        /// Path to the existing volume's backing file or device
         #[arg(allow_hyphen_values = true)]
         path: PathBuf,
 
@@ -92,9 +92,9 @@ enum Commands {
         label: String,
     },
 
-    /// Unmount an unlocked tomb's filesystem and re-lock its LUKS2 volume
+    /// Unmount an unlocked volume's filesystem and re-lock its LUKS2 volume
     Close {
-        /// Path to the existing tomb's backing file or device
+        /// Path to the existing volume's backing file or device
         #[arg(allow_hyphen_values = true)]
         path: PathBuf,
 
@@ -103,32 +103,32 @@ enum Commands {
         skip_hooks: bool,
     },
 
-    /// Close every currently open/unlocked tomb in one command
+    /// Close every currently open/unlocked volume in one command
     CloseAll {
-        /// Skip bind-hooks and exec-hooks processing for every tomb closed in this batch.
+        /// Skip bind-hooks and exec-hooks processing for every volume closed in this batch.
         #[arg(long)]
         skip_hooks: bool,
     },
 
-    /// Grow an existing tomb's volume and filesystem to a larger size
+    /// Grow an existing volume's volume and filesystem to a larger size
     Resize {
-        /// Path to the existing tomb's backing file or device
+        /// Path to the existing volume's backing file or device
         #[arg(allow_hyphen_values = true)]
         path: PathBuf,
 
-        /// New total size for the tomb (e.g. 20G) — must be larger than its
+        /// New total size for the volume (e.g. 20G) — must be larger than its
         /// current size; resize is grow-only
         #[arg(long, value_parser = parse_size)]
         size: u64,
     },
 
-    /// Emergency: force-close every open tomb immediately, escalating past
+    /// Emergency: force-close every open volume immediately, escalating past
     /// any busy mount, with zero confirmation
     Slam,
 
-    /// Show a tomb's technical info, including its enrolled FIDO2 keys
+    /// Show a volume's technical info, including its enrolled FIDO2 keys
     Info {
-        /// Path to the existing tomb's backing file or device
+        /// Path to the existing volume's backing file or device
         #[arg(allow_hyphen_values = true)]
         path: PathBuf,
     },
@@ -139,7 +139,7 @@ enum Commands {
 // flat `create` with an optional device flag.
 #[derive(Subcommand)]
 enum CreateMode {
-    /// Create a new file-backed tomb
+    /// Create a new file-backed volume
     File {
         /// Destination path for the backing file; must not already exist
         #[arg(allow_hyphen_values = true)]
@@ -150,7 +150,7 @@ enum CreateMode {
         #[arg(long, value_parser = parse_size)]
         size: u64,
 
-        /// Filesystem to create inside the tomb
+        /// Filesystem to create inside the volume
         #[arg(long, value_enum, default_value = "ext4")]
         filesystem: CliFilesystem,
 
@@ -166,7 +166,7 @@ enum CreateMode {
         user_verification: bool,
     },
 
-    /// Create a new tomb on an existing raw device or partition
+    /// Create a new volume on an existing raw device or partition
     Device {
         /// Path to the target device or partition; must not already carry a
         /// LUKS2 header
@@ -178,7 +178,7 @@ enum CreateMode {
         #[arg(long, value_parser = parse_size)]
         size: Option<u64>,
 
-        /// Filesystem to create inside the tomb
+        /// Filesystem to create inside the volume
         #[arg(long, value_enum, default_value = "ext4")]
         filesystem: CliFilesystem,
 
@@ -230,10 +230,10 @@ pub fn parse_size(input: &str) -> Result<u64, String> {
         .checked_mul(multiplier)
         .ok_or_else(|| format!("size {input:?} is too large"))?;
 
-    if bytes < MIN_TOMB_SIZE_BYTES {
+    if bytes < MIN_VOLUME_SIZE_BYTES {
         return Err(format!(
-            "size {input:?} is too small (minimum is {MIN_TOMB_SIZE_BYTES} bytes / {}M)",
-            MIN_TOMB_SIZE_BYTES / (1024 * 1024)
+            "size {input:?} is too small (minimum is {MIN_VOLUME_SIZE_BYTES} bytes / {}M)",
+            MIN_VOLUME_SIZE_BYTES / (1024 * 1024)
         ));
     }
 
@@ -299,7 +299,7 @@ pub fn confirms_wipe(input: &str) -> bool {
 /// this is never trusted as the sole gate.
 fn confirm_device_wipe(path: &Path) -> bool {
     println!(
-        "WARNING: this will erase any existing data on {} and format it as a new encrypted tomb.",
+        "WARNING: this will erase any existing data on {} and format it as a new encrypted volume.",
         path.display()
     );
     print!("Type \"yes\" to continue: ");
@@ -310,7 +310,7 @@ fn confirm_device_wipe(path: &Path) -> bool {
 }
 
 /// Builds the adapter, runs `create::run`, and reports the result — shared by
-/// both `create` subcommands. `announce` gates the "Creating tomb..." message:
+/// both `create` subcommands. `announce` gates the "Creating volume..." message:
 /// the Device arm passes `false` when the user already declined the wipe
 /// confirmation, so the message doesn't imply work started when the call is
 /// about to fail immediately on `domain`'s own confirmation check.
@@ -325,7 +325,7 @@ fn run_create(
     let adapter = ExecAdapter::default();
 
     if announce {
-        println!("Creating tomb at {display_path}...");
+        println!("Creating volume at {display_path}...");
     }
 
     if let Err(err) = create::run(
@@ -342,7 +342,7 @@ fn run_create(
         std::process::exit(1);
     }
 
-    println!("Tomb created at {display_path}.");
+    println!("Volume created at {display_path}.");
 }
 
 /// Plain-language intro line printed before `unlock::run` (FR5/NFR3),
@@ -362,11 +362,11 @@ pub fn unlock_intro_message(read_only: bool) -> String {
 pub fn unlock_success_message(read_only: bool, mountpoint: &Path) -> String {
     if read_only {
         format!(
-            "Tomb unlocked (read-only) and mounted at {}.",
+            "Volume unlocked (read-only) and mounted at {}.",
             mountpoint.display()
         )
     } else {
-        format!("Tomb unlocked and mounted at {}.", mountpoint.display())
+        format!("Volume unlocked and mounted at {}.", mountpoint.display())
     }
 }
 
@@ -438,7 +438,7 @@ fn run_enroll(
         std::process::exit(1);
     }
 
-    println!("Enrolling a new security key on this tomb. Follow the prompts below.");
+    println!("Enrolling a new security key on this volume. Follow the prompts below.");
 
     match enroll::run(
         &path,
@@ -502,7 +502,7 @@ fn run_revoke(path: PathBuf, label: String) {
         std::process::exit(1);
     }
 
-    println!("Revoking key \"{label}\" from this tomb.");
+    println!("Revoking key \"{label}\" from this volume.");
 
     match revoke::run(&path, &label, &adapter, &adapter, &adapter) {
         Ok(()) => println!("Key \"{label}\" revoked."),
@@ -527,7 +527,7 @@ fn run_close(path: PathBuf, skip_hooks: bool) {
         std::process::exit(1);
     }
 
-    println!("Closing this tomb.");
+    println!("Closing this volume.");
 
     match close::run(
         &path,
@@ -537,7 +537,7 @@ fn run_close(path: PathBuf, skip_hooks: bool) {
         &adapter,
         &adapter,
     ) {
-        Ok(()) => println!("Tomb closed."),
+        Ok(()) => println!("Volume closed."),
         Err(err) => {
             eprintln!("{}", ux::translate(&err));
             std::process::exit(1);
@@ -560,7 +560,7 @@ fn run_close_all(skip_hooks: bool) {
         std::process::exit(1);
     }
 
-    println!("Checking for open tombs to close.");
+    println!("Checking for open volumes to close.");
 
     match close_all::run(
         skip_hooks,
@@ -571,7 +571,7 @@ fn run_close_all(skip_hooks: bool) {
     ) {
         Ok(results) => {
             if results.is_empty() {
-                println!("No tombs are currently open.");
+                println!("No volumes are currently open.");
                 return;
             }
 
@@ -616,12 +616,12 @@ fn run_slam() {
         std::process::exit(1);
     }
 
-    println!("Slamming every open tomb — closing immediately, no confirmation.");
+    println!("Slamming every open volume — closing immediately, no confirmation.");
 
     match slam::run(&print_hook_warning, &adapter, &adapter, &adapter) {
         Ok(results) => {
             if results.is_empty() {
-                println!("No tombs are currently open.");
+                println!("No volumes are currently open.");
                 return;
             }
 
@@ -667,7 +667,7 @@ fn run_resize(path: PathBuf, new_size: u64) {
         std::process::exit(1);
     }
 
-    println!("Growing this tomb. Touch your security key now (you may also be asked for its PIN).");
+    println!("Growing this volume. Touch your security key now (you may also be asked for its PIN).");
 
     match resize::run(
         &path,
@@ -677,7 +677,7 @@ fn run_resize(path: PathBuf, new_size: u64) {
         &adapter,
         &adapter,
     ) {
-        Ok(()) => println!("Tomb grown to {new_size} bytes."),
+        Ok(()) => println!("Volume grown to {new_size} bytes."),
         Err(err) => {
             eprintln!("{}", ux::translate(&err));
             std::process::exit(1);

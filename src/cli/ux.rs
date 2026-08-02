@@ -19,15 +19,15 @@ use crate::domain::progress::{CreateStage, ResizeStage};
 pub fn translate(err: &DomainError) -> String {
     match err {
         DomainError::DestinationExists(path) => format!(
-            "A tomb already exists at {}. Choose a different location, or unlock the existing one instead.",
+            "A volume already exists at {}. Choose a different location, or unlock the existing one instead.",
             path.display()
         ),
         DomainError::DeviceAlreadyFormatted(path) => format!(
-            "{} already has an encrypted tomb on it. If you meant to unlock it, use the unlock command instead.",
+            "{} already has an encrypted volume on it. If you meant to unlock it, use the unlock command instead.",
             path.display()
         ),
         DomainError::DeviceConfirmationRequired => {
-            "Creating a tomb on a device erases everything on it. Please confirm the warning to continue."
+            "Creating a volume on a device erases everything on it. Please confirm the warning to continue."
                 .to_string()
         }
         DomainError::DeviceSizeExceedsCapacity {
@@ -39,7 +39,7 @@ pub fn translate(err: &DomainError) -> String {
             path.display()
         ),
         DomainError::DeviceTooSmall { path, size } => format!(
-            "{} would only have {size} bytes for a tomb — that's too small to be usable.",
+            "{} would only have {size} bytes for a volume — that's too small to be usable.",
             path.display()
         ),
         DomainError::ResizeMustGrow {
@@ -48,7 +48,7 @@ pub fn translate(err: &DomainError) -> String {
             current_size,
         } => format!(
             "{} is already {current_size} bytes. You asked for {requested} bytes — resize can \
-             only grow a tomb, never shrink it.",
+             only grow a volume, never shrink it.",
             path.display()
         ),
         DomainError::PreflightFailed(missing) => {
@@ -62,7 +62,7 @@ pub fn translate(err: &DomainError) -> String {
         }
         // Only `domain::workflows::revoke` produces this.
         DomainError::LastKeyslotGuard => {
-            "That's the last key that can unlock this tomb — revoking it would lock you out \
+            "That's the last key that can unlock this volume — revoking it would lock you out \
              permanently, so this was refused."
                 .to_string()
         }
@@ -82,7 +82,7 @@ pub fn translate(err: &DomainError) -> String {
                 HookRejectionReason::WorldWritable => "it's writable by anyone on this system",
             };
             format!(
-                "Hypogaol refused to run this tomb's exec-hooks script ({}) because {clause}. \
+                "Hypogaol refused to run this volume's exec-hooks script ({}) because {clause}. \
                  Nothing has changed.",
                 path.display()
             )
@@ -111,8 +111,8 @@ pub fn translate_hook_warning(w: &HookWarning) -> String {
             let clause = match reason {
                 BindHookSkipReason::SourceMissing => "its source path doesn't exist",
                 BindHookSkipReason::DestMissing => "its destination path doesn't exist",
-                BindHookSkipReason::SourceEscapesTombRoot => {
-                    "its source path escapes the tomb"
+                BindHookSkipReason::SourceEscapesVolumeRoot => {
+                    "its source path escapes the volume"
                 }
                 BindHookSkipReason::DestEscapesHome => {
                     "its destination path escapes your home directory"
@@ -123,16 +123,16 @@ pub fn translate_hook_warning(w: &HookWarning) -> String {
         }
         HookWarning::ExecHookNonZeroExit { path, exit_code } => match exit_code {
             Some(code) => format!(
-                "This tomb's exec-hooks script ({}) exited with status {code} — continuing anyway.",
+                "This volume's exec-hooks script ({}) exited with status {code} — continuing anyway.",
                 path.display()
             ),
             None => format!(
-                "This tomb's exec-hooks script ({}) was terminated by a signal — continuing anyway.",
+                "This volume's exec-hooks script ({}) was terminated by a signal — continuing anyway.",
                 path.display()
             ),
         },
         HookWarning::BindHooksFileUnreadable { path } => format!(
-            "Couldn't read this tomb's bind-hooks file ({}) — skipping all bind-hooks entries.",
+            "Couldn't read this volume's bind-hooks file ({}) — skipping all bind-hooks entries.",
             path.display()
         ),
     }
@@ -190,8 +190,8 @@ fn translate_adapter_failure(inner: &str) -> String {
     // a plain `revoke` failure). Checked first for the same reason as the
     // `fido2-token` bucket above.
     if inner.contains("luksDump") {
-        return "Hypogaol couldn't read this tomb's key information. Make sure the path points \
-                at a valid tomb, then try again."
+        return "Hypogaol couldn't read this volume's key information. Make sure the path points \
+                at a valid volume, then try again."
             .to_string();
     }
 
@@ -238,7 +238,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // before that bucket since the wrapped detail still contains
     // "cryptsetup close" (review finding, 2026-07-26).
     if inner.contains("but failed to re-lock afterward") {
-        return "Hypogaol grew this tomb successfully, but couldn't re-lock its LUKS2 volume \
+        return "Hypogaol grew this volume successfully, but couldn't re-lock its LUKS2 volume \
                 afterward. Your data and the new capacity are safe — run `close` to finish, or \
                 try `resize` again."
             .to_string();
@@ -250,7 +250,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // that bucket's touch/PIN-entry framing is meaningless for `close`, which
     // never touches a FIDO2 key (review finding, 2026-07-26).
     if inner.contains("cryptsetup close") {
-        return "Hypogaol couldn't re-lock this tomb's LUKS2 volume. Make sure nothing is \
+        return "Hypogaol couldn't re-lock this volume's LUKS2 volume. Make sure nothing is \
                 still using it, then try again."
             .to_string();
     }
@@ -265,21 +265,21 @@ fn translate_adapter_failure(inner: &str) -> String {
     // timing issue (this call re-authenticates via the FIDO2 token, Task 0's
     // spike finding).
     if inner.contains("cryptsetup resize") {
-        return "Hypogaol couldn't resize this tomb's LUKS2 volume — your security key or its \
+        return "Hypogaol couldn't resize this volume's LUKS2 volume — your security key or its \
                 PIN may not have been accepted in time."
             .to_string();
     }
 
     // `luksOpen`'s own "no remaining space for data" failure — reachable if
-    // `MIN_TOMB_SIZE_BYTES` is ever loosened again without re-verifying it
+    // `MIN_VOLUME_SIZE_BYTES` is ever loosened again without re-verifying it
     // leaves real payload room behind the LUKS2 header (confirmed
-    // empirically, 2026-07-27: a tomb sized exactly to the header offset
+    // empirically, 2026-07-27: a volume sized exactly to the header offset
     // passes size validation but fails here). Checked before the generic
     // `cryptsetup` bucket below for the same marker-bleed reason as every
     // other dedicated branch in this function — this is a sizing problem,
     // not a touch/PIN timing issue.
     if inner.contains("too small for activation") {
-        return "This tomb's size leaves no room for a filesystem once the encryption header is \
+        return "This volume's size leaves no room for a filesystem once the encryption header is \
                 accounted for. Choose a larger size and try again."
             .to_string();
     }
@@ -289,7 +289,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // `{cmd:?}` Debug-format argv dump, the single most jargon-dense string
     // reachable from `create`.
     if inner.contains("cryptsetup") {
-        return "Something went wrong while unlocking or creating your tomb — your security key \
+        return "Something went wrong while unlocking or creating your volume — your security key \
                 or its PIN may not have been accepted in time."
             .to_string();
     }
@@ -299,20 +299,20 @@ fn translate_adapter_failure(inner: &str) -> String {
     // "umount".contains("mount") is true as a plain substring, which would
     // otherwise misclassify these as unlock's own mount failure (the
     // "marker bleed" bug class the Epic 2 retro flagged: 3 real bugs from
-    // this pattern already). "No active mapping" (the tomb was never
+    // this pattern already). "No active mapping" (the volume was never
     // unlocked, or a prior `close` already fully completed) and "not
     // currently mounted" (unmounted already, but still open — the
     // partial-failure retry case `close::run` now recovers from) each get
     // their own distinct message rather than reading like a generic close
     // failure (review finding, 2026-07-26).
     if inner.contains("no active mapping") {
-        return "This tomb doesn't appear to be unlocked right now — run unlock first.".to_string();
+        return "This volume doesn't appear to be unlocked right now — run unlock first.".to_string();
     }
     if inner.contains("not currently mounted") {
-        return "This tomb doesn't look like it's currently mounted.".to_string();
+        return "This volume doesn't look like it's currently mounted.".to_string();
     }
     if inner.contains("umount") || inner.contains("findmnt") {
-        return "Hypogaol couldn't unmount this tomb's filesystem. Make sure nothing is still \
+        return "Hypogaol couldn't unmount this volume's filesystem. Make sure nothing is still \
                 using it, then try again."
             .to_string();
     }
@@ -323,7 +323,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // "mount" nor "mkfs" and would otherwise fall all the way through to
     // the unhelpful generic fallback (marker-bleed guard).
     if inner.contains("resize2fs") {
-        return "Hypogaol grew this tomb's volume, but couldn't grow its filesystem to match."
+        return "Hypogaol grew this volume's volume, but couldn't grow its filesystem to match."
             .to_string();
     }
 
@@ -334,7 +334,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // the way through to the unhelpful generic fallback (marker-bleed
     // guard; review finding, 2026-07-26).
     if inner.contains("e2fsck") {
-        return "Hypogaol grew this tomb's volume, but couldn't check its filesystem before \
+        return "Hypogaol grew this volume's volume, but couldn't check its filesystem before \
                 growing it to match."
             .to_string();
     }
@@ -342,7 +342,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // Mount/filesystem failures (`mkfs`, `mount`, `chmod`, mount-point
     // create/remove).
     if inner.contains("mount") || inner.contains("mkfs") {
-        return "Your tomb unlocked, but Hypogaol couldn't mount its filesystem.".to_string();
+        return "Your volume unlocked, but Hypogaol couldn't mount its filesystem.".to_string();
     }
 
     // `mapping_name::mapping_name`'s canonicalization failure. The message is
@@ -366,13 +366,13 @@ fn translate_adapter_failure(inner: &str) -> String {
         || inner.contains("is not a regular file")
         || inner.contains("failed to open")
     {
-        return "Hypogaol couldn't determine or set the size needed for this tomb.".to_string();
+        return "Hypogaol couldn't determine or set the size needed for this volume.".to_string();
     }
 
     // Fallback: keeps AC #2's "no jargon leaks" promise for the primary line
     // while still surfacing the original text as a labeled technical detail,
     // rather than discarding information a bug report would need.
     format!(
-        "Something unexpected happened while working with your tomb.\nTechnical detail: {inner}"
+        "Something unexpected happened while working with your volume.\nTechnical detail: {inner}"
     )
 }
