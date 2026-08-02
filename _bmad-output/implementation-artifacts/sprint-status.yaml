@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-22
-last_updated: 2026-08-02
+last_updated: 2026-08-03
 project: hypogaol
 project_key: NOKEY
 tracking_system: file-system
@@ -83,7 +83,7 @@ development_status:
   epic-5: in-progress
   5-1-product-identity-rename: done
   5-2-domain-term-rename-tomb-to-volume: done
-  5-3-top-level-branding-copy: backlog
+  5-3-top-level-branding-copy: ready-for-dev
   5-4-update-live-planning-automation-pointers: backlog
 
 action_items:
