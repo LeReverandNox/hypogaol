@@ -1,0 +1,925 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hypogaol — The Naming of the Warden</title>
+<style>
+  :root{
+    --ink:#121110;
+    --stone-950:#1b1a16;
+    --stone-900:#242219;
+    --stone-800:#332f26;
+    --stone-700:#453f31;
+    --stone-600:#5c5544;
+    --stone-500:#7a7160;
+    --stone-400:#9a9080;
+    --stone-300:#bdb49c;
+    --parchment:#e8dfc7;
+    --moss-900:#1c2718;
+    --moss-700:#2f4527;
+    --moss-500:#4a6a3e;
+    --moss-300:#7d9868;
+    --amber-900:#4a2f0e;
+    --amber-700:#8a5a17;
+    --amber-500:#dc9a34;
+    --amber-300:#f3c169;
+    --amber-100:#ffe9bd;
+    --blood:#6b2626;
+    --font-serif: Palatino, "Palatino Linotype", "Book Antiqua", Georgia, "Iowan Old Style", "Times New Roman", serif;
+    --font-mono: "SF Mono", "Cascadia Code", Consolas, "Liberation Mono", Menlo, Monaco, monospace;
+  }
+
+  *{ box-sizing:border-box; }
+
+  html{ scroll-behavior:smooth; }
+
+  body{
+    margin:0;
+    padding:0;
+    color:var(--stone-300);
+    font-family:var(--font-serif);
+    background:
+      radial-gradient(ellipse at 50% 0%, rgba(220,154,52,0.10), transparent 55%),
+      radial-gradient(ellipse at 15% 30%, rgba(74,106,62,0.08), transparent 45%),
+      radial-gradient(ellipse at 85% 70%, rgba(74,106,62,0.06), transparent 45%),
+      repeating-linear-gradient(0deg, rgba(0,0,0,0.16) 0px, rgba(0,0,0,0.16) 2px, transparent 2px, transparent 46px),
+      repeating-linear-gradient(90deg, rgba(0,0,0,0.09) 0px, rgba(0,0,0,0.09) 1px, transparent 1px, transparent 130px),
+      linear-gradient(180deg, var(--stone-950), var(--stone-900) 35%, var(--stone-950) 100%);
+    background-attachment: fixed;
+    line-height:1.65;
+  }
+
+  .container{
+    max-width:880px;
+    margin:0 auto;
+    padding:5rem 1.5rem 6rem;
+    position:relative;
+  }
+
+  ::selection{ background:var(--amber-700); color:var(--amber-100); }
+
+  a{ color:var(--amber-300); }
+
+  /* ---------- Typography ---------- */
+
+  h1,h2,h3{ font-family:var(--font-serif); font-weight:700; margin:0; }
+
+  .eyebrow{
+    text-align:center;
+    font-family:var(--font-mono);
+    letter-spacing:0.35em;
+    font-size:0.7rem;
+    color:var(--stone-500);
+    text-transform:uppercase;
+    margin-bottom:2rem;
+  }
+
+  .hero h1{
+    font-size:clamp(2rem, 6vw, 3.4rem);
+    text-align:center;
+    letter-spacing:0.04em;
+    color:var(--stone-300);
+    text-shadow:
+      1px 1px 0 rgba(0,0,0,0.85),
+      -1px -1px 0 rgba(255,255,255,0.04),
+      0 0 50px rgba(220,154,52,0.10);
+    margin-top:1.5rem;
+  }
+
+  .hero .old-name{
+    font-family:var(--font-mono);
+    text-decoration:line-through;
+    text-decoration-color:var(--blood);
+    text-decoration-thickness:2px;
+    color:var(--stone-500);
+    opacity:0.8;
+  }
+
+  .lede{
+    max-width:640px;
+    margin:1.6rem auto 0;
+    text-align:center;
+    font-size:1.05rem;
+    color:var(--stone-400);
+  }
+
+  .brief{
+    max-width:620px;
+    margin:2.5rem auto 0;
+    background:linear-gradient(160deg, rgba(51,47,38,0.6), rgba(36,34,25,0.6));
+    border:1px solid var(--stone-700);
+    border-left:3px solid var(--amber-700);
+    padding:1.4rem 1.6rem;
+    border-radius:2px 10px 2px 10px;
+    font-size:0.92rem;
+  }
+  .brief p{ margin:0 0 .5rem; color:var(--stone-500); font-family:var(--font-mono); font-size:0.7rem; letter-spacing:0.12em; text-transform:uppercase;}
+  .brief ul{ margin:0; padding-left:1.2rem; }
+  .brief li{ margin:.35rem 0; }
+
+  .chapter{ margin-top:5.5rem; }
+
+  .chapter-number{
+    display:block;
+    text-align:center;
+    font-family:var(--font-mono);
+    font-size:0.72rem;
+    letter-spacing:0.4em;
+    color:var(--stone-600);
+    margin-bottom:0.6rem;
+    text-transform:uppercase;
+  }
+
+  .chapter h2{
+    text-align:center;
+    font-size:clamp(1.3rem, 3.2vw, 1.8rem);
+    text-transform:uppercase;
+    letter-spacing:0.14em;
+    color:var(--amber-300);
+    text-shadow:0 0 24px rgba(220,154,52,0.18);
+  }
+
+  .chapter .intro{
+    max-width:600px;
+    margin:1.1rem auto 2rem;
+    text-align:center;
+    color:var(--stone-400);
+    font-size:0.98rem;
+  }
+
+  h3.sub{
+    color:var(--parchment);
+    font-size:1.05rem;
+    letter-spacing:0.06em;
+    text-transform:uppercase;
+    border-bottom:1px solid var(--stone-700);
+    padding-bottom:0.4rem;
+    margin:2.4rem 0 1rem;
+  }
+
+  p{ margin:0 0 1rem; }
+
+  /* drop caps for chapter intros */
+  .chapter .intro::first-letter{
+    font-size:1.8em;
+    color:var(--amber-500);
+    font-weight:700;
+  }
+
+  /* ---------- Dividers ---------- */
+  .divider{ display:flex; align-items:center; gap:1rem; margin:3.2rem 0; }
+  .divider::before,.divider::after{ content:''; flex:1; height:1px; background:linear-gradient(90deg, transparent, var(--stone-600), transparent); }
+  .divider .gem{ width:8px; height:8px; background:var(--amber-500); transform:rotate(45deg); box-shadow:0 0 10px rgba(220,154,52,0.7); flex:none; }
+
+  /* ---------- Tablets (name candidates) ---------- */
+  .tablet-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fill, minmax(155px, 1fr));
+    gap:0.8rem;
+    margin:1.6rem 0 2rem;
+  }
+
+  .tablet{
+    background:linear-gradient(160deg, var(--stone-700), var(--stone-800) 55%, var(--stone-900));
+    border:1px solid var(--stone-600);
+    border-radius:4px 11px 5px 12px / 9px 4px 11px 5px;
+    padding:0.85rem 1rem;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 4px 10px rgba(0,0,0,0.35);
+    position:relative;
+  }
+  .tablet .word{ font-size:1.05rem; color:var(--parchment); display:block; }
+  .tablet .meta{ font-family:var(--font-mono); font-size:0.66rem; color:var(--stone-500); margin-top:0.35rem; display:block; line-height:1.4; }
+
+  .tablet.rejected .word{
+    text-decoration:line-through;
+    text-decoration-color:var(--blood);
+    text-decoration-thickness:2px;
+    opacity:0.5;
+    filter:saturate(0.6);
+  }
+  .tablet.rejected .meta{ color:var(--blood); opacity:0.85; }
+
+  .tablet.unresolved{ border-style:dashed; opacity:0.65; }
+  .tablet.unresolved .word{ color:var(--stone-400); }
+  .tablet.unresolved .meta{ font-style:italic; }
+
+  .tablet.kept{
+    border-color:var(--amber-700);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.05), 0 0 18px rgba(220,154,52,0.25);
+  }
+  .tablet.kept .word{ color:var(--amber-300); }
+
+  .tablet.winner{
+    border-color:var(--amber-500);
+    background:linear-gradient(160deg, var(--amber-900), var(--stone-800) 60%, var(--stone-900));
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.08), 0 0 30px rgba(220,154,52,0.35);
+  }
+  .tablet.winner .word{ color:var(--amber-100); font-size:1.25rem; font-weight:700; }
+
+  .tag{
+    display:inline-block;
+    font-family:var(--font-mono);
+    font-size:0.6rem;
+    letter-spacing:0.1em;
+    text-transform:uppercase;
+    padding:0.15rem 0.5rem;
+    border-radius:3px;
+    margin-top:0.4rem;
+  }
+  .tag.rejected{ background:rgba(107,38,38,0.25); color:#d99; border:1px solid rgba(107,38,38,0.6); }
+  .tag.unresolved{ background:rgba(122,113,96,0.15); color:var(--stone-400); border:1px solid var(--stone-600); }
+  .tag.kept{ background:rgba(220,154,52,0.15); color:var(--amber-300); border:1px solid rgba(220,154,52,0.5); }
+  .tag.winner{ background:rgba(220,154,52,0.25); color:var(--amber-100); border:1px solid var(--amber-500); }
+
+  .aside{
+    max-width:560px;
+    margin:1.6rem auto;
+    padding:1rem 1.3rem;
+    border-left:2px solid var(--moss-500);
+    background:rgba(47,69,39,0.15);
+    font-size:0.88rem;
+    color:var(--stone-400);
+    font-style:italic;
+    border-radius:0 6px 6px 0;
+  }
+
+  /* ---------- Rose window ---------- */
+  .rose-wrap{ display:flex; justify-content:center; margin:1rem 0; }
+  .rose-mark .petal{ fill:var(--stone-700); stroke:var(--stone-500); stroke-width:0.6; opacity:0.85; }
+  .rose-mark .foil{ fill:var(--stone-600); opacity:0.75; }
+  .rose-mark .rim{ fill:none; stroke:var(--stone-500); stroke-width:1.4; }
+  .rose-mark .core-disc{ fill:var(--stone-950); }
+  .rose-mark .keylight{ fill:var(--amber-700); opacity:0.45; }
+
+  .rose-mark.dim{ opacity:0.55; filter:grayscale(0.35); }
+
+  .rose-mark.lit .petal{ stroke:var(--amber-500); opacity:1; }
+  .rose-mark.lit .foil{ fill:var(--amber-700); opacity:0.9; }
+  .rose-mark.lit .rim{ stroke:var(--amber-500); }
+  .rose-mark.lit .keylight{ fill:url(#amberGlow); opacity:1; animation:flicker 4s ease-in-out infinite; }
+
+  @keyframes flicker{
+    0%,100%{ opacity:1; filter:brightness(1); }
+    45%{ opacity:0.93; filter:brightness(1.1); }
+    52%{ opacity:0.86; filter:brightness(0.95); }
+    75%{ opacity:1; filter:brightness(1.06); }
+  }
+
+  /* ---------- Climax ---------- */
+  .climax{
+    text-align:center;
+    padding:3rem 0 2rem;
+    position:relative;
+  }
+  .climax .found-label{
+    font-family:var(--font-mono);
+    letter-spacing:0.4em;
+    font-size:0.72rem;
+    color:var(--amber-500);
+    text-transform:uppercase;
+    margin-bottom:0.8rem;
+  }
+  .climax .hypogaol-title{
+    font-size:clamp(2.8rem, 11vw, 6rem);
+    letter-spacing:0.03em;
+    color:var(--amber-300);
+    text-shadow:
+      0 0 30px rgba(220,154,52,0.65),
+      0 0 90px rgba(220,154,52,0.30),
+      2px 2px 0 rgba(0,0,0,0.6);
+    animation: reveal 1.6s ease-out;
+    margin:0.6rem 0;
+  }
+  @keyframes reveal{
+    0%{ opacity:0; letter-spacing:0.5em; filter:blur(6px); }
+    100%{ opacity:1; letter-spacing:0.03em; filter:blur(0); }
+  }
+  .climax .tagline{
+    font-style:italic;
+    font-size:1.15rem;
+    color:var(--parchment);
+    margin-top:0.6rem;
+  }
+  .climax .gloss{
+    max-width:560px;
+    margin:1.6rem auto 0;
+    font-size:0.92rem;
+    color:var(--stone-400);
+  }
+
+  .motes{ position:relative; height:0; }
+  .mote{
+    position:absolute;
+    bottom:0;
+    width:3px; height:3px;
+    border-radius:50%;
+    background:var(--amber-300);
+    box-shadow:0 0 6px 2px rgba(243,193,105,0.8);
+    animation: drift 6s ease-in infinite;
+    opacity:0;
+  }
+  @keyframes drift{
+    0%{ transform:translateY(0) translateX(0); opacity:0; }
+    15%{ opacity:0.9; }
+    100%{ transform:translateY(-140px) translateX(var(--dx,10px)); opacity:0; }
+  }
+
+  /* ---------- PMI ---------- */
+  .pmi-grid{
+    display:grid;
+    grid-template-columns:repeat(auto-fit, minmax(220px,1fr));
+    gap:1.2rem;
+    margin:2rem 0;
+  }
+  .pmi-col{
+    background:linear-gradient(160deg, rgba(51,47,38,0.55), rgba(27,26,22,0.55));
+    border:1px solid var(--stone-700);
+    border-radius:6px;
+    padding:1.2rem;
+  }
+  .pmi-col h4{
+    display:flex; align-items:center; gap:0.6rem;
+    font-family:var(--font-mono);
+    text-transform:uppercase;
+    letter-spacing:0.12em;
+    font-size:0.8rem;
+    margin:0 0 0.9rem;
+  }
+  .pmi-badge{
+    width:22px; height:22px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-weight:700; font-size:0.85rem; flex:none;
+  }
+  .pmi-col.plus .pmi-badge{ background:rgba(74,106,62,0.35); color:var(--moss-300); border:1px solid var(--moss-500); }
+  .pmi-col.minus .pmi-badge{ background:rgba(107,38,38,0.3); color:#d99; border:1px solid var(--blood); }
+  .pmi-col.interesting .pmi-badge{ background:rgba(220,154,52,0.25); color:var(--amber-300); border:1px solid var(--amber-500); }
+  .pmi-col.plus h4{ color:var(--moss-300); }
+  .pmi-col.minus h4{ color:#d99; }
+  .pmi-col.interesting h4{ color:var(--amber-300); }
+  .pmi-col ul{ margin:0; padding-left:1.1rem; font-size:0.88rem; color:var(--stone-400); }
+  .pmi-col li{ margin:0.5rem 0; }
+
+  .verdict{
+    text-align:center;
+    margin-top:1.8rem;
+    padding:1rem;
+    border-top:1px solid var(--stone-700);
+    border-bottom:1px solid var(--stone-700);
+    font-family:var(--font-mono);
+    font-size:0.85rem;
+    letter-spacing:0.05em;
+    color:var(--amber-300);
+  }
+
+  /* ---------- Mascot / palette / chips ---------- */
+  .mascot-card{
+    display:flex; gap:1.6rem; align-items:center;
+    background:linear-gradient(160deg, rgba(51,47,38,0.5), rgba(27,26,22,0.5));
+    border:1px solid var(--stone-700);
+    border-radius:8px;
+    padding:1.3rem;
+    margin:1.2rem 0;
+    flex-wrap:wrap;
+  }
+  .mascot-portrait{ flex:none; }
+  .mascot-text{ flex:1; min-width:220px; font-size:0.94rem; color:var(--stone-400); }
+  .mascot-text .name{ font-size:1.3rem; color:var(--amber-300); display:block; margin-bottom:0.3rem; }
+
+  .swatch-row{ display:flex; gap:1.2rem; flex-wrap:wrap; justify-content:center; margin:1.6rem 0 2rem; }
+  .swatch{ width:120px; text-align:center; font-family:var(--font-mono); font-size:0.68rem; color:var(--stone-500); }
+  .swatch .box{ height:70px; border-radius:6px; margin-bottom:0.5rem; box-shadow:0 4px 12px rgba(0,0,0,0.4), inset 0 0 0 1px rgba(255,255,255,0.07); }
+  .swatch .box.stone{ background:linear-gradient(160deg, var(--stone-500), var(--stone-800)); }
+  .swatch .box.moss{ background:linear-gradient(160deg, var(--moss-300), var(--moss-900)); }
+  .swatch .box.amber{ background:linear-gradient(160deg, var(--amber-300), var(--amber-900)); box-shadow:0 4px 20px rgba(220,154,52,0.4), inset 0 0 0 1px rgba(255,255,255,0.15); }
+  .swatch .name{ color:var(--parchment); font-family:var(--font-serif); font-size:0.85rem; display:block; margin-bottom:0.15rem; }
+
+  .tagline-list{ list-style:none; padding:0; margin:1rem 0 2rem; text-align:center; }
+  .tagline-list li{ margin:0.5rem 0; font-style:italic; color:var(--stone-600); text-decoration:line-through; text-decoration-color:var(--stone-700); }
+  .tagline-list li.locked{
+    font-style:normal; text-decoration:none; color:var(--amber-300); font-size:1.2rem; font-weight:700;
+    text-shadow:0 0 20px rgba(220,154,52,0.3);
+    margin-top:1rem;
+  }
+
+  .chip-row{ display:flex; flex-wrap:wrap; gap:0.5rem; justify-content:center; margin:1rem 0 1.6rem; }
+  .chip{
+    font-family:var(--font-mono);
+    font-size:0.82rem;
+    padding:0.45rem 0.9rem;
+    border-radius:4px;
+    display:inline-block;
+  }
+  .chip.plain{
+    background:linear-gradient(160deg, #d8b46a, #8a6a2c);
+    color:#2b1d05;
+    font-weight:700;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.5), 0 3px 6px rgba(0,0,0,0.5);
+  }
+  .chip.rejected{
+    background:var(--stone-800);
+    color:var(--stone-500);
+    text-decoration:line-through;
+    text-decoration-color:var(--blood);
+    border:1px dashed var(--stone-600);
+  }
+  .chip-label{ text-align:center; font-family:var(--font-mono); font-size:0.7rem; letter-spacing:0.15em; text-transform:uppercase; color:var(--stone-500); margin:1.6rem 0 0.4rem; }
+
+  .rename-flow{
+    display:flex; align-items:center; justify-content:center; gap:1.2rem; flex-wrap:wrap;
+    margin:1.6rem 0;
+  }
+  .rename-flow .old{ font-family:var(--font-mono); text-decoration:line-through; text-decoration-color:var(--blood); color:var(--stone-500); font-size:1.2rem; }
+  .rename-flow .arrow{ color:var(--amber-500); font-size:1.3rem; }
+  .rename-flow .new{ font-family:var(--font-mono); color:var(--amber-100); font-size:1.4rem; font-weight:700; background:rgba(220,154,52,0.15); padding:0.3rem 0.9rem; border-radius:4px; border:1px solid var(--amber-700); }
+  .also-considered{ text-align:center; font-size:0.8rem; color:var(--stone-500); font-family:var(--font-mono); }
+  .also-considered span{ text-decoration:line-through; text-decoration-color:var(--stone-700); margin:0 0.4rem; }
+
+  /* ---------- Insight inscriptions ---------- */
+  .inscription{
+    max-width:640px;
+    margin:1.6rem auto;
+    padding:1.3rem 1.6rem;
+    background:linear-gradient(160deg, rgba(36,34,25,0.6), rgba(27,26,22,0.6));
+    border:1px solid var(--stone-700);
+    border-radius:4px;
+    position:relative;
+  }
+  .inscription::before{
+    content:'';
+    position:absolute; left:0; top:0.6rem; bottom:0.6rem; width:2px;
+    background:var(--amber-700);
+  }
+  .inscription .num{
+    font-family:var(--font-mono);
+    color:var(--amber-500);
+    font-size:0.72rem;
+    letter-spacing:0.2em;
+    text-transform:uppercase;
+    display:block;
+    margin-bottom:0.5rem;
+  }
+  .inscription p{ margin:0; font-size:0.95rem; color:var(--stone-400); }
+
+  /* ---------- Charter ---------- */
+  .charter{
+    margin:4rem 0 2rem;
+    position:relative;
+    background:linear-gradient(160deg, rgba(36,34,25,0.75), rgba(20,19,14,0.85));
+    border:1px solid var(--amber-700);
+    border-radius:4px;
+    padding:2.4rem 2rem 2rem;
+    box-shadow:0 0 50px rgba(220,154,52,0.12), inset 0 0 0 1px rgba(220,154,52,0.15);
+  }
+  .wax-seal{
+    position:absolute;
+    top:-26px; left:50%; transform:translateX(-50%) rotate(-6deg);
+    width:56px; height:56px; border-radius:50%;
+    background:radial-gradient(circle at 35% 30%, var(--blood), #3a1414 70%);
+    box-shadow:0 4px 10px rgba(0,0,0,0.5), inset 0 0 0 2px rgba(0,0,0,0.3);
+    display:flex; align-items:center; justify-content:center;
+    color:var(--amber-300); font-family:var(--font-mono); font-size:0.65rem; font-weight:700;
+    letter-spacing:0.05em;
+  }
+  .charter h2{ text-align:center; color:var(--amber-300); font-size:1.2rem; letter-spacing:0.16em; text-transform:uppercase; margin-bottom:0.3rem; }
+  .charter .charter-date{ text-align:center; font-family:var(--font-mono); font-size:0.7rem; color:var(--stone-500); margin-bottom:1.6rem; letter-spacing:0.1em; }
+  .charter dl{ display:grid; grid-template-columns:auto 1fr; gap:0.6rem 1.2rem; font-size:0.92rem; }
+  .charter dt{ color:var(--amber-500); font-family:var(--font-mono); font-size:0.75rem; text-transform:uppercase; letter-spacing:0.08em; white-space:nowrap; padding-top:0.1rem; }
+  .charter dd{ margin:0; color:var(--parchment); }
+
+  footer{
+    text-align:center;
+    margin-top:4rem;
+    padding-top:2rem;
+    color:var(--stone-600);
+    font-family:var(--font-mono);
+    font-size:0.72rem;
+    letter-spacing:0.08em;
+  }
+  footer .foot-tagline{ color:var(--amber-500); margin-top:0.6rem; font-style:italic; font-family:var(--font-serif); font-size:0.9rem; }
+
+  @media (max-width: 560px){
+    .mascot-card{ flex-direction:column; text-align:center; }
+    .charter dl{ grid-template-columns:1fr; }
+    .charter dt{ margin-top:0.6rem; }
+  }
+</style>
+</head>
+<body>
+
+<!-- ============ SVG DEFS: rose window mark ============ -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <radialGradient id="amberGlow" cx="50%" cy="42%" r="65%">
+      <stop offset="0%" stop-color="#fff3d6"/>
+      <stop offset="45%" stop-color="#f3c169"/>
+      <stop offset="100%" stop-color="#8a5a17"/>
+    </radialGradient>
+    <filter id="softGlow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="2.4" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <mask id="keyholeMask" maskUnits="userSpaceOnUse" x="0" y="0" width="200" height="200">
+      <rect x="0" y="0" width="200" height="200" fill="black"/>
+      <path fill="white" d="M100,80 m-12,0 a12,12 0 1,0 24,0 a12,12 0 1,0 -24,0 M108,98 L114,126 L86,126 L92,98 Z"/>
+      <rect fill="black" x="93" y="70" width="14" height="24" rx="3"/>
+      <circle fill="white" cx="100" cy="77" r="2.6"/>
+    </mask>
+    <symbol id="roseWindow" viewBox="0 0 200 200">
+      <circle class="rim" cx="100" cy="100" r="97"/>
+      <circle class="rim" cx="100" cy="100" r="46"/>
+      <g class="petals">
+        <g transform="rotate(0 100 100)"><path class="petal" d="M100,96 C88,80 86,42 100,16 C114,42 112,80 100,96 Z"/></g>
+        <g transform="rotate(30 100 100)"><path class="petal" d="M100,96 C88,80 86,42 100,16 C114,42 112,80 100,96 Z"/></g>
+        <g transform="rotate(60 100 100)"><path class="petal" d="M100,96 C88,80 86,42 100,16 C114,42 112,80 100,96 Z"/></g>
+        <g transform="rotate(90 100 100)"><path class="petal" d="M100,96 C88,80 86,42 100,16 C114,42 112,80 100,96 Z"/></g>
+        <g transform="rotate(120 100 100)"><path class="petal" d="M100,96 C88,80 86,42 100,16 C114,42 112,80 100,96 Z"/></g>
+        <g transform="rotate(150 100 100)"><path class="petal" d="M100,96 C88,80 86,42 100,16 C114,42 112,80 100,96 Z"/></g>
+        <g transform="rotate(180 100 100)"><path class="petal" d="M100,96 C88,80 86,42 100,16 C114,42 112,80 100,96 Z"/></g>
+        <g transform="rotate(210 100 100)"><path class="petal" d="M100,96 C88,80 86,42 100,16 C114,42 112,80 100,96 Z"/></g>
+        <g transform="rotate(240 100 100)"><path class="petal" d="M100,96 C88,80 86,42 100,16 C114,42 112,80 100,96 Z"/></g>
+        <g transform="rotate(270 100 100)"><path class="petal" d="M100,96 C88,80 86,42 100,16 C114,42 112,80 100,96 Z"/></g>
+        <g transform="rotate(300 100 100)"><path class="petal" d="M100,96 C88,80 86,42 100,16 C114,42 112,80 100,96 Z"/></g>
+        <g transform="rotate(330 100 100)"><path class="petal" d="M100,96 C88,80 86,42 100,16 C114,42 112,80 100,96 Z"/></g>
+      </g>
+      <g class="foils">
+        <g transform="rotate(15 100 100)"><circle class="foil" cx="100" cy="55" r="4.5"/></g>
+        <g transform="rotate(45 100 100)"><circle class="foil" cx="100" cy="55" r="4.5"/></g>
+        <g transform="rotate(75 100 100)"><circle class="foil" cx="100" cy="55" r="4.5"/></g>
+        <g transform="rotate(105 100 100)"><circle class="foil" cx="100" cy="55" r="4.5"/></g>
+        <g transform="rotate(135 100 100)"><circle class="foil" cx="100" cy="55" r="4.5"/></g>
+        <g transform="rotate(165 100 100)"><circle class="foil" cx="100" cy="55" r="4.5"/></g>
+        <g transform="rotate(195 100 100)"><circle class="foil" cx="100" cy="55" r="4.5"/></g>
+        <g transform="rotate(225 100 100)"><circle class="foil" cx="100" cy="55" r="4.5"/></g>
+        <g transform="rotate(255 100 100)"><circle class="foil" cx="100" cy="55" r="4.5"/></g>
+        <g transform="rotate(285 100 100)"><circle class="foil" cx="100" cy="55" r="4.5"/></g>
+        <g transform="rotate(315 100 100)"><circle class="foil" cx="100" cy="55" r="4.5"/></g>
+        <g transform="rotate(345 100 100)"><circle class="foil" cx="100" cy="55" r="4.5"/></g>
+      </g>
+      <circle class="core-disc" cx="100" cy="100" r="40"/>
+      <g filter="url(#softGlow)">
+        <rect class="keylight" x="58" y="58" width="84" height="84" mask="url(#keyholeMask)"/>
+      </g>
+      <circle class="rim" cx="100" cy="100" r="40"/>
+    </symbol>
+  </defs>
+</svg>
+
+<div class="container">
+
+  <!-- ============ HERO ============ -->
+  <section class="hero">
+    <div class="eyebrow">A Brainstorming Keepsake · August 2, 2026</div>
+    <div class="rose-wrap">
+      <svg class="rose-mark dim" viewBox="0 0 200 200" width="170" height="170"><use href="#roseWindow"></use></svg>
+    </div>
+    <h1>The Naming of the Warden</h1>
+    <p class="lede">
+      Every vault needs a name before the world may know it. This one had only a placeholder —
+      <span class="old-name">tomb&#8209;fido2</span> — a working label for a Rust CLI that unlocks a LUKS
+      volume with a FIDO2 hardware key. It was time to give it a real one, ready to stand in public.
+    </p>
+    <div class="brief">
+      <p>The Brief</p>
+      <ul>
+        <li>Playful, with a strong point of view — no boring technical name</li>
+        <li>Must still carry the <em>tomb / buried&#8209;data</em> feeling</li>
+        <li>No direct reference to "tomb" or "fido2"</li>
+        <li>Not already claimed by a popular open-source project (checked via GitHub)</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ============ CHAPTER I ============ -->
+  <section class="chapter">
+    <span class="chapter-number">Chapter I</span>
+    <h2>Prior Lives</h2>
+    <p class="intro">A previous session had already tried a batch of grave-and-vault words. Each one was checked against GitHub. Each one was already spoken for.</p>
+
+    <div class="tablet-grid">
+      <div class="tablet rejected"><span class="word">Sarcophagus</span><span class="meta">sarcophagus-org, elcritch/sarcophagus</span></div>
+      <div class="tablet rejected"><span class="word">Ossuary</span><span class="meta">mrmekon/ossuary</span></div>
+      <div class="tablet rejected"><span class="word">Catacomb</span><span class="meta">catacombing/catacomb</span></div>
+      <div class="tablet rejected"><span class="word">Cenotaph</span><span class="meta">bianconif/CenOTAPH</span></div>
+      <div class="tablet rejected"><span class="word">Pharos</span><span class="meta">French gov cyber-threat platform</span></div>
+      <div class="tablet rejected"><span class="word">Mausoleum</span><span class="meta">mandeep/Mausoleum — tomb-related GUI</span></div>
+    </div>
+
+    <p class="intro" style="margin-top:2.4rem;">A second batch never even made it to the GitHub search bar — the session pivoted before they were tested.</p>
+    <div class="tablet-grid">
+      <div class="tablet unresolved"><span class="word">Bunker</span><span class="meta">never put to the test</span></div>
+      <div class="tablet unresolved"><span class="word">Citadel</span><span class="meta">never put to the test</span></div>
+      <div class="tablet unresolved"><span class="word">Lockbox</span><span class="meta">never put to the test</span></div>
+      <div class="tablet unresolved"><span class="word">Vault</span><span class="meta">never put to the test</span></div>
+      <div class="tablet unresolved"><span class="word">Phalanx</span><span class="meta">never put to the test</span></div>
+      <div class="tablet unresolved"><span class="word">Cryptalon</span><span class="meta">never put to the test</span></div>
+      <div class="tablet unresolved"><span class="word">Tangible</span><span class="meta">never put to the test</span></div>
+      <div class="tablet unresolved"><span class="word">Tactile</span><span class="meta">never put to the test</span></div>
+      <div class="tablet unresolved"><span class="word">Sigil</span><span class="meta">never put to the test</span></div>
+    </div>
+  </section>
+
+  <div class="divider"><span class="gem"></span></div>
+
+  <!-- ============ CHAPTER II ============ -->
+  <section class="chapter">
+    <span class="chapter-number">Chapter II</span>
+    <h2>The Search Abroad</h2>
+    <p class="intro"><em>Technique: Metaphor Mapping.</em> The search widened outward — to real remote places, and to foreign words for shelter, storage, and hiding.</p>
+
+    <h3 class="sub">Real, Distant Places</h3>
+    <div class="tablet-grid">
+      <div class="tablet unresolved"><span class="word">Svalbard</span><span class="meta">Norwegian island, Global Seed Vault</span></div>
+      <div class="tablet rejected"><span class="word">Geode</span><span class="meta">geode-sdk/geode, demiangomez/geode</span></div>
+      <div class="tablet unresolved"><span class="word">Kerguelen</span><span class="meta">French Antarctic archipelago — could shorten to "kerg"</span></div>
+      <div class="tablet unresolved"><span class="word">Adyton</span><span class="meta">Greek: restricted inner chamber of a temple</span></div>
+    </div>
+
+    <h3 class="sub">A Polyglot Ossuary of Shelter-Words</h3>
+    <p class="intro" style="margin-bottom:1rem;">None of them sparked.</p>
+    <div class="tablet-grid">
+      <div class="tablet rejected"><span class="word">Geymsla</span><span class="meta">Icelandic — storage, storeroom</span></div>
+      <div class="tablet rejected"><span class="word">Skjol</span><span class="meta">Icelandic — refuge, shelter</span></div>
+      <div class="tablet rejected"><span class="word">Kura</span><span class="meta">Japanese — fireproof storehouse</span></div>
+      <div class="tablet rejected"><span class="word">Piilo</span><span class="meta">Finnish — hideout</span></div>
+      <div class="tablet rejected"><span class="word">Babes</span><span class="meta">Basque — shelter, refuge</span></div>
+      <div class="tablet rejected"><span class="word">Gorde</span><span class="meta">Basque — verb: to keep, hide, store</span></div>
+      <div class="tablet rejected"><span class="word">Panah</span><span class="meta">Persian — refuge, sanctuary</span></div>
+      <div class="tablet rejected"><span class="word">Cro</span><span class="meta">Irish Gaelic — small enclosure, hut</span></div>
+      <div class="tablet rejected"><span class="word">Sitha</span><span class="meta">Zulu — verb: to hide, conceal</span></div>
+      <div class="tablet rejected"><span class="word">Berge</span><span class="meta">Norwegian — verb: to save, rescue</span></div>
+      <div class="tablet rejected"><span class="word">Kanz</span><span class="meta">Arabic — treasure, buried treasure</span></div>
+      <div class="tablet rejected"><span class="word">Geumgo</span><span class="meta">Korean — safe, lit. "gold storage"</span></div>
+    </div>
+  </section>
+
+  <div class="divider"><span class="gem"></span></div>
+
+  <!-- ============ CHAPTER III ============ -->
+  <section class="chapter">
+    <span class="chapter-number">Chapter III</span>
+    <h2>Into the Burial Ground</h2>
+    <p class="intro">Direction shifted: stop borrowing shelter-words from other tongues, and go straight at the tomb/burial lexicon in English.</p>
+
+    <div class="tablet-grid">
+      <div class="tablet rejected"><span class="word">Cairn</span><span class="meta">already used by many projects</span></div>
+      <div class="tablet kept">
+        <span class="word">Hypogeum</span>
+        <span class="meta">Greek — underground chamber, temple, or tomb</span>
+        <span class="tag kept">kept — the anchor</span>
+      </div>
+    </div>
+    <p class="intro" style="margin-top:1.4rem;">GitHub check: only a small, unpopular student multiplayer game (mikymaione/Hypogeum) uses it — no major collision. It became the user's favorite so far, and the root to build from rather than the final word itself.</p>
+  </section>
+
+  <div class="divider"><span class="gem"></span></div>
+
+  <!-- ============ CHAPTER IV ============ -->
+  <section class="chapter">
+    <span class="chapter-number">Chapter IV</span>
+    <h2>The Blending</h2>
+    <p class="intro"><em>Technique: Concept Blending.</em> Hypogeum became raw material to mutate, not the destination itself.</p>
+
+    <div class="tablet-grid">
+      <div class="tablet unresolved">
+        <span class="word">Hypogeon</span>
+        <span class="meta">blend of Hypogeum + Dungeon — shares the "ge" bridge, keeps the archaeological root, adds a playful treasure-vault echo</span>
+      </div>
+      <div class="tablet rejected">
+        <span class="word">Hypocrypt</span>
+        <span class="meta">blend of Hypo + Crypt — sounds like "hypocrite." No collision found, but "-crypt" is a crowded suffix in this exact niche (Picocrypt, Cryptomator...) — risks reading as "yet another cryptname"</span>
+      </div>
+    </div>
+
+    <div class="aside">
+      A tangent, not a candidate: <strong>Hypogeal</strong> — the adjective form of hypogeum ("underground, subterranean") — is also the botanical term for seeds that germinate underground. A natural bridge back to the earlier Svalbard Seed Vault thread.
+    </div>
+
+    <div class="tablet-grid" style="margin-top:1.6rem;">
+      <div class="tablet winner">
+        <span class="word">Hypogaol</span>
+        <span class="meta">blend of Hypo(gean) + Gaol — referencing Bloodborne's "Hypogean Gaol." Zero GitHub collisions — only game-lore pages.</span>
+        <span class="tag winner">found</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CLIMAX ============ -->
+  <section class="climax">
+    <div class="motes">
+      <span class="mote" style="left:20%; --dx:-18px; animation-delay:0s;"></span>
+      <span class="mote" style="left:35%; --dx:14px; animation-delay:1.1s;"></span>
+      <span class="mote" style="left:50%; --dx:-8px; animation-delay:2.2s;"></span>
+      <span class="mote" style="left:65%; --dx:20px; animation-delay:0.6s;"></span>
+      <span class="mote" style="left:80%; --dx:-14px; animation-delay:1.8s;"></span>
+    </div>
+    <div class="found-label">The name has been found</div>
+    <div class="rose-wrap">
+      <svg class="rose-mark lit" viewBox="0 0 200 200" width="250" height="250"><use href="#roseWindow"></use></svg>
+    </div>
+    <div class="hypogaol-title">Hypogaol</div>
+    <div class="tagline">"Sealed until touched."</div>
+    <p class="gloss">
+      <em>hypo-</em> (under, beneath) + <em>gaol</em> (the archaic spelling of jail) — a name that is, at once,
+      a real word for an underground chamber and a wink at Bloodborne's Hypogean Gaol. It hits every mark:
+      playful, strong point of view, stays in the buried/underground register, no direct "tomb" or "fido2" —
+      and, checked, nobody else on GitHub has taken it.
+    </p>
+    <div class="aside" style="margin-top:1.8rem;">
+      The name proved fertile: it generated a coherent identity on its own — mascot, mark, palette, tagline —
+      rather than needing one forced onto it.
+    </div>
+  </section>
+
+  <div class="divider"><span class="gem"></span></div>
+
+  <!-- ============ CHAPTER V ============ -->
+  <section class="chapter">
+    <span class="chapter-number">Chapter V</span>
+    <h2>Trial by PMI</h2>
+    <p class="intro">Before committing, the sole surviving candidate went through a Plus / Minus / Interesting pressure test.</p>
+
+    <div class="pmi-grid">
+      <div class="pmi-col plus">
+        <h4><span class="pmi-badge">+</span> Plus</h4>
+        <ul>
+          <li>Zero OSS/GitHub collision, confirmed.</li>
+          <li>Strong parti-pris via the Bloodborne/Soulsborne reference — distinct personality, no literal tomb/fido2 reference.</li>
+          <li>The name proved fertile on its own, generating mascot, mark, palette and tagline unforced.</li>
+        </ul>
+      </div>
+      <div class="pmi-col minus">
+        <h4><span class="pmi-badge">−</span> Minus</h4>
+        <ul>
+          <li>"Gaol" pronunciation friction for readers unfamiliar with the archaic spelling — mitigated by a planned README pronunciation note (the k3sup precedent).</li>
+          <li>The Bloodborne reference lands only for players who know it; to everyone else it reads as an invented word — the same risk "tomb" never had to face.</li>
+        </ul>
+      </div>
+      <div class="pmi-col interesting">
+        <h4><span class="pmi-badge">?</span> Interesting</h4>
+        <ul>
+          <li>The name works on two independent levels at once — a real archaeological term (hypogeum/hypogean) and a specific gaming Easter egg — so it lands even for people who miss one of the two references.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="verdict">VERDICT — Pluses outweigh minuses; both minuses already mitigated or acceptable. Proceed with Hypogaol.</div>
+  </section>
+
+  <div class="divider"><span class="gem"></span></div>
+
+  <!-- ============ CHAPTER VI ============ -->
+  <section class="chapter">
+    <span class="chapter-number">Chapter VI</span>
+    <h2>The Identity Takes Shape</h2>
+    <p class="intro">A name this fertile grew a full identity around it — a mascot, a mark, a palette, and the boundary between where flavor lives and where it must never intrude.</p>
+
+    <h3 class="sub">The Mascot — Hypo</h3>
+    <div class="mascot-card">
+      <svg class="mascot-portrait" width="86" height="86" viewBox="0 0 100 100" aria-hidden="true">
+        <circle cx="50" cy="50" r="48" fill="#242219" stroke="#5c5544" stroke-width="1.5"/>
+        <path d="M50,20 C38,20 34,32 34,42 L34,58 C34,68 30,72 28,78 L72,78 C70,72 66,68 66,58 L66,42 C66,32 62,20 50,20 Z" fill="#7a7160" stroke="#453f31" stroke-width="1"/>
+        <circle cx="42" cy="44" r="4" fill="#1b1a16"/>
+        <circle cx="58" cy="44" r="4" fill="#1b1a16"/>
+        <path d="M40,60 Q50,66 60,60" stroke="#1b1a16" stroke-width="2" fill="none"/>
+        <rect x="30" y="76" width="40" height="10" rx="2" fill="#4a6a3e" stroke="#2f4527" stroke-width="1"/>
+        <circle cx="36" cy="81" r="1.6" fill="#dc9a34"/>
+        <circle cx="44" cy="81" r="1.6" fill="#dc9a34"/>
+        <circle cx="64" cy="83" r="6" fill="none" stroke="#dc9a34" stroke-width="1.4"/>
+        <rect x="63" y="88" width="2" height="6" fill="#dc9a34"/>
+        <path d="M22,70 l-6,14 l10,-2 z" fill="#f3c169" opacity="0.85"/>
+      </svg>
+      <div class="mascot-text">
+        <span class="name">Hypo</span>
+        A small stone gargoyle warden — Victorian coat, brass buttons, a ring of ornate keys at the belt,
+        a lantern in hand. A deadpan guardian character for docs and README. Its rune-circle mark and a
+        wheelbarrow-adjacent name ("Barrow") were both tried and set aside before landing here — "Hypo" is
+        a short, friendly nickname callback to the "hypo-" root, distinct from the formal project name.
+        A small ASCII-art banner of Hypo and his lantern is planned for a successful unlock.
+      </div>
+    </div>
+
+    <h3 class="sub">The Mark</h3>
+    <div class="rose-wrap" style="margin:1.4rem 0;">
+      <svg class="rose-mark lit" viewBox="0 0 200 200" width="160" height="160"><use href="#roseWindow"></use></svg>
+    </div>
+    <p style="text-align:center; max-width:560px; margin:0 auto 1rem; color:var(--stone-400); font-size:0.92rem;">
+      A gothic rose-window tracery circle. At its center, a keyhole shape fused with a FIDO2 security-key
+      silhouette — a subtle nod to the hardware mechanic. Rose windows and gargoyles are both authentic
+      elements of the same real Gothic cathedral architecture, so the mark and the mascot cohere around one
+      consistent world — cathedral and prison at once — deliberately distinct from the glowing rune-on-stone
+      language of the user's earlier project, <em>runed</em>.
+    </p>
+
+    <h3 class="sub">The Palette</h3>
+    <div class="swatch-row">
+      <div class="swatch"><div class="box stone"></div><span class="name">Stone Grey</span>base</div>
+      <div class="swatch"><div class="box moss"></div><span class="name">Moss Green</span>base</div>
+      <div class="swatch"><div class="box amber"></div><span class="name">Lantern Amber</span>accent — unlock only</div>
+    </div>
+    <p style="text-align:center; max-width:560px; margin:-0.6rem auto 1rem; color:var(--stone-400); font-size:0.92rem;">
+      Dark stone grey and moss green form the base. A single warm lantern-amber accent is reserved for the
+      unlock/success moment — echoing Bloodborne's lamp checkpoints.
+    </p>
+
+    <h3 class="sub">The Tagline</h3>
+    <ul class="tagline-list">
+      <li>"Locked in stone. Opened by touch."</li>
+      <li>"No warden but the one you carry."</li>
+      <li>"Buried deep. Unlocked by touch."</li>
+      <li>"One key. One touch. Nothing else gets in."</li>
+      <li class="locked">"Sealed until touched."</li>
+    </ul>
+
+    <h3 class="sub">Branding Stops at the Door</h3>
+    <p style="text-align:center; max-width:560px; margin:0 auto 0.6rem; color:var(--stone-400); font-size:0.92rem;">
+      A full warden vocabulary was drafted for the CLI verbs, then rejected — too abstract to memorize.
+      A crisis-use tool needs zero-cognitive-overhead verbs, not puns to decode under stress.
+    </p>
+    <div class="chip-label">rejected — the warden's vocabulary</div>
+    <div class="chip-row">
+      <span class="chip rejected">parole (unlock)</span>
+      <span class="chip rejected">remand / commit (lock)</span>
+      <span class="chip rejected">deputize / induct (enroll)</span>
+      <span class="chip rejected">discharge (revoke)</span>
+      <span class="chip rejected">roster (list)</span>
+      <span class="chip rejected">found (init)</span>
+      <span class="chip rejected">inspect (doctor)</span>
+    </div>
+    <div class="chip-label">locked — plain and literal</div>
+    <div class="chip-row">
+      <span class="chip plain">unlock</span>
+      <span class="chip plain">lock</span>
+      <span class="chip plain">enroll</span>
+      <span class="chip plain">revoke</span>
+      <span class="chip plain">list</span>
+      <span class="chip plain">init</span>
+      <span class="chip plain">doctor</span>
+    </div>
+    <p style="text-align:center; max-width:560px; margin:0.8rem auto 0; color:var(--stone-500); font-size:0.85rem; font-style:italic;">
+      Theming lives only at the top — name, mascot, mark, tagline, banner. Subcommands, README, and error
+      messages stay plain, literal, human-friendly, with zero flavor.
+    </p>
+
+    <h3 class="sub">Renaming "Tomb" in the Code</h3>
+    <p style="text-align:center; max-width:560px; margin:0 auto 0.6rem; color:var(--stone-400); font-size:0.92rem;">
+      The internal domain term for the encrypted container needed a generic, theme-independent replacement —
+      one that wouldn't need to change if the branding ever evolves again.
+    </p>
+    <div class="rename-flow">
+      <span class="old">tomb</span>
+      <span class="arrow">&#10132;</span>
+      <span class="new">volume</span>
+    </div>
+    <p class="also-considered">also considered: <span>container</span> <span>vault</span> — volume matches LUKS/cryptsetup's own native terminology</p>
+  </section>
+
+  <div class="divider"><span class="gem"></span></div>
+
+  <!-- ============ CHAPTER VII ============ -->
+  <section class="chapter">
+    <span class="chapter-number">Chapter VII</span>
+    <h2>What This Session Taught</h2>
+
+    <div class="inscription">
+      <span class="num">Insight 01 — Specificity Beat Vocabulary</span>
+      <p>Abstract dictionary words, in any language, never sparked. The breakthrough came from one specific, textured cultural reference — Bloodborne's Hypogean Gaol — rather than a generic "cool word."</p>
+    </div>
+    <div class="inscription">
+      <span class="num">Insight 02 — One Recurring Principle</span>
+      <p>Flavor belongs at the top — name, mascot, mark, tagline. Literal clarity belongs everywhere the user depends on it under stress — CLI verbs, README, error messages. The same principle that shaped Epic 1's "plain-language, zero cognitive overhead in crisis" requirement, recurring here in branding.</p>
+    </div>
+    <div class="inscription">
+      <span class="num">Insight 03 — An Emerging Signature</span>
+      <p>Hypogaol — grounded, Victorian-gothic — deliberately contrasts with the user's prior project "runed" — cosmic, Lovecraftian. Dark and atmospheric each time, but tonally distinct per project, not a repeated formula.</p>
+    </div>
+  </section>
+
+  <!-- ============ CHARTER ============ -->
+  <section class="charter">
+    <div class="wax-seal">SEALED</div>
+    <h2>The Charter</h2>
+    <div class="charter-date">Closed 2026-08-02 · 18:21</div>
+    <dl>
+      <dt>Name</dt><dd>Hypogaol — replacing the tomb-fido2 placeholder</dd>
+      <dt>Domain term</dt><dd>"volume" replaces "tomb" throughout code and docs</dd>
+      <dt>Mascot</dt><dd>Hypo — a stone gargoyle warden: Victorian coat, brass buttons, keyring, lantern</dd>
+      <dt>Mark</dt><dd>Gothic rose-window tracery circle, keyhole fused with a FIDO2 key silhouette at its center</dd>
+      <dt>Palette</dt><dd>Stone grey / moss green base, lantern-amber accent reserved for the unlock/success state</dd>
+      <dt>Tagline</dt><dd>"Sealed until touched."</dd>
+      <dt>Split</dt><dd>Theming confined to name/mascot/mark/tagline/banner; CLI subcommands (unlock, lock, enroll, revoke, list, init, doctor), README, and error messages stay plain, literal, human-friendly</dd>
+    </dl>
+  </section>
+
+  <footer>
+    <div class="rose-wrap"><svg class="rose-mark dim" viewBox="0 0 200 200" width="60" height="60"><use href="#roseWindow"></use></svg></div>
+    <div>brainstorm-project-naming-2026-08-02</div>
+    <div class="foot-tagline">Hypogaol — Sealed until touched.</div>
+  </footer>
+
+</div>
+</body>
+</html>
