@@ -82,11 +82,15 @@ development_status:
 
   epic-5: in-progress
   5-1-product-identity-rename: done
-  5-2-domain-term-rename-tomb-to-volume: backlog
+  5-2-domain-term-rename-tomb-to-volume: done
   5-3-top-level-branding-copy: backlog
   5-4-update-live-planning-automation-pointers: backlog
 
 action_items:
+  - epic: 5
+    action: "Run `make test-hardware` manually against real hardware to verify Story 5.2's rename (AC #2) — no physical FIDO2 device was available in the dev-story execution environment, so only cargo build/make test/cargo build --test hardware (typecheck) were verified automatically. RESOLVED 2026-08-02 (LeReverandNox): ran against real hardware, 21/22 passed. The 1 failure (resize_rejects_a_shrink_request_and_leaves_the_volume_untouched) is the pre-existing epic-3 grow-only-check bug recurring, not a rename regression — see that action item, reconfirmed a third time by this run."
+    owner: "LeReverandNox"
+    status: done
   - epic: 1
     action: "Fix mount-point ownership: chown to invoking uid/gid before chmod 0700 in FilesystemBackend::mount (currently root-owned, root-only)"
     owner: "Amelia"
@@ -148,7 +152,7 @@ action_items:
     owner: "LeReverandNox"
     status: in-progress
   - epic: 3
-    action: "BUG (found during Story 4.3's hardware run, 2026-07-27): resize::run's tier-2 grow-only check (resize.rs's grow_open_mapping, fs.filesystem_size comparison) fails to reject a same-size resize request on a small (32 MiB) file-backed tomb — tests/hardware/main.rs's resize_rejects_a_shrink_request_and_leaves_the_tomb_untouched failed with 'expected DomainError::ResizeMustGrow, got Ok(())'. Root cause unconfirmed but suspected: mkfs.ext4 overhead on a near-minimum-size tomb makes the filesystem's own reported size close enough to the full backing-file size that new_size <= live_current_size no longer holds. Introduced in Story 3.2 (PR #29) — unrelated to Story 4.3's changes (neither resize.rs nor this test's assertions were touched by 4.3). Other 17/18 hardware tests passed."
+    action: "BUG (found during Story 4.3's hardware run, 2026-07-27): resize::run's tier-2 grow-only check (resize.rs's grow_open_mapping, fs.filesystem_size comparison) fails to reject a same-size resize request on a small (32 MiB) file-backed tomb — tests/hardware/main.rs's resize_rejects_a_shrink_request_and_leaves_the_tomb_untouched failed with 'expected DomainError::ResizeMustGrow, got Ok(())'. Root cause unconfirmed but suspected: mkfs.ext4 overhead on a near-minimum-size tomb makes the filesystem's own reported size close enough to the full backing-file size that new_size <= live_current_size no longer holds. Introduced in Story 3.2 (PR #29) — unrelated to Story 4.3's changes (neither resize.rs nor this test's assertions were touched by 4.3). Other 17/18 hardware tests passed. RECONFIRMED 2026-08-02 during Story 5.2's hardware run (test renamed to resize_rejects_a_shrink_request_and_leaves_the_volume_untouched, same panic: 'expected DomainError::ResizeMustGrow, got Ok(())', 21/22 other tests passed) — third occurrence (4.3, and now 5.2), still unrelated to whatever story is running at the time; this is a standing tier-2 grow-only-check defect that needs its own fix, not a story-specific regression."
     owner: "unassigned"
     status: open
   - epic: 4

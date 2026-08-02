@@ -16,7 +16,7 @@ fn mapper(name: &str, source_path: &str) -> MapperHandle {
 #[test]
 fn escalates_through_sigterm_sighup_sigkill_until_umount_succeeds() {
     let log = new_call_log();
-    let mapper_a = mapper("vault-aaaa", "/tomb/a.img");
+    let mapper_a = mapper("vault-aaaa", "/volume/a.img");
 
     let luks = FakeLuksBackend::passing()
         .with_log(log.clone())
@@ -58,7 +58,7 @@ fn escalates_through_sigterm_sighup_sigkill_until_umount_succeeds() {
 #[test]
 fn no_holders_remaining_stops_escalation_and_reports_that_mappings_failure() {
     let log = new_call_log();
-    let mapper_a = mapper("vault-aaaa", "/tomb/a.img");
+    let mapper_a = mapper("vault-aaaa", "/volume/a.img");
 
     let luks = FakeLuksBackend::passing()
         .with_log(log.clone())
@@ -86,7 +86,7 @@ fn no_holders_remaining_stops_escalation_and_reports_that_mappings_failure() {
 #[test]
 fn hooks_step_runs_exactly_once_never_repeated_across_escalation_rounds() {
     let log = new_call_log();
-    let mapper_a = mapper("vault-aaaa", "/tomb/a.img");
+    let mapper_a = mapper("vault-aaaa", "/volume/a.img");
 
     let luks = FakeLuksBackend::passing()
         .with_log(log.clone())
@@ -124,8 +124,8 @@ fn hooks_step_runs_exactly_once_never_repeated_across_escalation_rounds() {
 #[test]
 fn one_mappings_never_clearing_does_not_stop_the_batch() {
     let log = new_call_log();
-    let mapper_a = mapper("vault-aaaa", "/tomb/a.img");
-    let mapper_b = mapper("vault-bbbb", "/tomb/b.img");
+    let mapper_a = mapper("vault-aaaa", "/volume/a.img");
+    let mapper_b = mapper("vault-bbbb", "/volume/b.img");
 
     let luks = FakeLuksBackend::passing()
         .with_log(log.clone())

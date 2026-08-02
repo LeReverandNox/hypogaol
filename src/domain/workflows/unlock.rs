@@ -52,7 +52,7 @@ pub fn run(
 }
 
 /// Applies bind-hooks (best-effort) then guardrail-checks and runs
-/// exec-hooks (hard-gated) against the just-mounted tomb (AC #1-#4). On an
+/// exec-hooks (hard-gated) against the just-mounted volume (AC #1-#4). On an
 /// exec-hooks guardrail rejection, rolls back every bind-hooks destination
 /// that was actually applied, then the primary mount and LUKS2 mapping
 /// (AC #4) — see Story 4.4's Dev Notes, "Resolved: rollback on a rejected

@@ -16,8 +16,8 @@ fn mapper(name: &str, source_path: &str) -> MapperHandle {
 #[test]
 fn closes_every_discovered_mapping_using_the_full_close_sequence() {
     let log = new_call_log();
-    let mapper_a = mapper("vault-aaaa", "/tomb/a.img");
-    let mapper_b = mapper("vault-bbbb", "/tomb/b.img");
+    let mapper_a = mapper("vault-aaaa", "/volume/a.img");
+    let mapper_b = mapper("vault-bbbb", "/volume/b.img");
 
     let luks = FakeLuksBackend::passing()
         .with_log(log.clone())
@@ -64,8 +64,8 @@ fn closes_every_discovered_mapping_using_the_full_close_sequence() {
 #[test]
 fn one_mappings_close_failure_does_not_stop_the_batch() {
     let log = new_call_log();
-    let mapper_a = mapper("vault-aaaa", "/tomb/a.img");
-    let mapper_b = mapper("vault-bbbb", "/tomb/b.img");
+    let mapper_a = mapper("vault-aaaa", "/volume/a.img");
+    let mapper_b = mapper("vault-bbbb", "/volume/b.img");
 
     let luks = FakeLuksBackend::passing()
         .with_log(log.clone())
@@ -107,8 +107,8 @@ fn one_mappings_close_failure_does_not_stop_the_batch() {
 #[test]
 fn one_mappings_umount_failure_does_not_stop_the_batch() {
     let log = new_call_log();
-    let mapper_a = mapper("vault-aaaa", "/tomb/a.img");
-    let mapper_b = mapper("vault-bbbb", "/tomb/b.img");
+    let mapper_a = mapper("vault-aaaa", "/volume/a.img");
+    let mapper_b = mapper("vault-bbbb", "/volume/b.img");
 
     let luks = FakeLuksBackend::passing()
         .with_log(log.clone())
@@ -184,8 +184,8 @@ fn preflight_failure_short_circuits_before_list_open_mappings_is_called() {
 #[test]
 fn skip_hooks_true_skips_hooks_for_every_mapping_in_the_batch() {
     let log = new_call_log();
-    let mapper_a = mapper("vault-aaaa", "/tomb/a.img");
-    let mapper_b = mapper("vault-bbbb", "/tomb/b.img");
+    let mapper_a = mapper("vault-aaaa", "/volume/a.img");
+    let mapper_b = mapper("vault-bbbb", "/volume/b.img");
 
     let luks = FakeLuksBackend::passing()
         .with_log(log.clone())

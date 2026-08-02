@@ -13,7 +13,7 @@ use crate::ports::luks_backend::LuksBackend;
 /// for AD-4's uniform three-port preflight gate, same as every sibling
 /// workflow.
 ///
-/// `resize` grows an existing tomb's volume and filesystem to `new_size`
+/// `resize` grows an existing volume's LUKS2 mapping and filesystem to `new_size`
 /// (AC #1/#4). Ordering is AD-10-mandated and non-negotiable: file-backed
 /// storage grows first, then the LUKS2 mapping, then the filesystem —
 /// reversing any of these risks growing a filesystem onto space the LUKS
@@ -40,7 +40,7 @@ pub fn run(
     // Tier 1 of the grow-only check (AD-10: rejected "before calling any
     // adapter" for the common/obvious cases) — see this story's Dev Notes
     // "Open Design Question" for why a single pre-open check can't fully
-    // enforce AC #3 for a device-backed tomb using Story 1.6's headroom
+    // enforce AC #3 for a device-backed volume using Story 1.6's headroom
     // feature; tier 2 below closes that gap once the mapping is open. Runs
     // before `read_filesystem` below so an obviously-invalid request never
     // reaches a real adapter call at all (AC #3's literal "before calling
@@ -109,7 +109,7 @@ pub fn run(
 /// Distinguishes "the grow itself failed" from "the grow succeeded but the
 /// subsequent re-lock didn't" — both would otherwise surface via the same
 /// generic close-failure message, leaving the user thinking growth never
-/// happened when the tomb's capacity was in fact already safely increased
+/// happened when the volume's capacity was in fact already safely increased
 /// (review finding, 2026-07-26).
 fn grow_succeeded_close_failed(new_size: u64, err: DomainError) -> DomainError {
     let detail = match err {
@@ -117,7 +117,7 @@ fn grow_succeeded_close_failed(new_size: u64, err: DomainError) -> DomainError {
         other => format!("{other:?}"),
     };
     DomainError::AdapterFailure(format!(
-        "tomb grown to {new_size} bytes, but failed to re-lock afterward: {detail}"
+        "volume grown to {new_size} bytes, but failed to re-lock afterward: {detail}"
     ))
 }
 
@@ -157,9 +157,9 @@ fn grow_open_mapping(
     // filesystem's own superblock, not the LUKS mapping — confirmed
     // empirically on real hardware that a LUKS2 mapping's dynamic segment
     // always reflects the *full* backing storage on reopen, even for a
-    // device-backed tomb using Story 1.6 headroom (a smaller-than-capacity
+    // device-backed volume using Story 1.6 headroom (a smaller-than-capacity
     // create-time constraint is never persisted, AD-2), so
-    // `device_capacity(&mapper.device_node())` cannot tell "this tomb
+    // `device_capacity(&mapper.device_node())` cannot tell "this volume
     // currently uses less than the raw device" from "it uses all of it."
     // Only the filesystem's own block-count metadata can. Runs after `open`
     // (an authentication/read operation, not a mutation) but strictly

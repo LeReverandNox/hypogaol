@@ -33,7 +33,7 @@ pub trait LuksBackend {
     /// crash-safe ordering).
     fn remove_key(&self, path: &Path, keyslot: KeyslotRef) -> Result<(), DomainError>;
 
-    /// Releases `mapper`'s dm-crypt mapping, leaving the tomb closed/at rest.
+    /// Releases `mapper`'s dm-crypt mapping, leaving the volume closed/at rest.
     fn close(&self, mapper: &MapperHandle) -> Result<(), DomainError>;
 
     /// Opens an existing LUKS2 volume at `path` as `name` via its enrolled

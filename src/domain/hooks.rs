@@ -1,4 +1,4 @@
-//! Pure-logic support for per-tomb `bind-hooks`/`exec-hooks` automation
+//! Pure-logic support for per-volume `bind-hooks`/`exec-hooks` automation
 //! (AD-14). Mirrors `keyslot_guard.rs`'s role as a focused, pure-logic
 //! `domain` module — no I/O beyond `resolve_bind_hook_entry`'s direct
 //! `std::fs::canonicalize` call, the same precedent `mapping_name.rs`
@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use crate::domain::types::HookFileMeta;
 use crate::ports::filesystem_backend::FilesystemBackend;
 
-/// One parsed line from a tomb's `bind-hooks` file: a tomb-root-relative
+/// One parsed line from a volume's `bind-hooks` file: a volume-root-relative
 /// source and a `$HOME`-relative destination.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BindHookEntry {
@@ -28,7 +28,7 @@ pub struct BindHookEntry {
 pub enum BindHookSkipReason {
     SourceMissing,
     DestMissing,
-    SourceEscapesTombRoot,
+    SourceEscapesVolumeRoot,
     DestEscapesHome,
     BindMountFailed,
 }
@@ -104,23 +104,23 @@ pub fn exec_hook_rejection(meta: &HookFileMeta) -> Option<HookRejectionReason> {
 
 /// Resolves one `bind-hooks` entry to concrete, containment-checked
 /// `(source, dest)` paths (AC #1/#2). Joins `entry.source_relative` onto
-/// `tomb_root` and `entry.dest_relative` onto `home_dir`; checks
+/// `volume_root` and `entry.dest_relative` onto `home_dir`; checks
 /// `fs.path_exists` on both before canonicalizing (reusing the existing AD-9
 /// method, not a redundant new one); canonicalizes both directly via
 /// `std::fs::canonicalize` (same precedent as `mapping_name::mapping_name`'s
 /// direct call); confirms the canonicalized source starts with the
-/// canonicalized `tomb_root` and the canonicalized dest starts with the
+/// canonicalized `volume_root` and the canonicalized dest starts with the
 /// canonicalized `home_dir` — canonicalize resolves `..`/symlinks before the
 /// `starts_with` check runs, so an escaping entry canonicalizes to a path
 /// outside the root and fails containment, rejecting `..`/absolute-path
 /// escapes without needing separate string detection.
 pub fn resolve_bind_hook_entry(
     entry: &BindHookEntry,
-    tomb_root: &Path,
+    volume_root: &Path,
     home_dir: &Path,
     fs: &dyn FilesystemBackend,
 ) -> Result<(PathBuf, PathBuf), BindHookSkipReason> {
-    let source = tomb_root.join(&entry.source_relative);
+    let source = volume_root.join(&entry.source_relative);
     let dest = home_dir.join(&entry.dest_relative);
 
     if !fs.path_exists(&source) {
@@ -135,13 +135,13 @@ pub fn resolve_bind_hook_entry(
     let canonical_dest =
         std::fs::canonicalize(&dest).map_err(|_| BindHookSkipReason::DestMissing)?;
 
-    let canonical_tomb_root =
-        std::fs::canonicalize(tomb_root).map_err(|_| BindHookSkipReason::SourceEscapesTombRoot)?;
+    let canonical_volume_root = std::fs::canonicalize(volume_root)
+        .map_err(|_| BindHookSkipReason::SourceEscapesVolumeRoot)?;
     let canonical_home_dir =
         std::fs::canonicalize(home_dir).map_err(|_| BindHookSkipReason::DestEscapesHome)?;
 
-    if !canonical_source.starts_with(&canonical_tomb_root) {
-        return Err(BindHookSkipReason::SourceEscapesTombRoot);
+    if !canonical_source.starts_with(&canonical_volume_root) {
+        return Err(BindHookSkipReason::SourceEscapesVolumeRoot);
     }
     if !canonical_dest.starts_with(&canonical_home_dir) {
         return Err(BindHookSkipReason::DestEscapesHome);

@@ -29,7 +29,7 @@ impl Drop for RealFixtureFile {
     }
 }
 
-/// A real, temporary directory — used to stand in for a mounted tomb's
+/// A real, temporary directory — used to stand in for a mounted volume's
 /// mountpoint (matching `FakeFilesystemBackend::mount`'s own hardcoded
 /// `/tmp/fake-mount-{name}` return shape) or the invoking user's `$HOME`,
 /// since `unlock::run`'s hooks step reads `bind-hooks`/`exec-hooks` via a

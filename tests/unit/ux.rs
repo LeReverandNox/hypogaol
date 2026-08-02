@@ -26,10 +26,10 @@ fn assert_no_jargon(message: &str) {
 
 #[test]
 fn translates_destination_exists() {
-    let err = DomainError::DestinationExists(PathBuf::from("/tmp/my-tomb"));
+    let err = DomainError::DestinationExists(PathBuf::from("/tmp/my-volume"));
     let message = translate(&err);
     assert_no_jargon(&message);
-    assert!(message.contains("/tmp/my-tomb"));
+    assert!(message.contains("/tmp/my-volume"));
 }
 
 #[test]
@@ -181,7 +181,7 @@ fn translates_adapter_failure_temp_key_file_creation_as_enrollment() {
     // body — it must not be misdiagnosed as a device/file sizing problem just
     // because its text contains "failed to create".
     let err = DomainError::AdapterFailure(
-        "failed to create temporary key file /dev/shm/.tomb-fido2-bootstrap-abc123: Permission denied (os error 13)"
+        "failed to create temporary key file /dev/shm/.volume-fido2-bootstrap-abc123: Permission denied (os error 13)"
             .to_string(),
     );
     let message = translate(&err);
@@ -228,7 +228,7 @@ fn translates_adapter_failure_sizing_failure() {
 }
 
 // `"umount".contains("mount")` is `true` as a plain substring, so a close
-// failure could silently fall into the unlock-flavored "Your tomb unlocked,
+// failure could silently fall into the unlock-flavored "Your volume unlocked,
 // but Hypogaol couldn't mount its filesystem" message unless it's matched
 // ahead of that generic bucket (the "marker bleed" bug class the Epic 2
 // retro flagged).
@@ -238,7 +238,7 @@ fn translates_adapter_failure_umount_failure_is_not_swallowed_by_the_unlock_moun
     let message = translate(&err);
     assert_no_jargon(&message);
     assert!(
-        !message.contains("Your tomb unlocked"),
+        !message.contains("Your volume unlocked"),
         "close's own umount failure was misclassified as unlock's mount-failure message: {message:?}"
     );
 }
@@ -248,7 +248,7 @@ fn translates_adapter_failure_findmnt_failure_is_not_swallowed_by_the_unlock_mou
     let err = DomainError::AdapterFailure("failed to run findmnt: some io error".to_string());
     let message = translate(&err);
     assert_no_jargon(&message);
-    assert!(!message.contains("Your tomb unlocked"));
+    assert!(!message.contains("Your volume unlocked"));
 }
 
 #[test]
@@ -258,7 +258,7 @@ fn translates_adapter_failure_not_currently_mounted_gets_its_own_distinct_messag
     );
     let message = translate(&err);
     assert_no_jargon(&message);
-    assert!(!message.contains("Your tomb unlocked"));
+    assert!(!message.contains("Your volume unlocked"));
 
     let generic_umount_err =
         DomainError::AdapterFailure("umount failed: target is busy".to_string());
@@ -292,7 +292,7 @@ fn translates_adapter_failure_no_active_mapping_gets_its_own_distinct_message() 
         DomainError::AdapterFailure("/dev/mapper/vault-deadbeef has no active mapping".to_string());
     let message = translate(&err);
     assert_no_jargon(&message);
-    assert!(!message.contains("Your tomb unlocked"));
+    assert!(!message.contains("Your volume unlocked"));
 
     let not_currently_mounted_err = DomainError::AdapterFailure(
         "/dev/mapper/vault-deadbeef is not currently mounted".to_string(),
@@ -331,7 +331,7 @@ fn translates_adapter_failure_canonicalization_failure_path_containing_colon_spa
 #[test]
 fn translates_resize_must_grow() {
     let err = DomainError::ResizeMustGrow {
-        path: PathBuf::from("/tmp/my-tomb.img"),
+        path: PathBuf::from("/tmp/my-volume.img"),
         requested: 1_000,
         current_size: 2_000,
     };
@@ -339,7 +339,7 @@ fn translates_resize_must_grow() {
     assert_no_jargon(&message);
     assert!(message.contains("1000"));
     assert!(message.contains("2000"));
-    assert!(message.contains("/tmp/my-tomb.img"));
+    assert!(message.contains("/tmp/my-volume.img"));
 }
 
 // "cryptsetup resize --token-only failed for ..." and "failed to run
@@ -404,19 +404,19 @@ fn translates_adapter_failure_e2fsck_failure_gets_its_own_message() {
 #[test]
 fn translates_adapter_failure_resize_pre_grow_checks_as_sizing_failure() {
     let err =
-        DomainError::AdapterFailure("failed to stat /tmp/my-tomb.img: some io error".to_string());
+        DomainError::AdapterFailure("failed to stat /tmp/my-volume.img: some io error".to_string());
     let message = translate(&err);
     assert_no_jargon(&message);
     assert!(!message.contains("some io error"));
 
     let err = DomainError::AdapterFailure(
-        "/tmp/my-tomb.img is not a regular file — refusing to grow it".to_string(),
+        "/tmp/my-volume.img is not a regular file — refusing to grow it".to_string(),
     );
     let message = translate(&err);
     assert_no_jargon(&message);
 
     let err = DomainError::AdapterFailure(
-        "failed to open /tmp/my-tomb.img for growing: some io error".to_string(),
+        "failed to open /tmp/my-volume.img for growing: some io error".to_string(),
     );
     let message = translate(&err);
     assert_no_jargon(&message);
@@ -425,18 +425,18 @@ fn translates_adapter_failure_resize_pre_grow_checks_as_sizing_failure() {
 
 // A `luks.close` failure that happens *after* a successful grow must read
 // distinctly from both a plain resize failure and a plain `close` failure —
-// otherwise the user is told resize failed even though their tomb's capacity
+// otherwise the user is told resize failed even though their volume's capacity
 // was already safely increased (review finding, 2026-07-26).
 #[test]
 fn translates_adapter_failure_post_grow_close_failure_is_distinct_from_generic_close_failure() {
     let err = DomainError::AdapterFailure(
-        "tomb grown to 8192 bytes, but failed to re-lock afterward: cryptsetup close failed: device is busy"
+        "volume grown to 8192 bytes, but failed to re-lock afterward: cryptsetup close failed: device is busy"
             .to_string(),
     );
     let message = translate(&err);
     assert_no_jargon(&message);
     assert!(
-        message.contains("grew this tomb successfully"),
+        message.contains("grew this volume successfully"),
         "message should acknowledge the grow succeeded: {message:?}"
     );
 
@@ -557,7 +557,7 @@ fn translate_covers_every_hook_rejection_reason_with_a_distinct_no_jargon_messag
         .iter()
         .map(|reason| {
             translate(&DomainError::HookRejected {
-                path: PathBuf::from("/tmp/my-tomb/exec-hooks"),
+                path: PathBuf::from("/tmp/my-volume/exec-hooks"),
                 reason: *reason,
             })
         })
@@ -565,7 +565,7 @@ fn translate_covers_every_hook_rejection_reason_with_a_distinct_no_jargon_messag
 
     for message in &messages {
         assert_no_jargon(message);
-        assert!(message.contains("/tmp/my-tomb/exec-hooks"));
+        assert!(message.contains("/tmp/my-volume/exec-hooks"));
     }
 
     let mut unique = messages.clone();
@@ -583,7 +583,7 @@ fn translate_hook_warning_covers_every_bind_hook_skip_reason_with_a_distinct_no_
     let reasons = [
         BindHookSkipReason::SourceMissing,
         BindHookSkipReason::DestMissing,
-        BindHookSkipReason::SourceEscapesTombRoot,
+        BindHookSkipReason::SourceEscapesVolumeRoot,
         BindHookSkipReason::DestEscapesHome,
         BindHookSkipReason::BindMountFailed,
     ];
@@ -616,20 +616,20 @@ fn translate_hook_warning_covers_every_bind_hook_skip_reason_with_a_distinct_no_
 #[test]
 fn translate_hook_warning_exec_hook_non_zero_exit_with_a_code() {
     let message = translate_hook_warning(&HookWarning::ExecHookNonZeroExit {
-        path: PathBuf::from("/tmp/my-tomb/exec-hooks"),
+        path: PathBuf::from("/tmp/my-volume/exec-hooks"),
         exit_code: Some(3),
     });
     assert_no_jargon(&message);
-    assert!(message.contains("/tmp/my-tomb/exec-hooks"));
+    assert!(message.contains("/tmp/my-volume/exec-hooks"));
     assert!(message.contains('3'));
 }
 
 #[test]
 fn translate_hook_warning_exec_hook_non_zero_exit_without_a_code() {
     let message = translate_hook_warning(&HookWarning::ExecHookNonZeroExit {
-        path: PathBuf::from("/tmp/my-tomb/exec-hooks"),
+        path: PathBuf::from("/tmp/my-volume/exec-hooks"),
         exit_code: None,
     });
     assert_no_jargon(&message);
-    assert!(message.contains("/tmp/my-tomb/exec-hooks"));
+    assert!(message.contains("/tmp/my-volume/exec-hooks"));
 }
