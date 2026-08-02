@@ -29,7 +29,7 @@ so that the domain vocabulary is generic and independent of whatever the product
   - Read in full: every file listed in Task 1-6 below. Re-grep `-i "tomb"` in each immediately before editing it — the counts below are a snapshot from story creation and may have drifted.
   - Note the one cross-file trap up front: `MIN_TOMB_SIZE_BYTES` (defined in `src/domain/workflows/create.rs:32`) is a `pub const` consumed in `src/cli/main.rs`, `tests/unit/create.rs`, `tests/unit/cli.rs`, and `tests/unit/progress.rs`. Renaming it to `MIN_VOLUME_SIZE_BYTES` requires touching all five files atomically in the same pass or `cargo build`/`make test` won't compile in between.
 
-- [ ] **Task 1: Rename in `src/domain/` (workflows, hooks, errors, ports)** (AC: #1)
+- [x] **Task 1: Rename in `src/domain/` (workflows, hooks, errors, ports)** (AC: #1)
   - Files: `src/domain/workflows/{create,unlock,enroll,revoke,close,resize,slam,close_all}.rs`, `src/domain/hooks.rs`, `src/domain/errors.rs`, `src/domain/keyslot_guard.rs`, `src/ports/{luks_backend,filesystem_backend}.rs`.
   - Rename the domain-noun "tomb" wherever it appears in doc comments, inline comments, and error-message strings (e.g. `src/domain/errors.rs`'s `"resolved size {size} bytes for {} is too small for a viable tomb"` and `"no FIDO2 key labeled {0:?} is enrolled on this tomb"`).
   - Identifier renames in this layer (not just prose — these are real symbols, rename every use site):
@@ -103,4 +103,19 @@ so that the domain vocabulary is generic and independent of whatever the product
 
 ### Completion Notes List
 
+- Task 1: Case-preserving `tomb`/`Tomb`/`TOMB` -> `volume`/`Volume`/`VOLUME` rename across `src/domain/` and `src/ports/`. Includes `MIN_TOMB_SIZE_BYTES` -> `MIN_VOLUME_SIZE_BYTES` (consumers in `src/cli/main.rs`, `src/cli/ux.rs` comment, and `tests/unit/{create,cli,progress}.rs` intentionally left for Task 2/4 in the same build-passing pass) and `hooks.rs`'s `tomb_root`/`canonical_tomb_root`/`SourceEscapesTombRoot` -> `volume_root`/`canonical_volume_root`/`SourceEscapesVolumeRoot`. `cargo build` will not pass until Task 2/4 land (expected, cross-file rename).
+
 ### File List
+
+- src/domain/errors.rs
+- src/domain/hooks.rs
+- src/domain/keyslot_guard.rs
+- src/domain/workflows/close.rs
+- src/domain/workflows/close_all.rs
+- src/domain/workflows/create.rs
+- src/domain/workflows/enroll.rs
+- src/domain/workflows/resize.rs
+- src/domain/workflows/slam.rs
+- src/domain/workflows/unlock.rs
+- src/ports/filesystem_backend.rs
+- src/ports/luks_backend.rs
