@@ -5,6 +5,7 @@ edition = "2021"
 publish = false
 license = "GPL-3.0-or-later"
 repository = "https://github.com/LeReverandNox/hypogaol"
+description = "Hypogaol — sealed until touched."
 
 # publish = false hides this crate from cargo-dist by default (it only considers
 # publishable packages); this override tells it to build/dist this binary anyway.
