@@ -1,11 +1,11 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use tomb_fido2::domain::progress::{CreateStage, ResizeStage};
-use tomb_fido2::domain::types::{CreateTarget, Filesystem};
-use tomb_fido2::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
-use tomb_fido2::domain::workflows::resize;
-use tomb_fido2::ports::fido2_backend::Fido2DeviceSelection;
+use hypogaol::domain::progress::{CreateStage, ResizeStage};
+use hypogaol::domain::types::{CreateTarget, Filesystem};
+use hypogaol::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
+use hypogaol::domain::workflows::resize;
+use hypogaol::ports::fido2_backend::Fido2DeviceSelection;
 
 use crate::fakes::{FakeFido2Backend, FakeFilesystemBackend, FakeLuksBackend};
 

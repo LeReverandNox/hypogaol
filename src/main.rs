@@ -1,3 +1,3 @@
 fn main() {
-    tomb_fido2::cli::main::run();
+    hypogaol::cli::main::run();
 }

@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
-use tomb_fido2::cli::ux::{
+use hypogaol::cli::ux::{
     translate, translate_create_stage, translate_hook_warning, translate_resize_stage,
 };
-use tomb_fido2::domain::errors::DomainError;
-use tomb_fido2::domain::hooks::{BindHookSkipReason, HookRejectionReason, HookWarning};
-use tomb_fido2::domain::progress::{CreateStage, ResizeStage};
+use hypogaol::domain::errors::DomainError;
+use hypogaol::domain::hooks::{BindHookSkipReason, HookRejectionReason, HookWarning};
+use hypogaol::domain::progress::{CreateStage, ResizeStage};
 
 const JARGON_MARKERS: [&str; 4] = [
     "cryptsetup",

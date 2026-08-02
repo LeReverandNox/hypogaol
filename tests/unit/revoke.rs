@@ -1,8 +1,8 @@
 use std::path::Path;
 
-use tomb_fido2::domain::errors::DomainError;
-use tomb_fido2::domain::types::{KeyslotInfo, KeyslotRef};
-use tomb_fido2::domain::workflows::revoke;
+use hypogaol::domain::errors::DomainError;
+use hypogaol::domain::types::{KeyslotInfo, KeyslotRef};
+use hypogaol::domain::workflows::revoke;
 
 use crate::fakes::{new_call_log, FakeFido2Backend, FakeFilesystemBackend, FakeLuksBackend};
 

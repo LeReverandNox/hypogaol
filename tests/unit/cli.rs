@@ -1,10 +1,10 @@
 use std::path::Path;
 
 use clap::Parser;
-use tomb_fido2::cli::main::{
+use hypogaol::cli::main::{
     confirms_revoke, confirms_wipe, parse_size, unlock_intro_message, unlock_success_message, Cli,
 };
-use tomb_fido2::domain::workflows::create::MIN_TOMB_SIZE_BYTES;
+use hypogaol::domain::workflows::create::MIN_TOMB_SIZE_BYTES;
 
 #[test]
 fn rejects_empty_input() {

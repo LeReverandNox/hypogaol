@@ -1,10 +1,10 @@
 [package]
-name = "tomb-fido2"
+name = "hypogaol"
 version = "0.1.0"
 edition = "2021"
 publish = false
 license = "GPL-3.0-or-later"
-repository = "https://github.com/LeReverandNox/tomb-fido2"
+repository = "https://github.com/LeReverandNox/hypogaol"
 
 # publish = false hides this crate from cargo-dist by default (it only considers
 # publishable packages); this override tells it to build/dist this binary anyway.

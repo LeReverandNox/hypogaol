@@ -1,10 +1,10 @@
 use std::path::PathBuf;
 
-use tomb_fido2::domain::hooks::{
+use hypogaol::domain::hooks::{
     exec_hook_rejection, parse_bind_hooks, resolve_bind_hook_entry, BindHookEntry,
     BindHookSkipReason, HookRejectionReason,
 };
-use tomb_fido2::domain::types::HookFileMeta;
+use hypogaol::domain::types::HookFileMeta;
 
 use crate::fakes::FakeFilesystemBackend;
 

@@ -3,13 +3,13 @@ use std::collections::{HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use tomb_fido2::domain::errors::DomainError;
-use tomb_fido2::domain::types::{
+use hypogaol::domain::errors::DomainError;
+use hypogaol::domain::types::{
     Filesystem, HookFileMeta, KeyMetadata, KeyslotInfo, KeyslotRef, MapperHandle, Pid, Signal,
 };
-use tomb_fido2::ports::fido2_backend::{Fido2Backend, Fido2DeviceSelection};
-use tomb_fido2::ports::filesystem_backend::FilesystemBackend;
-use tomb_fido2::ports::luks_backend::LuksBackend;
+use hypogaol::ports::fido2_backend::{Fido2Backend, Fido2DeviceSelection};
+use hypogaol::ports::filesystem_backend::FilesystemBackend;
+use hypogaol::ports::luks_backend::LuksBackend;
 
 fn missing(deps: &[&str]) -> Vec<String> {
     deps.iter().map(|dep| dep.to_string()).collect()

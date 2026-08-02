@@ -30,7 +30,7 @@ so that Cargo, the CLI, and the README present one consistent, permanent product
   - This story's AC1 is explicitly conditioned on "the GitHub repository has already been renamed to `hypogaol`" — that rename is a manual, user-owned action (`LeReverandNox/tomb-fido2` → `LeReverandNox/hypogaol`) outside any agent's scope, per the sprint change proposal §5.
   - Check whether it's done: `git remote get-url origin` and/or `gh repo view --json nameWithOwner`. If the remote still resolves to `tomb-fido2`, **stop and ask the user to confirm/perform the rename before proceeding** — don't guess or skip this gate, since `Cargo.toml`'s `repository` URL and any README links depend on it being correct in one pass (rather than needing a second pass later).
 
-- [ ] **Task 2: Rename the Cargo package identity** (AC: #1)
+- [x] **Task 2: Rename the Cargo package identity** (AC: #1)
   - In `Cargo.toml`: `name = "tomb-fido2"` → `name = "hypogaol"`; `repository = "https://github.com/LeReverandNox/tomb-fido2"` → `"https://github.com/LeReverandNox/hypogaol"`.
   - Run `cargo build` (or `cargo check`) afterward so `Cargo.lock`'s `tomb-fido2` package entry (~line 265) regenerates to `hypogaol` automatically — do not hand-edit `Cargo.lock`.
   - Do **not** touch `[package.metadata.dist]` (`dist = true`), `[workspace.metadata.dist]`, or `[profile.dist]` — none of them contain the product name; they key off the package name that just changed above, so they need no edits of their own.
@@ -95,10 +95,35 @@ so that Cargo, the CLI, and the README present one consistent, permanent product
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Claude Sonnet 5 (claude-sonnet-5)
 
 ### Debug Log References
 
 ### Completion Notes List
 
+- Task 2: Renamed Cargo package (`name`, `repository`) to `hypogaol`; `cargo build` regenerated `Cargo.lock`'s package entry automatically. Discovered a consequence the story's Dev Notes didn't anticipate: since no `[lib]` section overrides it, the library crate identifier also derives from the package name, so every `use tomb_fido2::...` in `src/main.rs` and `tests/**/*.rs` broke at compile time. Fixed by mechanically renaming `tomb_fido2::` → `hypogaol::` at each import site (pure identifier rename, zero behavioral change) — required for Task 2's own `cargo build` step and Task 9's regression gate to pass. Left the one prose doc-comment mention of `` `tomb_fido2` `` in `src/adapters/exec/mod.rs:122` untouched (not a CLI-name/banner literal, so not an AD-13 violation per Task 7's carve-out). `make test` (174 tests) passes unchanged.
+
 ### File List
+
+- `Cargo.toml`
+- `Cargo.lock`
+- `src/main.rs`
+- `tests/hardware/main.rs`
+- `tests/unit/cli.rs`
+- `tests/unit/close.rs`
+- `tests/unit/close_all.rs`
+- `tests/unit/create.rs`
+- `tests/unit/enroll.rs`
+- `tests/unit/fakes.rs`
+- `tests/unit/hooks.rs`
+- `tests/unit/info.rs`
+- `tests/unit/keyslot_guard.rs`
+- `tests/unit/mapping_name.rs`
+- `tests/unit/preflight.rs`
+- `tests/unit/progress.rs`
+- `tests/unit/resize.rs`
+- `tests/unit/revoke.rs`
+- `tests/unit/slam.rs`
+- `tests/unit/unlock.rs`
+- `tests/unit/ux.rs`
+- `tests/unit/workflows.rs`

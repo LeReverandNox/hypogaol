@@ -1,8 +1,8 @@
 use std::path::PathBuf;
 
-use tomb_fido2::domain::errors::DomainError;
-use tomb_fido2::domain::workflows::enroll;
-use tomb_fido2::ports::fido2_backend::Fido2DeviceSelection;
+use hypogaol::domain::errors::DomainError;
+use hypogaol::domain::workflows::enroll;
+use hypogaol::ports::fido2_backend::Fido2DeviceSelection;
 
 use crate::fakes::{new_call_log, FakeFido2Backend, FakeFilesystemBackend, FakeLuksBackend};
 

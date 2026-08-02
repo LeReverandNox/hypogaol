@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
-use tomb_fido2::domain::errors::DomainError;
-use tomb_fido2::domain::mapping_name;
-use tomb_fido2::domain::types::Filesystem;
-use tomb_fido2::domain::workflows::resize;
+use hypogaol::domain::errors::DomainError;
+use hypogaol::domain::mapping_name;
+use hypogaol::domain::types::Filesystem;
+use hypogaol::domain::workflows::resize;
 
 use crate::fakes::{
     new_call_log, no_progress, FakeFido2Backend, FakeFilesystemBackend, FakeLuksBackend,
