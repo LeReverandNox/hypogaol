@@ -22,7 +22,7 @@ fn no_progress<S>(_stage: S) {}
 ///
 /// Deliberately does *not* auto-detach on drop: the whole point of this
 /// test's printed instructions is to let a human inspect the still-open
-/// tomb by hand afterward (mount, `dumpe2fs`, etc.), and an unconditional
+/// volume by hand afterward (mount, `dumpe2fs`, etc.), and an unconditional
 /// `Drop`-based `losetup -d` would tear the loop device down the instant the
 /// test function returns — before those instructions are ever followed.
 /// Detaching is the last step of the printed manual sequence instead. Any
@@ -84,7 +84,7 @@ fn privileged_output(
 }
 
 /// End-to-end break-glass verification (Story 1.5, AC #1): create a real
-/// file-backed tomb via this tool's own `domain::workflows::create`, then
+/// file-backed volume via this tool's own `domain::workflows::create`, then
 /// independently confirm the result is recognized by bare
 /// `cryptsetup`/`fido2-token` (not this tool's own unlock, which doesn't
 /// exist until Story 1.7).
@@ -94,11 +94,11 @@ fn privileged_output(
 /// present, ready to be touched and to enter its PIN when prompted.
 #[test]
 #[ignore]
-fn create_a_file_backed_tomb_is_independently_unlockable_via_bare_cryptsetup() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test");
+fn create_a_file_backed_volume_is_independently_unlockable_via_bare_cryptsetup() {
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
-    let path = dir.join("tomb.img");
+    let path = dir.join("volume.img");
 
     let adapter = ExecAdapter::default();
     let target = CreateTarget::File {
@@ -138,18 +138,18 @@ fn create_a_file_backed_tomb_is_independently_unlockable_via_bare_cryptsetup() {
     // interactive prompt this test can't automate; finish verifying it by
     // hand, then record the result in the story's Completion Notes:
     println!(
-        "Tomb created at {}. To finish verifying AC #1 by hand:\n  \
-         sudo cryptsetup open --token-only {} tomb-fido2-hardware-test\n  \
-         sudo mount /dev/mapper/tomb-fido2-hardware-test <mountpoint>\n  \
+        "Volume created at {}. To finish verifying AC #1 by hand:\n  \
+         sudo cryptsetup open --token-only {} volume-fido2-hardware-test\n  \
+         sudo mount /dev/mapper/volume-fido2-hardware-test <mountpoint>\n  \
          ls <mountpoint>\n  \
-         sudo umount <mountpoint> && sudo cryptsetup close tomb-fido2-hardware-test",
+         sudo umount <mountpoint> && sudo cryptsetup close volume-fido2-hardware-test",
         path.display(),
         path.display(),
     );
 }
 
 /// Device-backed create's headroom claim (Story 1.6, AC #2): create a real
-/// tomb on a loop device using a size smaller than the loop device's own
+/// volume on a loop device using a size smaller than the loop device's own
 /// capacity, then independently confirm (bare `cryptsetup`/`blockdev`) that
 /// the LUKS2 payload is smaller than the full device, leaving free space for
 /// a later resize/grow (Story 3.2).
@@ -159,8 +159,8 @@ fn create_a_file_backed_tomb_is_independently_unlockable_via_bare_cryptsetup() {
 /// present, ready to be touched and to enter its PIN when prompted.
 #[test]
 #[ignore]
-fn create_a_device_backed_tomb_leaves_headroom_for_a_later_resize() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-device");
+fn create_a_device_backed_volume_leaves_headroom_for_a_later_resize() {
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-device");
     let backing_file = dir.join("loop-backing.img");
 
     // Must run before the backing file is deleted/recreated below — see
@@ -250,13 +250,13 @@ fn create_a_device_backed_tomb_leaves_headroom_for_a_later_resize() {
     // the same live-interaction limit Story 1.5's break-glass clause hit, so
     // it's left as a manual step below rather than automated here.
     println!(
-        "Device-backed tomb created at {} (loop device backed by {}).\n\
+        "Device-backed volume created at {} (loop device backed by {}).\n\
          Requested {requested_size} bytes of {capacity} bytes total capacity.\n\
          To finish verifying AC #2's headroom claim by hand:\n  \
-         sudo cryptsetup open --token-only {} tomb-fido2-hardware-test-device\n  \
-         sudo dumpe2fs -h /dev/mapper/tomb-fido2-hardware-test-device | grep -E 'Block count|Block size'\n  \
+         sudo cryptsetup open --token-only {} volume-fido2-hardware-test-device\n  \
+         sudo dumpe2fs -h /dev/mapper/volume-fido2-hardware-test-device | grep -E 'Block count|Block size'\n  \
          # confirm block_count * block_size is close to {requested_size} bytes, not {capacity}\n  \
-         sudo cryptsetup close tomb-fido2-hardware-test-device\n  \
+         sudo cryptsetup close volume-fido2-hardware-test-device\n  \
          sudo losetup -d {}",
         loop_device.path.display(),
         backing_file.display(),
@@ -297,10 +297,10 @@ fn assert_actually_mounted(device_node: &std::path::Path, mountpoint: &std::path
 /// filesystem `unlock::run` mounted is actually readable/writable, not just
 /// present in the mount table.
 fn assert_readable_and_writable(mountpoint: &std::path::Path) {
-    let marker = mountpoint.join("tomb-fido2-marker.txt");
-    std::fs::write(&marker, b"tomb-fido2 hardware test").expect("failed to write marker file");
+    let marker = mountpoint.join("volume-fido2-marker.txt");
+    std::fs::write(&marker, b"volume-fido2 hardware test").expect("failed to write marker file");
     let contents = std::fs::read_to_string(&marker).expect("failed to read marker file back");
-    assert_eq!(contents, "tomb-fido2 hardware test");
+    assert_eq!(contents, "volume-fido2 hardware test");
 }
 
 /// Runs unprivileged `id <flag>`, independent of `ExecAdapter`'s own
@@ -523,7 +523,7 @@ impl Drop for UnlockCleanup {
 }
 
 /// End-to-end unlock verification (Story 1.7, AC #1): create a real
-/// file-backed tomb via this tool's own `create::run`, then unlock and mount
+/// file-backed volume via this tool's own `create::run`, then unlock and mount
 /// it via `unlock::run`, and confirm — independently of this tool's own
 /// code, via `findmnt` — that the returned mount point is actually mounted
 /// and its filesystem is readable/writable.
@@ -533,11 +533,11 @@ impl Drop for UnlockCleanup {
 /// prompted (once for `create`'s enrollment, once more for `unlock`'s open).
 #[test]
 #[ignore]
-fn unlock_mounts_a_file_backed_tomb_with_a_readable_writable_filesystem() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-unlock");
+fn unlock_mounts_a_file_backed_volume_with_a_readable_writable_filesystem() {
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-unlock");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
-    let path = dir.join("tomb.img");
+    let path = dir.join("volume.img");
 
     let adapter = ExecAdapter::default();
     let target = CreateTarget::File {
@@ -582,8 +582,8 @@ fn unlock_mounts_a_file_backed_tomb_with_a_readable_writable_filesystem() {
 /// prompted (once for `create`'s enrollment, once more for `unlock`'s open).
 #[test]
 #[ignore]
-fn unlock_works_unmodified_against_a_device_backed_tomb() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-unlock-device");
+fn unlock_works_unmodified_against_a_device_backed_volume() {
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-unlock-device");
     let backing_file = dir.join("loop-backing.img");
 
     // Must run before the backing file is deleted/recreated below — see
@@ -656,7 +656,7 @@ fn unlock_works_unmodified_against_a_device_backed_tomb() {
 /// read-write to establish real chown/chmod ownership on the volume's root
 /// inode (so the read-only assertions below aren't confounded by the
 /// "never-writably-mounted" edge case, per Task 2's design note), write a
-/// marker file, close, then re-unlock the same tomb read-only and confirm
+/// marker file, close, then re-unlock the same volume read-only and confirm
 /// writes are rejected at both the filesystem level (a write attempt fails)
 /// and the underlying dm-crypt mapping level (`mount -o remount,rw` also
 /// fails, per AC #2's explicit "including a later remount attempt").
@@ -674,10 +674,10 @@ fn unlock_works_unmodified_against_a_device_backed_tomb() {
 #[test]
 #[ignore]
 fn unlock_read_only_rejects_writes_at_both_layers_including_remount() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-unlock-read-only");
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-unlock-read-only");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
-    let path = dir.join("tomb.img");
+    let path = dir.join("volume.img");
 
     let adapter = ExecAdapter::default();
     let target = CreateTarget::File {
@@ -705,7 +705,7 @@ fn unlock_read_only_rejects_writes_at_both_layers_including_remount() {
     let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("writable unlock::run failed");
     assert_readable_and_writable(&mountpoint);
-    let marker = mountpoint.join("tomb-fido2-marker.txt");
+    let marker = mountpoint.join("volume-fido2-marker.txt");
     let marker_contents = std::fs::read_to_string(&marker)
         .expect("failed to read back marker written by the writable unlock");
 
@@ -727,7 +727,7 @@ fn unlock_read_only_rejects_writes_at_both_layers_including_remount() {
         "marker contents must be unchanged across the read-only re-unlock"
     );
 
-    let write_result = std::fs::write(mountpoint.join("tomb-fido2-write-attempt.txt"), b"nope");
+    let write_result = std::fs::write(mountpoint.join("volume-fido2-write-attempt.txt"), b"nope");
     assert!(
         write_result.is_err(),
         "a write attempt inside a read-only mount must fail, got {write_result:?}"
@@ -761,8 +761,8 @@ fn unlock_read_only_rejects_writes_at_both_layers_including_remount() {
 /// once for the read-only unlock).
 #[test]
 #[ignore]
-fn unlock_read_only_rejects_writes_at_both_layers_against_a_device_backed_tomb() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-unlock-read-only-device");
+fn unlock_read_only_rejects_writes_at_both_layers_against_a_device_backed_volume() {
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-unlock-read-only-device");
     let backing_file = dir.join("loop-backing.img");
 
     LoopDevice::detach_stale(&backing_file);
@@ -842,7 +842,7 @@ fn unlock_read_only_rejects_writes_at_both_layers_against_a_device_backed_tomb()
     assert_actually_mounted(&device_node, &mountpoint);
     assert_owned_by_invoking_user(&mountpoint);
 
-    let write_result = std::fs::write(mountpoint.join("tomb-fido2-write-attempt.txt"), b"nope");
+    let write_result = std::fs::write(mountpoint.join("volume-fido2-write-attempt.txt"), b"nope");
     assert!(
         write_result.is_err(),
         "a write attempt inside a read-only mount must fail, got {write_result:?}"
@@ -861,9 +861,9 @@ fn unlock_read_only_rejects_writes_at_both_layers_against_a_device_backed_tomb()
     cleanup.run();
 }
 
-/// Exercises the collision-suffix fallback (AC #2): two file-backed tombs
+/// Exercises the collision-suffix fallback (AC #2): two file-backed volumes
 /// with the *same* basename (`collision.img`) in different scratch
-/// directories derive the same `tomb_name`, so the second `unlock::run` must
+/// directories derive the same `volume_name`, so the second `unlock::run` must
 /// land at a distinct, suffixed mount point rather than failing or
 /// colliding with the first.
 ///
@@ -892,15 +892,15 @@ fn unlock_falls_back_to_a_suffixed_mount_point_on_a_basename_collision() {
         }
     }
 
-    let dir_a = std::env::temp_dir().join("tomb-fido2-hardware-test-collision-a");
-    let dir_b = std::env::temp_dir().join("tomb-fido2-hardware-test-collision-b");
+    let dir_a = std::env::temp_dir().join("volume-fido2-hardware-test-collision-a");
+    let dir_b = std::env::temp_dir().join("volume-fido2-hardware-test-collision-b");
     let _ = std::fs::remove_dir_all(&dir_a);
     let _ = std::fs::remove_dir_all(&dir_b);
     std::fs::create_dir_all(&dir_a).expect("failed to create scratch dir a");
     std::fs::create_dir_all(&dir_b).expect("failed to create scratch dir b");
 
     // Same basename in two different directories -> the same derived
-    // tomb_name, forcing the fallback path.
+    // volume_name, forcing the fallback path.
     let path_a = dir_a.join("collision.img");
     let path_b = dir_b.join("collision.img");
 
@@ -950,12 +950,12 @@ fn unlock_falls_back_to_a_suffixed_mount_point_on_a_basename_collision() {
     );
     assert_ne!(
         mountpoint_a, mountpoint_b,
-        "both tombs share the basename \"collision\" and must land at different mount points via the collision-suffix fallback"
+        "both volumes share the basename \"collision\" and must land at different mount points via the collision-suffix fallback"
     );
     assert_eq!(
         mountpoint_a.file_name().and_then(|n| n.to_str()),
         Some("collision"),
-        "the first tomb to claim the basename should get the plain, unsuffixed name"
+        "the first volume to claim the basename should get the plain, unsuffixed name"
     );
     let basename_b = mountpoint_b
         .file_name()
@@ -964,7 +964,7 @@ fn unlock_falls_back_to_a_suffixed_mount_point_on_a_basename_collision() {
         .into_owned();
     assert!(
         basename_b.starts_with("collision-"),
-        "expected the second tomb's mount point to fall back to a \"collision-<suffix>\" name, got {basename_b:?}"
+        "expected the second volume's mount point to fall back to a \"collision-<suffix>\" name, got {basename_b:?}"
     );
 
     cleanup_b.run();
@@ -1008,10 +1008,10 @@ fn pause(prompt: &str) {
 #[test]
 #[ignore]
 fn enroll_adds_an_independent_second_key_without_corrupting_the_primary() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-enroll");
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-enroll");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
-    let path = dir.join("tomb.img");
+    let path = dir.join("volume.img");
 
     let adapter = ExecAdapter::default();
     let target = CreateTarget::File {
@@ -1019,7 +1019,7 @@ fn enroll_adds_an_independent_second_key_without_corrupting_the_primary() {
         size: 64 * 1024 * 1024,
     };
 
-    println!("Creating tomb — touch the PRIMARY key when prompted.");
+    println!("Creating volume — touch the PRIMARY key when prompted.");
     let result = create::run(
         target,
         Filesystem::Ext4,
@@ -1083,7 +1083,7 @@ fn enroll_adds_an_independent_second_key_without_corrupting_the_primary() {
         "expected the newly enrolled key's \"backup\" label to be present, got:\n{dump_text}"
     );
 
-    // Both keys must independently unlock the tomb (AC #2). `unlock` relies
+    // Both keys must independently unlock the volume (AC #2). `unlock` relies
     // entirely on cryptsetup's own automatic FIDO2 token-matching (no
     // explicit device flag, by design — see the story's "Architect
     // consultation resolved" note) — it tries every enrolled token against
@@ -1125,10 +1125,10 @@ fn enroll_adds_an_independent_second_key_without_corrupting_the_primary() {
 #[test]
 #[ignore]
 fn revoke_removes_a_key_without_affecting_others() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-revoke");
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-revoke");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
-    let path = dir.join("tomb.img");
+    let path = dir.join("volume.img");
 
     let adapter = ExecAdapter::default();
     let target = CreateTarget::File {
@@ -1136,7 +1136,7 @@ fn revoke_removes_a_key_without_affecting_others() {
         size: 64 * 1024 * 1024,
     };
 
-    println!("Creating tomb — touch the PRIMARY key when prompted.");
+    println!("Creating volume — touch the PRIMARY key when prompted.");
     let result = create::run(
         target,
         Filesystem::Ext4,
@@ -1186,7 +1186,7 @@ fn revoke_removes_a_key_without_affecting_others() {
         "expected the surviving keyslot to be labeled \"backup\", got {keyslots:?}"
     );
 
-    // The surviving backup key must still unlock the tomb (AC #1's "other
+    // The surviving backup key must still unlock the volume (AC #1's "other
     // enrolled keys still do").
     println!("Unlocking with the surviving BACKUP key — touch it when prompted.");
     let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
@@ -1196,7 +1196,7 @@ fn revoke_removes_a_key_without_affecting_others() {
 }
 
 /// End-to-end verification that `revoke::run` refuses to remove the last
-/// remaining FIDO2 key rather than locking the tomb out permanently (Story
+/// remaining FIDO2 key rather than locking the volume out permanently (Story
 /// 2.2, AC #2).
 ///
 /// Manual-only (AD-7, `make test-hardware`): requires root and one physical
@@ -1204,10 +1204,10 @@ fn revoke_removes_a_key_without_affecting_others() {
 #[test]
 #[ignore]
 fn revoke_aborts_on_the_last_remaining_key() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-revoke-last-key");
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-revoke-last-key");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
-    let path = dir.join("tomb.img");
+    let path = dir.join("volume.img");
 
     let adapter = ExecAdapter::default();
     let target = CreateTarget::File {
@@ -1215,7 +1215,7 @@ fn revoke_aborts_on_the_last_remaining_key() {
         size: 64 * 1024 * 1024,
     };
 
-    println!("Creating tomb — touch the key when prompted.");
+    println!("Creating volume — touch the key when prompted.");
     let result = create::run(
         target,
         Filesystem::Ext4,
@@ -1240,7 +1240,7 @@ fn revoke_aborts_on_the_last_remaining_key() {
 
     // The volume must remain unlockable (AC #2's explicit "volume remains
     // unlockable") — the refused revoke must not have touched anything.
-    println!("Confirming the tomb is still unlockable — touch the key when prompted.");
+    println!("Confirming the volume is still unlockable — touch the key when prompted.");
     let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("unlock::run failed after a refused revoke — the guard must be a no-op on abort");
     let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
@@ -1248,14 +1248,14 @@ fn revoke_aborts_on_the_last_remaining_key() {
 }
 
 /// End-to-end close verification (Story 3.1, AC #1/#3): create a real
-/// file-backed tomb, unlock it, then close it via this tool's own
+/// file-backed volume, unlock it, then close it via this tool's own
 /// `close::run`, and confirm — independently of this tool's own code — both
 /// halves of AC #3: the mount point is gone (not merely unmounted, so a
 /// repeat unlock reclaims the plain basename rather than falling back to a
 /// collision-suffixed name — the Epic 2 retro action item Task 1's `rmdir`
 /// resolves) and the dm-crypt mapping device node is gone (the volume
 /// requires the FIDO2 key again to unlock). Finishes with a second
-/// `unlock::run` on the same path to prove the tomb is genuinely
+/// `unlock::run` on the same path to prove the volume is genuinely
 /// re-lockable/re-unlockable, not just superficially torn down.
 ///
 /// Manual-only (AD-7, `make test-hardware`): requires root and a real FIDO2
@@ -1263,11 +1263,11 @@ fn revoke_aborts_on_the_last_remaining_key() {
 /// prompted (once for `create`, once for each of the two `unlock::run` calls).
 #[test]
 #[ignore]
-fn close_unmounts_and_relocks_a_file_backed_tomb_allowing_a_clean_repeat_unlock() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-close");
+fn close_unmounts_and_relocks_a_file_backed_volume_allowing_a_clean_repeat_unlock() {
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-close");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
-    let path = dir.join("tomb.img");
+    let path = dir.join("volume.img");
 
     let adapter = ExecAdapter::default();
     let target = CreateTarget::File {
@@ -1275,7 +1275,7 @@ fn close_unmounts_and_relocks_a_file_backed_tomb_allowing_a_clean_repeat_unlock(
         size: 64 * 1024 * 1024,
     };
 
-    println!("Creating tomb — touch the key when prompted.");
+    println!("Creating volume — touch the key when prompted.");
     let result = create::run(
         target,
         Filesystem::Ext4,
@@ -1297,11 +1297,11 @@ fn close_unmounts_and_relocks_a_file_backed_tomb_allowing_a_clean_repeat_unlock(
     assert_actually_mounted(&device_node, &mountpoint);
     assert_eq!(
         mountpoint.file_name().and_then(|n| n.to_str()),
-        Some("tomb"),
+        Some("volume"),
         "the first unlock should claim the plain, unsuffixed basename"
     );
 
-    println!("Closing the tomb via close::run.");
+    println!("Closing the volume via close::run.");
     let result = close::run(&path, false, &|_| {}, &adapter, &adapter, &adapter);
     assert!(result.is_ok(), "close::run failed: {result:?}");
 
@@ -1317,7 +1317,7 @@ fn close_unmounts_and_relocks_a_file_backed_tomb_allowing_a_clean_repeat_unlock(
     );
 
     println!(
-        "Unlocking again with the same key to confirm close left the tomb re-lockable — touch the key when prompted."
+        "Unlocking again with the same key to confirm close left the volume re-lockable — touch the key when prompted."
     );
     let second_mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("second unlock::run failed");
@@ -1340,8 +1340,8 @@ fn close_unmounts_and_relocks_a_file_backed_tomb_allowing_a_clean_repeat_unlock(
 /// prompted (once for `create`, once for `unlock`).
 #[test]
 #[ignore]
-fn close_works_unmodified_against_a_device_backed_tomb() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-close-device");
+fn close_works_unmodified_against_a_device_backed_volume() {
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-close-device");
     let backing_file = dir.join("loop-backing.img");
 
     // Must run before the backing file is deleted/recreated below — see
@@ -1367,7 +1367,7 @@ fn close_works_unmodified_against_a_device_backed_tomb() {
         confirmed: true,
     };
 
-    println!("Creating tomb — touch the key when prompted.");
+    println!("Creating volume — touch the key when prompted.");
     let result = create::run(
         target,
         Filesystem::Ext4,
@@ -1399,7 +1399,7 @@ fn close_works_unmodified_against_a_device_backed_tomb() {
 
     // Identical close::run call as the file-backed scenario above — no
     // different flags or behavior branch based on target type (AC #5).
-    println!("Closing the tomb via close::run.");
+    println!("Closing the volume via close::run.");
     let result = close::run(
         &loop_device.path,
         false,
@@ -1434,7 +1434,7 @@ fn close_works_unmodified_against_a_device_backed_tomb() {
 }
 
 /// End-to-end emergency-slam verification (Story 4.6, AC #1): create a real
-/// file-backed tomb, unlock it, then hold its mountpoint busy with a real
+/// file-backed volume, unlock it, then hold its mountpoint busy with a real
 /// process that ignores SIGTERM/SIGHUP (`exec`'d after `trap '' TERM HUP`,
 /// so only SIGKILL can end it) — forcing `slam::run` through the full
 /// three-round escalation instead of clearing on the first signal.
@@ -1451,11 +1451,11 @@ fn close_works_unmodified_against_a_device_backed_tomb() {
 /// security key present, ready to be touched when prompted.
 #[test]
 #[ignore]
-fn slam_escalates_through_signals_to_close_a_tomb_with_a_process_holding_it_open() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-slam");
+fn slam_escalates_through_signals_to_close_a_volume_with_a_process_holding_it_open() {
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-slam");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
-    let path = dir.join("tomb.img");
+    let path = dir.join("volume.img");
 
     let adapter = ExecAdapter::default();
     let target = CreateTarget::File {
@@ -1463,7 +1463,7 @@ fn slam_escalates_through_signals_to_close_a_tomb_with_a_process_holding_it_open
         size: 64 * 1024 * 1024,
     };
 
-    println!("Creating tomb — touch the key when prompted.");
+    println!("Creating volume — touch the key when prompted.");
     let result = create::run(
         target,
         Filesystem::Ext4,
@@ -1514,13 +1514,13 @@ fn slam_escalates_through_signals_to_close_a_tomb_with_a_process_holding_it_open
     assert_eq!(
         results.len(),
         1,
-        "expected exactly one open tomb, got {results:?}"
+        "expected exactly one open volume, got {results:?}"
     );
     let (mapper, outcome) = &results[0];
     assert_eq!(mapper.source_path, path);
     assert!(
         outcome.is_ok(),
-        "expected slam to close the tomb, got {outcome:?}"
+        "expected slam to close the volume, got {outcome:?}"
     );
 
     // SIGTERM's round and SIGHUP's round each pause `ESCALATION_PAUSE` (1s)
@@ -1559,7 +1559,7 @@ fn slam_escalates_through_signals_to_close_a_tomb_with_a_process_holding_it_open
 }
 
 /// End-to-end resize verification (Story 3.2, AC #1/#4): create a small
-/// file-backed tomb, write data and close it, resize it larger via this
+/// file-backed volume, write data and close it, resize it larger via this
 /// tool's own `resize::run`, then unlock again and confirm the pre-resize
 /// data survived untouched, the previously enrolled key still works, and
 /// the grown capacity is actually usable — a write comfortably larger than
@@ -1572,11 +1572,11 @@ fn slam_escalates_through_signals_to_close_a_tomb_with_a_process_holding_it_open
 /// `luks.open`+`luks.resize`, once each for the two `unlock::run` calls).
 #[test]
 #[ignore]
-fn resize_grows_a_file_backed_tomb_preserving_data_and_keys() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-resize");
+fn resize_grows_a_file_backed_volume_preserving_data_and_keys() {
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-resize");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
-    let path = dir.join("tomb.img");
+    let path = dir.join("volume.img");
 
     let adapter = ExecAdapter::default();
     let initial_size: u64 = 32 * 1024 * 1024;
@@ -1587,7 +1587,7 @@ fn resize_grows_a_file_backed_tomb_preserving_data_and_keys() {
         size: initial_size,
     };
 
-    println!("Creating tomb — touch the key when prompted.");
+    println!("Creating volume — touch the key when prompted.");
     let result = create::run(
         target,
         Filesystem::Ext4,
@@ -1613,11 +1613,11 @@ fn resize_grows_a_file_backed_tomb_preserving_data_and_keys() {
     std::fs::write(mountpoint.join("before-resize.bin"), &before_contents)
         .expect("failed to write pre-resize file");
 
-    println!("Closing the tomb via close::run before resizing.");
+    println!("Closing the volume via close::run before resizing.");
     let result = close::run(&path, false, &|_| {}, &adapter, &adapter, &adapter);
     assert!(result.is_ok(), "close::run failed: {result:?}");
 
-    println!("Resizing the tomb — touch the key when prompted (re-authenticates the grow).");
+    println!("Resizing the volume — touch the key when prompted (re-authenticates the grow).");
     let result = resize::run(
         &path,
         grown_size,
@@ -1662,11 +1662,11 @@ fn resize_grows_a_file_backed_tomb_preserving_data_and_keys() {
     UnlockCleanup::new(mountpoint, name).run();
 }
 
-/// Covers growing a device-backed tomb into headroom left free at create
+/// Covers growing a device-backed volume into headroom left free at create
 /// time (Story 1.6's `size` < device capacity feature, combined with this
 /// story's resize) — the scenario the Dev Notes' "Open Design Question"
 /// two-tier grow-only check exists specifically to support: the raw loop
-/// device's own geometry must never change, but the tomb's provisioned size
+/// device's own geometry must never change, but the volume's provisioned size
 /// must grow from `requested_size` toward (not exceeding) the loop device's
 /// own `loop_capacity`.
 ///
@@ -1676,8 +1676,8 @@ fn resize_grows_a_file_backed_tomb_preserving_data_and_keys() {
 /// `unlock::run`).
 #[test]
 #[ignore]
-fn resize_grows_a_device_backed_tomb_into_its_own_headroom() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-resize-device");
+fn resize_grows_a_device_backed_volume_into_its_own_headroom() {
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-resize-device");
     let backing_file = dir.join("loop-backing.img");
 
     LoopDevice::detach_stale(&backing_file);
@@ -1704,7 +1704,7 @@ fn resize_grows_a_device_backed_tomb_into_its_own_headroom() {
         confirmed: true,
     };
 
-    println!("Creating tomb with headroom — touch the key when prompted.");
+    println!("Creating volume with headroom — touch the key when prompted.");
     let result = create::run(
         target,
         Filesystem::Ext4,
@@ -1776,7 +1776,7 @@ fn resize_grows_a_device_backed_tomb_into_its_own_headroom() {
 }
 
 /// The too-small-partition error path (Story 3.2, AC #2): requesting a
-/// resize larger than a device-backed tomb's raw underlying capacity must
+/// resize larger than a device-backed volume's raw underlying capacity must
 /// be refused clearly, before ever touching the FIDO2 key — this is a
 /// zero-`luks.open` tier-1 rejection, so no touch/PIN prompt should appear
 /// at all for the `resize::run` call itself.
@@ -1787,7 +1787,7 @@ fn resize_grows_a_device_backed_tomb_into_its_own_headroom() {
 #[test]
 #[ignore]
 fn resize_rejects_a_request_exceeding_the_raw_devices_capacity() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-resize-too-small");
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-resize-too-small");
     let backing_file = dir.join("loop-backing.img");
 
     LoopDevice::detach_stale(&backing_file);
@@ -1811,7 +1811,7 @@ fn resize_rejects_a_request_exceeding_the_raw_devices_capacity() {
         confirmed: true,
     };
 
-    println!("Creating tomb — touch the key when prompted.");
+    println!("Creating volume — touch the key when prompted.");
     let result = create::run(
         target,
         Filesystem::Ext4,
@@ -1856,8 +1856,8 @@ fn resize_rejects_a_request_exceeding_the_raw_devices_capacity() {
 }
 
 /// The grow-only rejection path (Story 3.2, AC #3): requesting a size no
-/// larger than the tomb's current size must be refused before touching
-/// anything, leaving the tomb exactly as it was — same backing file size,
+/// larger than the volume's current size must be refused before touching
+/// anything, leaving the volume exactly as it was — same backing file size,
 /// still unlockable with the same key.
 ///
 /// Manual-only (AD-7, `make test-hardware`): requires root and a real FIDO2
@@ -1867,11 +1867,11 @@ fn resize_rejects_a_request_exceeding_the_raw_devices_capacity() {
 /// rejection).
 #[test]
 #[ignore]
-fn resize_rejects_a_shrink_request_and_leaves_the_tomb_untouched() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-resize-grow-only");
+fn resize_rejects_a_shrink_request_and_leaves_the_volume_untouched() {
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-resize-grow-only");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
-    let path = dir.join("tomb.img");
+    let path = dir.join("volume.img");
 
     let adapter = ExecAdapter::default();
     let initial_size: u64 = 32 * 1024 * 1024;
@@ -1880,7 +1880,7 @@ fn resize_rejects_a_shrink_request_and_leaves_the_tomb_untouched() {
         size: initial_size,
     };
 
-    println!("Creating tomb — touch the key when prompted.");
+    println!("Creating volume — touch the key when prompted.");
     let result = create::run(
         target,
         Filesystem::Ext4,
@@ -1921,7 +1921,7 @@ fn resize_rejects_a_shrink_request_and_leaves_the_tomb_untouched() {
     );
 
     println!(
-        "Confirming the tomb is still unlockable with the original key — touch it when prompted."
+        "Confirming the volume is still unlockable with the original key — touch it when prompted."
     );
     let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("unlock::run failed after a refused resize — the rejection must be a no-op");
@@ -1930,7 +1930,7 @@ fn resize_rejects_a_shrink_request_and_leaves_the_tomb_untouched() {
 }
 
 /// Concrete proof of Story 4.1, AC #1's "without performing any unlock/open
-/// call": create a file-backed tomb, then call `info::run` with no preceding
+/// call": create a file-backed volume, then call `info::run` with no preceding
 /// `unlock::run`/mount anywhere in the test. If `info::run` accidentally
 /// required an open mapping, this would hang waiting for a touch prompt that
 /// never comes, or fail outright since nothing was ever mounted.
@@ -1941,10 +1941,10 @@ fn resize_rejects_a_shrink_request_and_leaves_the_tomb_untouched() {
 #[test]
 #[ignore]
 fn info_lists_enrolled_keys_without_unlocking() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-info");
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-info");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
-    let path = dir.join("tomb.img");
+    let path = dir.join("volume.img");
 
     let adapter = ExecAdapter::default();
     let target = CreateTarget::File {
@@ -1952,7 +1952,7 @@ fn info_lists_enrolled_keys_without_unlocking() {
         size: 64 * 1024 * 1024,
     };
 
-    println!("Creating tomb — touch the key when prompted.");
+    println!("Creating volume — touch the key when prompted.");
     let result = create::run(
         target,
         Filesystem::Ext4,
@@ -1990,8 +1990,8 @@ fn info_lists_enrolled_keys_without_unlocking() {
 /// own enrollment.
 #[test]
 #[ignore]
-fn info_works_unmodified_against_a_device_backed_tomb() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-info-device");
+fn info_works_unmodified_against_a_device_backed_volume() {
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-info-device");
     let backing_file = dir.join("loop-backing.img");
 
     // Must run before the backing file is deleted/recreated below — see
@@ -2017,7 +2017,7 @@ fn info_works_unmodified_against_a_device_backed_tomb() {
         confirmed: true,
     };
 
-    println!("Creating tomb — touch the key when prompted.");
+    println!("Creating volume — touch the key when prompted.");
     let result = create::run(
         target,
         Filesystem::Ext4,
@@ -2120,10 +2120,10 @@ fn dumped_uv_fields_for_label(path: &std::path::Path, key_label: &str) -> (bool,
 #[test]
 #[ignore]
 fn enroll_with_user_verification_on_a_uv_capable_key_disables_client_pin() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-uv-capable");
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-uv-capable");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
-    let path = dir.join("tomb.img");
+    let path = dir.join("volume.img");
 
     let adapter = ExecAdapter::default();
     let target = CreateTarget::File {
@@ -2132,7 +2132,7 @@ fn enroll_with_user_verification_on_a_uv_capable_key_disables_client_pin() {
     };
 
     println!(
-        "Creating tomb with --user-verification — verify on-device (fingerprint) when prompted, \
+        "Creating volume with --user-verification — verify on-device (fingerprint) when prompted, \
          not a typed PIN."
     );
     let result = create::run(
@@ -2162,7 +2162,7 @@ fn enroll_with_user_verification_on_a_uv_capable_key_disables_client_pin() {
          requested, so verification happens on-device (fingerprint) instead of via a typed PIN"
     );
 
-    println!("Confirming the tomb still unlocks — verify on-device (fingerprint) when prompted.");
+    println!("Confirming the volume still unlocks — verify on-device (fingerprint) when prompted.");
     let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("unlock::run failed after UV-required enrollment");
     let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
@@ -2188,10 +2188,10 @@ fn enroll_with_user_verification_on_a_uv_capable_key_disables_client_pin() {
 #[ignore]
 fn enroll_with_user_verification_authenticated_by_an_existing_key_succeeds_and_leaves_it_unchanged()
 {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-uv-mixed-auth");
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-uv-mixed-auth");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
-    let path = dir.join("tomb.img");
+    let path = dir.join("volume.img");
 
     let adapter = ExecAdapter::default();
     let target = CreateTarget::File {
@@ -2199,7 +2199,7 @@ fn enroll_with_user_verification_authenticated_by_an_existing_key_succeeds_and_l
         size: 32 * 1024 * 1024,
     };
 
-    println!("Creating tomb WITHOUT --user-verification — touch the PRIMARY key when prompted.");
+    println!("Creating volume WITHOUT --user-verification — touch the PRIMARY key when prompted.");
     let result = create::run(
         target,
         Filesystem::Ext4,
@@ -2278,7 +2278,7 @@ fn enroll_with_user_verification_authenticated_by_an_existing_key_succeeds_and_l
 /// verification. That silent fallback is exactly the bug the post-review fix
 /// closed (disabling `clientPin` removes the only UV method such a token
 /// has, so `systemd-cryptenroll` has no way left to satisfy "uv" and must
-/// refuse). A clean, explicit failure here — leaving the tomb exactly as it
+/// refuse). A clean, explicit failure here — leaving the volume exactly as it
 /// was before the attempt — is the correct, intended outcome, not a defect.
 ///
 /// Manual-only (AD-7, `make test-hardware`): requires root and a FIDO2
@@ -2289,10 +2289,10 @@ fn enroll_with_user_verification_authenticated_by_an_existing_key_succeeds_and_l
 #[test]
 #[ignore]
 fn enroll_with_user_verification_on_a_non_uv_capable_key_fails_cleanly() {
-    let dir = std::env::temp_dir().join("tomb-fido2-hardware-test-uv-incapable");
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-uv-incapable");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
-    let path = dir.join("tomb.img");
+    let path = dir.join("volume.img");
 
     let adapter = ExecAdapter::default();
     let target = CreateTarget::File {
@@ -2300,7 +2300,7 @@ fn enroll_with_user_verification_on_a_non_uv_capable_key_fails_cleanly() {
         size: 32 * 1024 * 1024,
     };
 
-    println!("Creating tomb WITHOUT --user-verification — touch the key when prompted.");
+    println!("Creating volume WITHOUT --user-verification — touch the key when prompted.");
     let result = create::run(
         target,
         Filesystem::Ext4,
@@ -2333,7 +2333,7 @@ fn enroll_with_user_verification_on_a_non_uv_capable_key_fails_cleanly() {
          test instead"
     );
 
-    // The failed attempt must leave the tomb exactly as it was — no partial
+    // The failed attempt must leave the volume exactly as it was — no partial
     // keyslot, same rollback discipline `enroll_fido2_key`'s own failure path
     // (rolling back a metadata-write failure) already guarantees.
     let keyslots = adapter
@@ -2349,7 +2349,7 @@ fn enroll_with_user_verification_on_a_non_uv_capable_key_fails_cleanly() {
         "the original primary key's label must survive an untouched, got {keyslots:?}"
     );
 
-    println!("Confirming the primary key still unlocks the tomb — touch it when prompted.");
+    println!("Confirming the primary key still unlocks the volume — touch it when prompted.");
     let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("unlock::run with the primary key failed after a rejected UV enrollment");
     let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");

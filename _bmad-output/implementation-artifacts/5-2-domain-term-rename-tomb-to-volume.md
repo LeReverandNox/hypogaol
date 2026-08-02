@@ -54,7 +54,7 @@ so that the domain vocabulary is generic and independent of whatever the product
   - `mapping_name.rs:16`'s nonexistent-path fixture `tomb-fido2-mapping-name-does-not-exist` → `volume-fido2-mapping-name-does-not-exist` (AC #5).
   - `ux.rs:184`'s fixture string `.tomb-fido2-bootstrap-abc123` → `.volume-fido2-bootstrap-abc123`, matching Task 3's `mod.rs` rename exactly (this is a hardcoded mirror of that literal, not derived from it — both must change together or the test that asserts on this string breaks).
 
-- [ ] **Task 5: Rename across `tests/hardware/main.rs`** (AC: #1, #5)
+- [x] **Task 5: Rename across `tests/hardware/main.rs`** (AC: #1, #5)
   - This file is the densest single file (116 "tomb" occurrences at story creation). It is a manual/hardware-gated suite (`make test-hardware`), not run by CI — rename it carefully but note that `cargo build`/`make test` won't catch mistakes here; only a manual `make test-hardware` run will (AC #2).
   - Rename every doc comment, test function name (`create_a_file_backed_tomb_...`, `unlock_mounts_a_file_backed_tomb_...`, etc.), and every fixture literal: temp-dir names (`tomb-fido2-hardware-test*` → `volume-fido2-hardware-test*`), backing-file names (`tomb.img` → `volume.img`), mapper names passed to `cryptsetup open`/`dumpe2fs`/`cryptsetup close` in the printed manual-verification instructions, marker filenames (`tomb-fido2-marker.txt`, `tomb-fido2-write-attempt.txt`) and their file contents (`b"tomb-fido2 hardware test"`), and the `tomb_name` collision-fallback comment (~line 903, matching Task 3's identifier rename).
 
@@ -107,6 +107,7 @@ so that the domain vocabulary is generic and independent of whatever the product
 - Task 2: Case-preserving rename across `src/cli/main.rs` (help/doc text, user-facing strings, `MIN_TOMB_SIZE_BYTES` use-site) and `src/cli/ux.rs` (error/status strings, `SourceEscapesTombRoot` match arm now `SourceEscapesVolumeRoot`, consistent with Task 1). `cargo build` still pending Task 3/4 (`src/adapters/exec/mod.rs`'s `tomb_name` param and `tests/unit/*.rs`'s `MIN_TOMB_SIZE_BYTES` use-sites).
 - Task 3: Renamed whole file except the AC#6 carve-out at line 122 (`tomb_fido2` old crate name doc comment). `create_mount_point`'s `tomb_name` param/locals -> `volume_name`; AC#5 fixture literals at lines 251/2251 renamed; test fn names `..._file_backed_tomb`/`..._device_backed_tomb` -> `..._volume`; the `/home/user/tombs/tomb.img` parser-test fixture at 2307/2311 renamed too since it's plain domain-noun text, not old-product-name branding.
 - Task 4: Renamed domain-noun usages (fn names, comments, assertion strings, plain-domain-noun placeholder paths like `/tmp/tomb`, `/tomb/a.img`) across all 16 `tests/unit/*.rs` files, plus `MIN_TOMB_SIZE_BYTES` use-sites (`create.rs`, `cli.rs`, `progress.rs`) and `SourceEscapesTombRoot` use-sites (`hooks.rs`, `ux.rs`) to match Task 1/3's identifier renames. AC#5's two explicit fixtures (`mapping_name.rs:16`, `ux.rs:184`) renamed. Deliberately left untouched: every other `tomb-fido2`-branded fixture literal (temp-dir names in `enroll/close/create/hooks/unlock/progress.rs`, argv[0] in `cli.rs`) — these are old-product-name references (category 2, Story 5.1's domain, not re-opened by AC#5's closed exception list) not this story's job. `cargo build` and `make test` (174 tests) both pass clean.
+- Task 5: Blanket rename of all 116 `tomb` occurrences in `tests/hardware/main.rs` — unlike `tests/unit/*.rs`, AC#5 explicitly includes "every `tomb-fido2-hardware-test*` literal" here, so no product-name literals were left behind (this file is the exception where old-product-name fixtures ARE this story's job). `cargo build --test hardware` typechecks clean; actual `make test-hardware` run against real hardware still outstanding per AC#2/Task 7 (manual, gated, not run by CI).
 
 ### File List
 
@@ -141,3 +142,4 @@ so that the domain vocabulary is generic and independent of whatever the product
 - tests/unit/fakes.rs
 - tests/unit/keyslot_guard.rs
 - tests/unit/mapping_name.rs
+- tests/hardware/main.rs
