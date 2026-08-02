@@ -229,7 +229,7 @@ fn translates_adapter_failure_sizing_failure() {
 
 // `"umount".contains("mount")` is `true` as a plain substring, so a close
 // failure could silently fall into the unlock-flavored "Your tomb unlocked,
-// but tomb-fido2 couldn't mount its filesystem" message unless it's matched
+// but Hypogaol couldn't mount its filesystem" message unless it's matched
 // ahead of that generic bucket (the "marker bleed" bug class the Epic 2
 // retro flagged).
 #[test]
