@@ -164,28 +164,28 @@ impl Drop for RealFixtureDir {
 }
 
 #[test]
-fn resolve_bind_hook_entry_rejects_dot_dot_escaping_tomb_root() {
-    let tomb_root = RealFixtureDir::create("dot-dot-tomb-root");
+fn resolve_bind_hook_entry_rejects_dot_dot_escaping_volume_root() {
+    let volume_root = RealFixtureDir::create("dot-dot-volume-root");
     let home = RealFixtureDir::create("dot-dot-home");
     home.subdir("dest");
 
-    // ".." off the tomb root resolves to its real parent (the shared temp
-    // dir) — a real, existing path, but outside `tomb_root`.
+    // ".." off the volume root resolves to its real parent (the shared temp
+    // dir) — a real, existing path, but outside `volume_root`.
     let entry = BindHookEntry {
         source_relative: "..".to_string(),
         dest_relative: "dest".to_string(),
     };
     let fs = FakeFilesystemBackend::passing().with_path_exists(true);
 
-    let result = resolve_bind_hook_entry(&entry, &tomb_root.0, &home.0, &fs);
+    let result = resolve_bind_hook_entry(&entry, &volume_root.0, &home.0, &fs);
 
-    assert_eq!(result, Err(BindHookSkipReason::SourceEscapesTombRoot));
+    assert_eq!(result, Err(BindHookSkipReason::SourceEscapesVolumeRoot));
 }
 
 #[test]
 fn resolve_bind_hook_entry_rejects_absolute_path_escaping_home() {
-    let tomb_root = RealFixtureDir::create("abs-path-tomb-root");
-    tomb_root.subdir("source");
+    let volume_root = RealFixtureDir::create("abs-path-volume-root");
+    volume_root.subdir("source");
     let home = RealFixtureDir::create("abs-path-home");
     let outside = RealFixtureDir::create("abs-path-outside");
 
@@ -198,14 +198,14 @@ fn resolve_bind_hook_entry_rejects_absolute_path_escaping_home() {
     };
     let fs = FakeFilesystemBackend::passing().with_path_exists(true);
 
-    let result = resolve_bind_hook_entry(&entry, &tomb_root.0, &home.0, &fs);
+    let result = resolve_bind_hook_entry(&entry, &volume_root.0, &home.0, &fs);
 
     assert_eq!(result, Err(BindHookSkipReason::DestEscapesHome));
 }
 
 #[test]
 fn resolve_bind_hook_entry_rejects_missing_source() {
-    let tomb_root = RealFixtureDir::create("missing-source-tomb-root");
+    let volume_root = RealFixtureDir::create("missing-source-volume-root");
     let home = RealFixtureDir::create("missing-source-home");
     home.subdir("dest");
 
@@ -216,15 +216,15 @@ fn resolve_bind_hook_entry_rejects_missing_source() {
     // Source check (first) reports missing — dest is never reached.
     let fs = FakeFilesystemBackend::passing().with_path_exists_sequence(vec![false]);
 
-    let result = resolve_bind_hook_entry(&entry, &tomb_root.0, &home.0, &fs);
+    let result = resolve_bind_hook_entry(&entry, &volume_root.0, &home.0, &fs);
 
     assert_eq!(result, Err(BindHookSkipReason::SourceMissing));
 }
 
 #[test]
 fn resolve_bind_hook_entry_rejects_missing_dest() {
-    let tomb_root = RealFixtureDir::create("missing-dest-tomb-root");
-    tomb_root.subdir("source");
+    let volume_root = RealFixtureDir::create("missing-dest-volume-root");
+    volume_root.subdir("source");
     let home = RealFixtureDir::create("missing-dest-home");
 
     let entry = BindHookEntry {
@@ -236,7 +236,7 @@ fn resolve_bind_hook_entry_rejects_missing_dest() {
     // doc ("checks `fs.path_exists` on both ... before canonicalizing").
     let fs = FakeFilesystemBackend::passing().with_path_exists_sequence(vec![true, false]);
 
-    let result = resolve_bind_hook_entry(&entry, &tomb_root.0, &home.0, &fs);
+    let result = resolve_bind_hook_entry(&entry, &volume_root.0, &home.0, &fs);
 
     assert_eq!(result, Err(BindHookSkipReason::DestMissing));
 }

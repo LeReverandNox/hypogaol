@@ -371,7 +371,7 @@ pub struct FakeFilesystemBackend {
     // `filesystem_size`'s return value — deliberately a separate field from
     // `device_capacity`, not derived from it: `resize::run`'s tier 2 reads
     // this instead of the mapping's raw size specifically because the two
-    // can differ for a device-backed tomb using Story 1.6 headroom
+    // can differ for a device-backed volume using Story 1.6 headroom
     // (confirmed empirically on real hardware — see `filesystem_size`'s own
     // port doc). Defaults to `device_capacity`'s own value so existing
     // tests that don't care about the distinction are unaffected.
@@ -382,7 +382,7 @@ pub struct FakeFilesystemBackend {
     last_umount: RefCell<Option<MapperHandle>>,
     last_growfs_filesystem: RefCell<Option<Filesystem>>,
     last_mount_read_only: RefCell<Option<bool>>,
-    // Story 4.4 (per-tomb bind-hooks/exec-hooks automation): six new
+    // Story 4.4 (per-volume bind-hooks/exec-hooks automation): six new
     // `FilesystemBackend` methods' fake state.
     hook_file_metadata: Cell<HookFileMeta>,
     invoking_home_dir: PathBuf,

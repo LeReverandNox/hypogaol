@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use hypogaol::domain::progress::{CreateStage, ResizeStage};
 use hypogaol::domain::types::{CreateTarget, Filesystem};
-use hypogaol::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
+use hypogaol::domain::workflows::create::{self, MIN_VOLUME_SIZE_BYTES};
 use hypogaol::domain::workflows::resize;
 use hypogaol::ports::fido2_backend::Fido2DeviceSelection;
 
@@ -43,7 +43,7 @@ fn create_file_backed_fires_all_four_stages_in_real_order() {
     let fixture = RealFixtureFile::create("progress-create-file-backed");
     let target = CreateTarget::File {
         path: fixture.0.clone(),
-        size: MIN_TOMB_SIZE_BYTES,
+        size: MIN_VOLUME_SIZE_BYTES,
     };
 
     let stages: Rc<RefCell<Vec<CreateStage>>> = Rc::new(RefCell::new(Vec::new()));
@@ -76,7 +76,7 @@ fn create_file_backed_fires_all_four_stages_in_real_order() {
 fn create_device_backed_never_fires_allocating_backing_file() {
     let luks = FakeLuksBackend::passing();
     let fido2 = FakeFido2Backend::passing();
-    let fs = FakeFilesystemBackend::passing().with_device_capacity(MIN_TOMB_SIZE_BYTES * 2);
+    let fs = FakeFilesystemBackend::passing().with_device_capacity(MIN_VOLUME_SIZE_BYTES * 2);
 
     let fixture = RealFixtureFile::create("progress-create-device-backed");
     let target = CreateTarget::Device {
@@ -191,7 +191,7 @@ fn create_does_not_fire_creating_filesystem_when_enroll_fails() {
     let fixture = RealFixtureFile::create("progress-create-enroll-failure");
     let target = CreateTarget::File {
         path: fixture.0.clone(),
-        size: MIN_TOMB_SIZE_BYTES,
+        size: MIN_VOLUME_SIZE_BYTES,
     };
 
     let stages: Rc<RefCell<Vec<CreateStage>>> = Rc::new(RefCell::new(Vec::new()));

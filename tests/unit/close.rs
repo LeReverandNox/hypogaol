@@ -27,7 +27,7 @@ impl Drop for RealFixtureFile {
     }
 }
 
-/// A real, temporary directory standing in for the tomb's live mountpoint
+/// A real, temporary directory standing in for the volume's live mountpoint
 /// (returned by `FakeFilesystemBackend::mount_point_of` via
 /// `with_mount_point_of`) — `close::run`'s hooks step reads
 /// `bind-hooks`/`exec-hooks` via a direct `std::fs::read_to_string` call and
@@ -68,7 +68,7 @@ fn happy_path_unmounts_then_closes_using_the_shared_mapping_name() {
 
     assert!(result.is_ok(), "expected Ok, got {result:?}");
     // The hooks step (Story 4.4) always runs first when `skip_hooks` is
-    // false: `mount_point_of` to learn the tomb root, then one `path_exists`
+    // false: `mount_point_of` to learn the volume root, then one `path_exists`
     // check per hooks file (`exec-hooks`, then `bind-hooks`), both absent
     // here.
     assert_eq!(
@@ -173,7 +173,7 @@ fn luks_close_failure_after_a_successful_umount_still_propagates_as_an_error() {
 }
 
 #[test]
-fn close_runs_exec_hooks_with_close_tomb_name_loopback_and_mapper_device_args() {
+fn close_runs_exec_hooks_with_close_volume_name_loopback_and_mapper_device_args() {
     let log = new_call_log();
     let luks = FakeLuksBackend::passing().with_log(log.clone());
     let fido2 = FakeFido2Backend::passing().with_log(log.clone());
@@ -194,7 +194,7 @@ fn close_runs_exec_hooks_with_close_tomb_name_loopback_and_mapper_device_args() 
 
     let expected_name = mapping_name::mapping_name(&fixture.0).unwrap();
     let expected_device_node = format!("/dev/mapper/{expected_name}");
-    let expected_tomb_name = fixture
+    let expected_volume_name = fixture
         .0
         .file_stem()
         .unwrap()
@@ -208,7 +208,7 @@ fn close_runs_exec_hooks_with_close_tomb_name_loopback_and_mapper_device_args() 
         vec![
             "close",
             &mountpoint.0.to_string_lossy(),
-            &expected_tomb_name,
+            &expected_volume_name,
             &fixture.0.to_string_lossy(),
             &expected_device_node,
         ]

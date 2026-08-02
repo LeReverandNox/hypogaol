@@ -4,7 +4,7 @@ use clap::Parser;
 use hypogaol::cli::main::{
     confirms_revoke, confirms_wipe, parse_size, unlock_intro_message, unlock_success_message, Cli,
 };
-use hypogaol::domain::workflows::create::MIN_TOMB_SIZE_BYTES;
+use hypogaol::domain::workflows::create::MIN_VOLUME_SIZE_BYTES;
 
 #[test]
 fn rejects_empty_input() {
@@ -16,14 +16,14 @@ fn rejects_empty_input() {
 fn rejects_sizes_below_the_minimum() {
     assert!(parse_size("0").is_err());
     assert!(parse_size("1024").is_err());
-    assert!(parse_size(&(MIN_TOMB_SIZE_BYTES - 1).to_string()).is_err());
+    assert!(parse_size(&(MIN_VOLUME_SIZE_BYTES - 1).to_string()).is_err());
 }
 
 #[test]
 fn accepts_the_minimum_size_exactly() {
     assert_eq!(
-        parse_size(&MIN_TOMB_SIZE_BYTES.to_string()),
-        Ok(MIN_TOMB_SIZE_BYTES)
+        parse_size(&MIN_VOLUME_SIZE_BYTES.to_string()),
+        Ok(MIN_VOLUME_SIZE_BYTES)
     );
 }
 
@@ -189,7 +189,7 @@ fn enroll_rejects_fido2_device_flag_given_without_its_unlock_pair() {
     let result = Cli::try_parse_from([
         "tomb-fido2",
         "enroll",
-        "/tmp/some-tomb",
+        "/tmp/some-volume",
         "--label",
         "backup",
         "--fido2-device",
@@ -206,7 +206,7 @@ fn enroll_rejects_unlock_fido2_device_flag_given_without_its_pair() {
     let result = Cli::try_parse_from([
         "tomb-fido2",
         "enroll",
-        "/tmp/some-tomb",
+        "/tmp/some-volume",
         "--label",
         "backup",
         "--unlock-fido2-device",
@@ -223,7 +223,7 @@ fn enroll_accepts_both_explicit_device_flags_together() {
     let result = Cli::try_parse_from([
         "tomb-fido2",
         "enroll",
-        "/tmp/some-tomb",
+        "/tmp/some-volume",
         "--label",
         "backup",
         "--fido2-device",

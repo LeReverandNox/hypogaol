@@ -48,7 +48,7 @@ so that the domain vocabulary is generic and independent of whatever the product
   - Test function names containing `_tomb` (e.g. `cryptsetup_status_field_prefers_loop_over_device_for_file_backed_tomb`, `..._device_backed_tomb`) → rename the `_tomb` suffix to `_volume`.
   - **Leave untouched:** line ~122's doc comment mentioning the old crate name `` `tomb_fido2` `` (AC #6 — a product-name reference already resolved/carved-out by Story 5.1, not this story's domain-noun target).
 
-- [ ] **Task 4: Rename across `tests/unit/*.rs`** (AC: #1, #5)
+- [x] **Task 4: Rename across `tests/unit/*.rs`** (AC: #1, #5)
   - Files (grep count of "tomb" at story creation, re-verify before editing): `cli.rs`(23), `ux.rs`(23), `create.rs`(19), `hooks.rs`(15), `close_all.rs`(8), `resize.rs`(7), `close.rs`(7), `revoke.rs`(6), `unlock.rs`(6), `progress.rs`(6), `slam.rs`(5), `info.rs`(4), `enroll.rs`(2), `fakes.rs`(2), `keyslot_guard.rs`(3), `mapping_name.rs`(1).
   - Rename every test function name's `_tomb`/`tomb_` segment to `_volume`/`volume_`, every comment, every assertion string, and every `MIN_TOMB_SIZE_BYTES` reference (`create.rs`, `cli.rs`, `progress.rs` — must land in the same pass as Task 1's const rename).
   - `mapping_name.rs:16`'s nonexistent-path fixture `tomb-fido2-mapping-name-does-not-exist` → `volume-fido2-mapping-name-does-not-exist` (AC #5).
@@ -106,6 +106,7 @@ so that the domain vocabulary is generic and independent of whatever the product
 - Task 1: Case-preserving `tomb`/`Tomb`/`TOMB` -> `volume`/`Volume`/`VOLUME` rename across `src/domain/` and `src/ports/`. Includes `MIN_TOMB_SIZE_BYTES` -> `MIN_VOLUME_SIZE_BYTES` (consumers in `src/cli/main.rs`, `src/cli/ux.rs` comment, and `tests/unit/{create,cli,progress}.rs` intentionally left for Task 2/4 in the same build-passing pass) and `hooks.rs`'s `tomb_root`/`canonical_tomb_root`/`SourceEscapesTombRoot` -> `volume_root`/`canonical_volume_root`/`SourceEscapesVolumeRoot`. `cargo build` will not pass until Task 2/4 land (expected, cross-file rename).
 - Task 2: Case-preserving rename across `src/cli/main.rs` (help/doc text, user-facing strings, `MIN_TOMB_SIZE_BYTES` use-site) and `src/cli/ux.rs` (error/status strings, `SourceEscapesTombRoot` match arm now `SourceEscapesVolumeRoot`, consistent with Task 1). `cargo build` still pending Task 3/4 (`src/adapters/exec/mod.rs`'s `tomb_name` param and `tests/unit/*.rs`'s `MIN_TOMB_SIZE_BYTES` use-sites).
 - Task 3: Renamed whole file except the AC#6 carve-out at line 122 (`tomb_fido2` old crate name doc comment). `create_mount_point`'s `tomb_name` param/locals -> `volume_name`; AC#5 fixture literals at lines 251/2251 renamed; test fn names `..._file_backed_tomb`/`..._device_backed_tomb` -> `..._volume`; the `/home/user/tombs/tomb.img` parser-test fixture at 2307/2311 renamed too since it's plain domain-noun text, not old-product-name branding.
+- Task 4: Renamed domain-noun usages (fn names, comments, assertion strings, plain-domain-noun placeholder paths like `/tmp/tomb`, `/tomb/a.img`) across all 16 `tests/unit/*.rs` files, plus `MIN_TOMB_SIZE_BYTES` use-sites (`create.rs`, `cli.rs`, `progress.rs`) and `SourceEscapesTombRoot` use-sites (`hooks.rs`, `ux.rs`) to match Task 1/3's identifier renames. AC#5's two explicit fixtures (`mapping_name.rs:16`, `ux.rs:184`) renamed. Deliberately left untouched: every other `tomb-fido2`-branded fixture literal (temp-dir names in `enroll/close/create/hooks/unlock/progress.rs`, argv[0] in `cli.rs`) — these are old-product-name references (category 2, Story 5.1's domain, not re-opened by AC#5's closed exception list) not this story's job. `cargo build` and `make test` (174 tests) both pass clean.
 
 ### File List
 
@@ -124,3 +125,19 @@ so that the domain vocabulary is generic and independent of whatever the product
 - src/cli/main.rs
 - src/cli/ux.rs
 - src/adapters/exec/mod.rs
+- tests/unit/cli.rs
+- tests/unit/ux.rs
+- tests/unit/create.rs
+- tests/unit/hooks.rs
+- tests/unit/close_all.rs
+- tests/unit/resize.rs
+- tests/unit/close.rs
+- tests/unit/revoke.rs
+- tests/unit/unlock.rs
+- tests/unit/progress.rs
+- tests/unit/slam.rs
+- tests/unit/info.rs
+- tests/unit/enroll.rs
+- tests/unit/fakes.rs
+- tests/unit/keyslot_guard.rs
+- tests/unit/mapping_name.rs

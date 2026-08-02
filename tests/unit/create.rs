@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use hypogaol::domain::errors::DomainError;
 use hypogaol::domain::types::{CreateTarget, Filesystem};
-use hypogaol::domain::workflows::create::{self, MIN_TOMB_SIZE_BYTES};
+use hypogaol::domain::workflows::create::{self, MIN_VOLUME_SIZE_BYTES};
 use hypogaol::ports::fido2_backend::Fido2DeviceSelection;
 
 use crate::fakes::{
@@ -42,7 +42,7 @@ fn refuses_before_touching_anything_if_destination_already_exists() {
 
     let target = CreateTarget::File {
         path: PathBuf::from("/tmp/already-there"),
-        size: MIN_TOMB_SIZE_BYTES,
+        size: MIN_VOLUME_SIZE_BYTES,
     };
 
     let result = create::run(
@@ -77,7 +77,7 @@ fn refuses_a_file_backed_size_below_the_minimum_before_touching_any_port() {
 
     let target = CreateTarget::File {
         path: PathBuf::from("/tmp/way-too-small"),
-        size: MIN_TOMB_SIZE_BYTES - 1,
+        size: MIN_VOLUME_SIZE_BYTES - 1,
     };
 
     let result = create::run(
@@ -94,7 +94,7 @@ fn refuses_a_file_backed_size_below_the_minimum_before_touching_any_port() {
     match result {
         Err(DomainError::DeviceTooSmall { path, size }) => {
             assert_eq!(path, PathBuf::from("/tmp/way-too-small"));
-            assert_eq!(size, MIN_TOMB_SIZE_BYTES - 1);
+            assert_eq!(size, MIN_VOLUME_SIZE_BYTES - 1);
         }
         other => panic!("expected DomainError::DeviceTooSmall, got {other:?}"),
     }
@@ -115,7 +115,7 @@ fn happy_path_runs_every_port_call_once_in_order() {
     let fixture = RealFixtureFile::create("happy-path");
     let target = CreateTarget::File {
         path: fixture.0.clone(),
-        size: MIN_TOMB_SIZE_BYTES,
+        size: MIN_VOLUME_SIZE_BYTES,
     };
 
     let result = create::run(
@@ -160,7 +160,7 @@ fn create_with_user_verification_true_threads_it_to_bootstrap_enrollment() {
     let fixture = RealFixtureFile::create("user-verification-true");
     let target = CreateTarget::File {
         path: fixture.0.clone(),
-        size: MIN_TOMB_SIZE_BYTES,
+        size: MIN_VOLUME_SIZE_BYTES,
     };
 
     let result = create::run(
@@ -182,7 +182,7 @@ fn create_with_user_verification_true_threads_it_to_bootstrap_enrollment() {
 fn create_device_with_user_verification_true_threads_it_to_bootstrap_enrollment() {
     let luks = FakeLuksBackend::passing();
     let fido2 = FakeFido2Backend::passing();
-    let fs = FakeFilesystemBackend::passing().with_device_capacity(MIN_TOMB_SIZE_BYTES * 2);
+    let fs = FakeFilesystemBackend::passing().with_device_capacity(MIN_VOLUME_SIZE_BYTES * 2);
 
     let fixture = RealFixtureFile::create("device-user-verification-true");
     let target = CreateTarget::Device {
@@ -218,7 +218,7 @@ fn enroll_failure_closes_the_mapping_and_removes_the_backing_file() {
     let fixture = RealFixtureFile::create("enroll-failure");
     let target = CreateTarget::File {
         path: fixture.0.clone(),
-        size: MIN_TOMB_SIZE_BYTES,
+        size: MIN_VOLUME_SIZE_BYTES,
     };
 
     let result = create::run(
@@ -264,7 +264,7 @@ fn mkfs_failure_closes_the_mapping_and_removes_the_backing_file() {
     let fixture = RealFixtureFile::create("mkfs-failure");
     let target = CreateTarget::File {
         path: fixture.0.clone(),
-        size: MIN_TOMB_SIZE_BYTES,
+        size: MIN_VOLUME_SIZE_BYTES,
     };
 
     let result = create::run(
@@ -305,7 +305,7 @@ fn bootstrap_format_and_open_failure_removes_the_backing_file_without_closing_a_
     let fixture = RealFixtureFile::create("bootstrap-failure");
     let target = CreateTarget::File {
         path: fixture.0.clone(),
-        size: MIN_TOMB_SIZE_BYTES,
+        size: MIN_VOLUME_SIZE_BYTES,
     };
 
     let result = create::run(
@@ -342,7 +342,7 @@ fn device_happy_path_with_no_size_given_uses_the_full_capacity() {
     let fido2 = FakeFido2Backend::passing().with_log(log.clone());
     let fs = FakeFilesystemBackend::passing()
         .with_log(log.clone())
-        .with_device_capacity(MIN_TOMB_SIZE_BYTES * 2);
+        .with_device_capacity(MIN_VOLUME_SIZE_BYTES * 2);
 
     let fixture = RealFixtureFile::create("device-happy-path-no-size");
     let target = CreateTarget::Device {
@@ -363,7 +363,7 @@ fn device_happy_path_with_no_size_given_uses_the_full_capacity() {
     );
 
     assert!(result.is_ok(), "expected Ok(()), got {result:?}");
-    assert_eq!(luks.last_bootstrap_size(), Some(MIN_TOMB_SIZE_BYTES * 2));
+    assert_eq!(luks.last_bootstrap_size(), Some(MIN_VOLUME_SIZE_BYTES * 2));
     assert_eq!(
         *log.borrow(),
         vec![
@@ -386,12 +386,12 @@ fn device_happy_path_with_a_size_smaller_than_capacity_uses_the_requested_size()
     let fido2 = FakeFido2Backend::passing().with_log(log.clone());
     let fs = FakeFilesystemBackend::passing()
         .with_log(log.clone())
-        .with_device_capacity(MIN_TOMB_SIZE_BYTES * 2);
+        .with_device_capacity(MIN_VOLUME_SIZE_BYTES * 2);
 
     let fixture = RealFixtureFile::create("device-happy-path-smaller-size");
     let target = CreateTarget::Device {
         path: fixture.0.clone(),
-        size: Some(MIN_TOMB_SIZE_BYTES),
+        size: Some(MIN_VOLUME_SIZE_BYTES),
         confirmed: true,
     };
 
@@ -409,7 +409,7 @@ fn device_happy_path_with_a_size_smaller_than_capacity_uses_the_requested_size()
     assert!(result.is_ok(), "expected Ok(()), got {result:?}");
     // The requested (smaller) size must reach bootstrap_format_and_open
     // unchanged, not the full capacity (AC #2).
-    assert_eq!(luks.last_bootstrap_size(), Some(MIN_TOMB_SIZE_BYTES));
+    assert_eq!(luks.last_bootstrap_size(), Some(MIN_VOLUME_SIZE_BYTES));
     assert_eq!(
         *log.borrow(),
         vec![
@@ -432,7 +432,7 @@ fn device_with_no_size_given_and_capacity_below_the_minimum_refuses_before_any_m
     let fido2 = FakeFido2Backend::passing();
     let fs = FakeFilesystemBackend::passing()
         .with_log(log.clone())
-        .with_device_capacity(MIN_TOMB_SIZE_BYTES - 1);
+        .with_device_capacity(MIN_VOLUME_SIZE_BYTES - 1);
 
     let fixture = RealFixtureFile::create("device-capacity-below-minimum");
     let target = CreateTarget::Device {
@@ -455,7 +455,7 @@ fn device_with_no_size_given_and_capacity_below_the_minimum_refuses_before_any_m
     match result {
         Err(DomainError::DeviceTooSmall { path, size }) => {
             assert_eq!(path, fixture.0);
-            assert_eq!(size, MIN_TOMB_SIZE_BYTES - 1);
+            assert_eq!(size, MIN_VOLUME_SIZE_BYTES - 1);
         }
         other => panic!("expected DomainError::DeviceTooSmall, got {other:?}"),
     }
@@ -603,7 +603,7 @@ fn device_branch_failure_closes_the_mapping_without_removing_any_backing_file() 
         .with_failure_at("enroll_fido2_key");
     let fs = FakeFilesystemBackend::passing()
         .with_log(log.clone())
-        .with_device_capacity(MIN_TOMB_SIZE_BYTES);
+        .with_device_capacity(MIN_VOLUME_SIZE_BYTES);
 
     let fixture = RealFixtureFile::create("device-failure-path");
     let target = CreateTarget::Device {

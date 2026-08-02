@@ -14,7 +14,7 @@ fn preflight_failure_short_circuits_before_any_port_call() {
         FakeFido2Backend::failing(&["fido2-token binary not found on PATH"]).with_log(log.clone());
     let fs = FakeFilesystemBackend::passing().with_log(log.clone());
 
-    let result = info::run(Path::new("/tmp/tomb"), &luks, &fido2, &fs);
+    let result = info::run(Path::new("/tmp/volume"), &luks, &fido2, &fs);
 
     match result {
         Err(DomainError::PreflightFailed(missing)) => {
@@ -51,7 +51,7 @@ fn happy_path_returns_every_enrolled_keyslots_label() {
     let fido2 = FakeFido2Backend::passing();
     let fs = FakeFilesystemBackend::passing();
 
-    let result = info::run(Path::new("/tmp/tomb"), &luks, &fido2, &fs);
+    let result = info::run(Path::new("/tmp/volume"), &luks, &fido2, &fs);
 
     match result {
         Ok(returned) => assert_eq!(returned, keyslots),
@@ -61,12 +61,12 @@ fn happy_path_returns_every_enrolled_keyslots_label() {
 }
 
 #[test]
-fn empty_tomb_returns_an_empty_list() {
+fn empty_volume_returns_an_empty_list() {
     let luks = FakeLuksBackend::passing().with_keyslots(vec![]);
     let fido2 = FakeFido2Backend::passing();
     let fs = FakeFilesystemBackend::passing();
 
-    let result = info::run(Path::new("/tmp/tomb"), &luks, &fido2, &fs);
+    let result = info::run(Path::new("/tmp/volume"), &luks, &fido2, &fs);
 
     match result {
         Ok(returned) => assert_eq!(returned, Vec::<KeyslotInfo>::new()),

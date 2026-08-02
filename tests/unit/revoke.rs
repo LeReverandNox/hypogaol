@@ -14,7 +14,7 @@ fn preflight_failure_short_circuits_before_any_port_call() {
         FakeFido2Backend::failing(&["fido2-token binary not found on PATH"]).with_log(log.clone());
     let fs = FakeFilesystemBackend::passing().with_log(log.clone());
 
-    let result = revoke::run(Path::new("/tmp/tomb"), "primary", &luks, &fido2, &fs);
+    let result = revoke::run(Path::new("/tmp/volume"), "primary", &luks, &fido2, &fs);
 
     match result {
         Err(DomainError::PreflightFailed(missing)) => {
@@ -50,7 +50,7 @@ fn happy_path_removes_the_keyslot_matching_the_given_label() {
     let fido2 = FakeFido2Backend::passing();
     let fs = FakeFilesystemBackend::passing();
 
-    let result = revoke::run(Path::new("/tmp/tomb"), "backup", &luks, &fido2, &fs);
+    let result = revoke::run(Path::new("/tmp/volume"), "backup", &luks, &fido2, &fs);
 
     assert!(result.is_ok(), "expected Ok(()), got {result:?}");
     assert_eq!(luks.last_removed_keyslot(), Some(KeyslotRef(1)));
@@ -79,7 +79,7 @@ fn targeting_an_unenrolled_label_returns_key_not_found_and_never_removes_anythin
     let fido2 = FakeFido2Backend::passing();
     let fs = FakeFilesystemBackend::passing();
 
-    let result = revoke::run(Path::new("/tmp/tomb"), "nonexistent", &luks, &fido2, &fs);
+    let result = revoke::run(Path::new("/tmp/volume"), "nonexistent", &luks, &fido2, &fs);
 
     match result {
         Err(DomainError::KeyNotFound(label)) => assert_eq!(label, "nonexistent"),
@@ -101,7 +101,7 @@ fn revoking_the_sole_remaining_keyslot_returns_last_keyslot_guard() {
     let fido2 = FakeFido2Backend::passing();
     let fs = FakeFilesystemBackend::passing();
 
-    let result = revoke::run(Path::new("/tmp/tomb"), "primary", &luks, &fido2, &fs);
+    let result = revoke::run(Path::new("/tmp/volume"), "primary", &luks, &fido2, &fs);
 
     assert!(matches!(result, Err(DomainError::LastKeyslotGuard)));
     // Same double list_fido2_keyslots call as the happy path (AC #3) —
@@ -146,7 +146,7 @@ fn guard_decision_uses_the_fresh_recount_not_the_earlier_label_resolution_view()
     let fido2 = FakeFido2Backend::passing();
     let fs = FakeFilesystemBackend::passing();
 
-    let result = revoke::run(Path::new("/tmp/tomb"), "primary", &luks, &fido2, &fs);
+    let result = revoke::run(Path::new("/tmp/volume"), "primary", &luks, &fido2, &fs);
 
     assert!(matches!(result, Err(DomainError::LastKeyslotGuard)));
     assert_eq!(
@@ -175,7 +175,7 @@ fn remove_key_failure_propagates_as_adapter_failure_untouched() {
     let fido2 = FakeFido2Backend::passing();
     let fs = FakeFilesystemBackend::passing();
 
-    let result = revoke::run(Path::new("/tmp/tomb"), "primary", &luks, &fido2, &fs);
+    let result = revoke::run(Path::new("/tmp/volume"), "primary", &luks, &fido2, &fs);
 
     match result {
         Err(DomainError::AdapterFailure(msg)) => {

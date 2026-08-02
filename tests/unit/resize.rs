@@ -259,10 +259,10 @@ fn device_backed_too_small_partition_rejection_never_calls_open() {
     );
 }
 
-// Story 1.6's headroom feature means a device-backed tomb's raw capacity can
+// Story 1.6's headroom feature means a device-backed volume's raw capacity can
 // be larger than its actual current provisioned size — tier 1 alone (which
 // only compares against raw capacity) cannot catch a request that's smaller
-// than the tomb's *actual* current filesystem size, so tier 2 (checked after
+// than the volume's *actual* current filesystem size, so tier 2 (checked after
 // `open`, against the filesystem's own superblock — never the raw LUKS
 // mapping, which always reports the full backing storage on reopen) must
 // still reject it, and must close the mapping it just opened rather than
@@ -276,12 +276,12 @@ fn device_backed_headroom_shrink_is_caught_by_tier_two_and_closes_the_mapping() 
         .with_log(log.clone())
         .with_is_block_device(true)
         .with_device_capacity(1024 * 1024 * 1024) // raw device is huge...
-        .with_filesystem_size(4096); // ...but this tomb's filesystem only uses 4096 bytes of it.
+        .with_filesystem_size(4096); // ...but this volume's filesystem only uses 4096 bytes of it.
 
     let fixture = RealFixtureFile::create("resize-headroom-shrink", &[0u8; 4096]);
 
     // Passes tier 1 (well within raw capacity) but does not actually grow
-    // the tomb's live current filesystem size of 4096.
+    // the volume's live current filesystem size of 4096.
     let result = resize::run(&fixture.0, 4096, &no_progress, &luks, &fido2, &fs);
 
     let Err(DomainError::ResizeMustGrow {
@@ -342,7 +342,7 @@ fn mid_flow_failure_after_a_successful_resize_still_closes_the_mapping() {
 
 // Regression test for a review finding (2026-07-26): a `luks.close` failure
 // *after* a fully successful grow must be distinguishable from a plain
-// resize failure, so the user isn't told resize failed when their tomb's
+// resize failure, so the user isn't told resize failed when their volume's
 // capacity was actually already safely increased.
 #[test]
 fn close_failure_after_a_successful_grow_reports_the_grow_succeeded() {
@@ -363,7 +363,7 @@ fn close_failure_after_a_successful_grow_reports_the_grow_succeeded() {
         panic!("expected AdapterFailure, got {result:?}");
     };
     assert!(
-        message.contains("tomb grown to 8192 bytes"),
+        message.contains("volume grown to 8192 bytes"),
         "message should acknowledge the grow succeeded: {message:?}"
     );
     assert!(

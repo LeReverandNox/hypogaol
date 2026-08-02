@@ -13,7 +13,7 @@ fn same_path_produces_the_same_name_every_time() {
 
 #[test]
 fn nonexistent_path_returns_an_error_instead_of_silently_falling_back() {
-    let missing = std::env::temp_dir().join("tomb-fido2-mapping-name-does-not-exist");
+    let missing = std::env::temp_dir().join("volume-fido2-mapping-name-does-not-exist");
 
     let result = mapping_name(&missing);
 
