@@ -667,7 +667,9 @@ fn run_resize(path: PathBuf, new_size: u64) {
         std::process::exit(1);
     }
 
-    println!("Growing this volume. Touch your security key now (you may also be asked for its PIN).");
+    println!(
+        "Growing this volume. Touch your security key now (you may also be asked for its PIN)."
+    );
 
     match resize::run(
         &path,

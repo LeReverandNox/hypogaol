@@ -135,8 +135,8 @@ pub fn resolve_bind_hook_entry(
     let canonical_dest =
         std::fs::canonicalize(&dest).map_err(|_| BindHookSkipReason::DestMissing)?;
 
-    let canonical_volume_root =
-        std::fs::canonicalize(volume_root).map_err(|_| BindHookSkipReason::SourceEscapesVolumeRoot)?;
+    let canonical_volume_root = std::fs::canonicalize(volume_root)
+        .map_err(|_| BindHookSkipReason::SourceEscapesVolumeRoot)?;
     let canonical_home_dir =
         std::fs::canonicalize(home_dir).map_err(|_| BindHookSkipReason::DestEscapesHome)?;
 

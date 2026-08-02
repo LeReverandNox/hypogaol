@@ -306,7 +306,8 @@ fn translate_adapter_failure(inner: &str) -> String {
     // their own distinct message rather than reading like a generic close
     // failure (review finding, 2026-07-26).
     if inner.contains("no active mapping") {
-        return "This volume doesn't appear to be unlocked right now — run unlock first.".to_string();
+        return "This volume doesn't appear to be unlocked right now — run unlock first."
+            .to_string();
     }
     if inner.contains("not currently mounted") {
         return "This volume doesn't look like it's currently mounted.".to_string();
