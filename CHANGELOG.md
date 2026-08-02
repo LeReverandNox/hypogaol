@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/LeReverandNox/hypogaol/compare/tomb-fido2-v0.1.0...tomb-fido2-v0.1.1) (2026-08-02)
+
+
+### Bug Fixes
+
+* auto-publish releases instead of leaving a manual draft gate ([56769c3](https://github.com/LeReverandNox/hypogaol/commit/56769c3137433e3b119e77a219266abc350f43ab))
+
 ## 0.1.0 (2026-07-28)
 
 
