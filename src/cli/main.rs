@@ -110,7 +110,7 @@ enum Commands {
         skip_hooks: bool,
     },
 
-    /// Grow an existing volume's volume and filesystem to a larger size
+    /// Grow an existing volume's LUKS2 mapping and filesystem to a larger size
     Resize {
         /// Path to the existing volume's backing file or device
         #[arg(allow_hyphen_values = true)]

@@ -323,7 +323,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // "mount" nor "mkfs" and would otherwise fall all the way through to
     // the unhelpful generic fallback (marker-bleed guard).
     if inner.contains("resize2fs") {
-        return "Hypogaol grew this volume's volume, but couldn't grow its filesystem to match."
+        return "Hypogaol grew this volume's LUKS2 mapping, but couldn't grow its filesystem to match."
             .to_string();
     }
 
@@ -334,7 +334,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // the way through to the unhelpful generic fallback (marker-bleed
     // guard; review finding, 2026-07-26).
     if inner.contains("e2fsck") {
-        return "Hypogaol grew this volume's volume, but couldn't check its filesystem before \
+        return "Hypogaol grew this volume's LUKS2 mapping, but couldn't check its filesystem before \
                 growing it to match."
             .to_string();
     }

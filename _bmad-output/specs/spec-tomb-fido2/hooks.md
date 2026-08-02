@@ -4,7 +4,7 @@ Mechanism detail for bind-hooks and exec-hooks. Adapted from dyne/tomb's hooks m
 
 ## bind-hooks
 
-A file named `bind-hooks` in the tomb's own root: a two-column, whitespace-separated list, one mapping per line — first column a path relative to the tomb root, second column a path relative to `$HOME`.
+A file named `bind-hooks` in the volume's own root: a two-column, whitespace-separated list, one mapping per line — first column a path relative to the volume root, second column a path relative to `$HOME`.
 
 ```
 mail          mail
@@ -12,22 +12,22 @@ mail          mail
 .mozilla      .mozilla
 ```
 
-On `open`, for each line, the tool bind-mounts (`mount -o bind`) the tomb-relative path onto the `$HOME`-relative path.
+On `open`, for each line, the tool bind-mounts (`mount -o bind`) the volume-relative path onto the `$HOME`-relative path.
 
 **Guardrails (stricter than dyne/tomb's stock model):**
 - Both the resolved source and destination paths must exist before mounting; a missing path skips that mapping with a warning, not a hard failure of the whole open.
-- The resolved source path must stay within the tomb root, and the resolved destination path must stay within `$HOME` — an entry using `..` or an absolute path to escape either root is rejected (skipped with a warning), not applied. dyne/tomb itself performs no such containment check.
+- The resolved source path must stay within the volume root, and the resolved destination path must stay within `$HOME` — an entry using `..` or an absolute path to escape either root is rejected (skipped with a warning), not applied. dyne/tomb itself performs no such containment check.
 
 ## exec-hooks
 
-A file named `exec-hooks` in the tomb's own root, run as the invoking user (never with elevated privilege, regardless of what privilege the lifecycle step itself needed):
+A file named `exec-hooks` in the volume's own root, run as the invoking user (never with elevated privilege, regardless of what privilege the lifecycle step itself needed):
 
 - On `open`: invoked with arguments `open <mountpoint>`.
-- On `close`: invoked with arguments `close <mountpoint> <tomb-name> <loopback-device> <mapper-device>`.
+- On `close`: invoked with arguments `close <mountpoint> <volume-name> <loopback-device> <mapper-device>`.
 
 **Guardrails (stricter than dyne/tomb's stock model):**
 - Must be a regular file (not a symlink or other non-regular file) with the executable bit set. dyne/tomb only checks the executable bit, which a symlink also satisfies.
-- Must be owned by the invoking user or by root, and must not be world-writable. dyne/tomb performs no ownership or permission check, so any tomb whose backing file/hooks weren't authored by the current user (inherited, restored from a shared backup, downloaded) would otherwise execute arbitrary code silently on open/close.
+- Must be owned by the invoking user or by root, and must not be world-writable. dyne/tomb performs no ownership or permission check, so any volume whose backing file/hooks weren't authored by the current user (inherited, restored from a shared backup, downloaded) would otherwise execute arbitrary code silently on open/close.
 
 ## Disabling hooks
 

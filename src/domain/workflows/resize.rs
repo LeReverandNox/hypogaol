@@ -13,7 +13,7 @@ use crate::ports::luks_backend::LuksBackend;
 /// for AD-4's uniform three-port preflight gate, same as every sibling
 /// workflow.
 ///
-/// `resize` grows an existing volume's volume and filesystem to `new_size`
+/// `resize` grows an existing volume's LUKS2 mapping and filesystem to `new_size`
 /// (AC #1/#4). Ordering is AD-10-mandated and non-negotiable: file-backed
 /// storage grows first, then the LUKS2 mapping, then the filesystem —
 /// reversing any of these risks growing a filesystem onto space the LUKS
