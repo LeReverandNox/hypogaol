@@ -109,3 +109,8 @@
 ## Deferred from: code review of 5-1-product-identity-rename (2026-08-02)
 
 - Internal test/temp-file fixtures still embed the old product name — not user-facing, out of this story's narrow scope (Cargo/config/flake/README/CHANGELOG/CI); natural pickup for Story 5.2 since it already touches these same files for the `tomb`→`volume` domain-noun rename. [src/adapters/exec/mod.rs:251,2251; tests/hardware/main.rs; tests/unit/*.rs]
+
+## Deferred from: code review of 5-3-top-level-branding-copy (2026-08-03)
+
+- Task 3's tone-boundary grep omits `src/cli/main.rs` (where the real runtime `println!`/`eprintln!` strings live) and its flavor-vocabulary pattern doesn't cover all of brand-identity.md's mascot/palette terms (e.g. "gothic", "warden", "moss", "amber", "keyhole", "tracery", "blackletter") — re-running the check with `main.rs` and the expanded vocabulary included still returns zero matches today, so no live violation; flag for future stories that extend Epic 5's tone-boundary checks. [_bmad-output/implementation-artifacts/5-3-top-level-branding-copy.md, Task 3]
+- No regression test guards the CLI `--help` banner's new description line (AC #2, dev-discretion addition) — a future `Cargo.toml` edit (e.g. someone writing a "real" crate description for publishing) could silently drop the tagline with nothing to catch it. Optional hardening beyond this copy-only story's stated acceptance bar (clean build + test). [Cargo.toml:8]

@@ -102,3 +102,9 @@ claude-sonnet-5
 ## Change Log
 
 - 2026-08-03: Implemented Story 5.3 — added the "Sealed until touched." tagline and a "gaol"/"jail" pronunciation note to `README.md`'s header (AC #1), added the same tagline treatment to the CLI's top-level `--help` banner via `Cargo.toml`'s `description` field (AC #2, dev discretion exercised: implemented), and ran the tone-boundary grep verification confirming no flavor leaked into error/status messages, domain logic, or per-subcommand help text (AC #3). All 4 tasks complete, all 3 ACs satisfied. `cargo build` clean, `make test` 174/174 passed, zero regressions. Status moved to `review`.
+
+### Review Findings
+
+- [x] [Review][Patch] Task 3 Completion Notes misstate the `grep -n "///" src/cli/main.rs` match count (~90 claimed vs. 160 actual) [_bmad-output/implementation-artifacts/5-3-top-level-branding-copy.md:125] — fixed, count corrected to 160
+- [x] [Review][Defer] Task 3's tone-boundary grep omits `src/cli/main.rs` (where the real runtime `println!`/`eprintln!` strings live) and its flavor-vocabulary pattern doesn't cover all of brand-identity.md's mascot/palette terms [_bmad-output/implementation-artifacts/5-3-top-level-branding-copy.md:76] — deferred, pre-existing verification-tooling gap; re-running with main.rs + expanded vocab included still returns zero matches today
+- [x] [Review][Defer] No regression test guards the CLI `--help` banner's new description line (AC #2 change), so a future `Cargo.toml` edit could silently drop it [Cargo.toml:8] — deferred, optional hardening beyond this copy-only story's stated acceptance bar (build+test clean)
