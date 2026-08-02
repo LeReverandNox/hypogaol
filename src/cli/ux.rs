@@ -238,7 +238,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // before that bucket since the wrapped detail still contains
     // "cryptsetup close" (review finding, 2026-07-26).
     if inner.contains("but failed to re-lock afterward") {
-        return "Hypogaol grew this volume successfully, but couldn't re-lock its LUKS2 volume \
+        return "Hypogaol grew this volume successfully, but couldn't re-lock its LUKS2 mapping \
                 afterward. Your data and the new capacity are safe — run `close` to finish, or \
                 try `resize` again."
             .to_string();
@@ -250,7 +250,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // that bucket's touch/PIN-entry framing is meaningless for `close`, which
     // never touches a FIDO2 key (review finding, 2026-07-26).
     if inner.contains("cryptsetup close") {
-        return "Hypogaol couldn't re-lock this volume's LUKS2 volume. Make sure nothing is \
+        return "Hypogaol couldn't re-lock this volume's LUKS2 mapping. Make sure nothing is \
                 still using it, then try again."
             .to_string();
     }
@@ -265,7 +265,7 @@ fn translate_adapter_failure(inner: &str) -> String {
     // timing issue (this call re-authenticates via the FIDO2 token, Task 0's
     // spike finding).
     if inner.contains("cryptsetup resize") {
-        return "Hypogaol couldn't resize this volume's LUKS2 volume — your security key or its \
+        return "Hypogaol couldn't resize this volume's LUKS2 mapping — your security key or its \
                 PIN may not have been accepted in time."
             .to_string();
     }

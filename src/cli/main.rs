@@ -92,7 +92,7 @@ enum Commands {
         label: String,
     },
 
-    /// Unmount an unlocked volume's filesystem and re-lock its LUKS2 volume
+    /// Unmount an unlocked volume's filesystem and re-lock its LUKS2 mapping
     Close {
         /// Path to the existing volume's backing file or device
         #[arg(allow_hyphen_values = true)]
