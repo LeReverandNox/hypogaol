@@ -4,7 +4,7 @@ baseline_commit: 714c282c6597735a5c8ed5c901b4e5481020e35c
 
 # Story 5.2: Domain Term Rename (tomb → volume)
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -73,10 +73,12 @@ so that the domain vocabulary is generic and independent of whatever the product
 
 ### Review Findings
 
-_(chunk 1 of 2 — `src/` only; `tests/`, README.md, hooks.md reviewed in a follow-up pass)_
+**Chunk 1 of 2 — `src/` (Tasks 1-3):**
 
 - [x] [Review][Patch] "volume's LUKS2 volume" stutter left unfixed in 4 spots [src/cli/main.rs:95, src/cli/ux.rs:241, src/cli/ux.rs:253, src/cli/ux.rs:268]
 - [x] [Review][Patch] `cargo fmt --check` fails on 3 files touched by the rename [src/cli/main.rs:667, src/cli/ux.rs:306, src/domain/hooks.rs:135]
+
+**Chunk 2 of 2 — `tests/unit/*.rs` + `tests/hardware/main.rs` (Tasks 4-5):** ✅ Clean review — all layers passed, no findings.
 
 ## Dev Notes
 
