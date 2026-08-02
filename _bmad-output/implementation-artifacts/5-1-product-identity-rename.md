@@ -35,7 +35,7 @@ so that Cargo, the CLI, and the README present one consistent, permanent product
   - Run `cargo build` (or `cargo check`) afterward so `Cargo.lock`'s `tomb-fido2` package entry (~line 265) regenerates to `hypogaol` automatically — do not hand-edit `Cargo.lock`.
   - Do **not** touch `[package.metadata.dist]` (`dist = true`), `[workspace.metadata.dist]`, or `[profile.dist]` — none of them contain the product name; they key off the package name that just changed above, so they need no edits of their own.
 
-- [ ] **Task 3: Update `_bmad/bmm/config.yaml`** (AC: #1)
+- [x] **Task 3: Update `_bmad/bmm/config.yaml`** (AC: #1)
   - `project_name: tomb-fido2` → `project_name: hypogaol`. Nothing else in this file references the product name.
 
 - [ ] **Task 4: Update `flake.nix`** (AC: #1)
@@ -102,11 +102,13 @@ Claude Sonnet 5 (claude-sonnet-5)
 ### Completion Notes List
 
 - Task 2: Renamed Cargo package (`name`, `repository`) to `hypogaol`; `cargo build` regenerated `Cargo.lock`'s package entry automatically. Discovered a consequence the story's Dev Notes didn't anticipate: since no `[lib]` section overrides it, the library crate identifier also derives from the package name, so every `use tomb_fido2::...` in `src/main.rs` and `tests/**/*.rs` broke at compile time. Fixed by mechanically renaming `tomb_fido2::` → `hypogaol::` at each import site (pure identifier rename, zero behavioral change) — required for Task 2's own `cargo build` step and Task 9's regression gate to pass. Left the one prose doc-comment mention of `` `tomb_fido2` `` in `src/adapters/exec/mod.rs:122` untouched (not a CLI-name/banner literal, so not an AD-13 violation per Task 7's carve-out). `make test` (174 tests) passes unchanged.
+- Task 3: `_bmad/bmm/config.yaml`'s `project_name` updated to `hypogaol`.
 
 ### File List
 
 - `Cargo.toml`
 - `Cargo.lock`
+- `_bmad/bmm/config.yaml`
 - `src/main.rs`
 - `tests/hardware/main.rs`
 - `tests/unit/cli.rs`
