@@ -2,7 +2,7 @@
 
 > Sealed until touched.
 
-*("Gaol" is pronounced like "jail" — archaic spelling, not a typo.)*
+*(The "gaol" in Hypogaol is pronounced like "jail" — archaic spelling, not a typo.)*
 
 A FIDO2-native reimagining of [dyne/tomb](https://github.com/dyne/tomb)'s core insight: a thin, disposable wrapper over standard, boring primitives, built to survive its own death.
 
