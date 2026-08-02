@@ -22,11 +22,11 @@ so that the brand identity lands without any flavor leaking into functional outp
 
 ## Tasks / Subtasks
 
-- [ ] **Task 0: Read every file this story touches before changing anything** (AC: #1, #2, #3)
+- [x] **Task 0: Read every file this story touches before changing anything** (AC: #1, #2, #3)
   - Read in full: `README.md` (lines 1-10 at minimum — the header region), `src/cli/main.rs` (the `Cli` struct and its `#[command(...)]` attribute, lines ~23-29), `Cargo.toml`'s `[package]` table, and `_bmad-output/brainstorming/brainstorm-project-naming-2026-08-02/brand-identity.md` §1/§6/§7 for the exact required tagline/pronunciation wording and tone rule.
   - Re-grep `README.md`'s first 10 lines before editing — Stories 5.1 and 5.2 both touched this file's header/body already (5.1: title + product-name self-references; 5.2: domain-noun rename), so confirm the exact current line numbers below haven't drifted.
 
-- [ ] **Task 1: Add tagline + pronunciation note to `README.md`'s header** (AC: #1)
+- [x] **Task 1: Add tagline + pronunciation note to `README.md`'s header** (AC: #1)
   - Confirmed current state at story creation: line 1 is `# Hypogaol`, line 2 is blank, line 3 begins the descriptive paragraph ("A FIDO2-native reimagining of [dyne/tomb]..."). Insert the tagline and pronunciation note **between** line 1 and the existing line 3 paragraph — do not touch line 3 onward.
   - Tagline text is fixed and must appear verbatim: **"Sealed until touched."** ([Source: brand-identity.md#6. Tagline]) — do not paraphrase or rephrase it.
   - Pronunciation note must convey, in your own concise phrasing: "gaol" is pronounced like "jail" — archaic spelling, not a typo ([Source: brand-identity.md#1. Name]). Keep it to one short line; this is the one place top-level flavor/name-explanation is allowed, but keep the note itself plain and informative, not cute.
