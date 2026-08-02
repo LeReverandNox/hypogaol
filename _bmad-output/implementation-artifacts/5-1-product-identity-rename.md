@@ -4,7 +4,7 @@ baseline_commit: 0ce7593d9c675fae7350c3035a438f132b23add2
 
 # Story 5.1: Product Identity Rename
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -65,7 +65,7 @@ so that Cargo, the CLI, and the README present one consistent, permanent product
 - [x] **Task 8: Verify CI/release config for hardcoded repo/name references** (AC: #3)
   - Checked during story creation: `.github/workflows/ci.yml`, `.github/workflows/release.yml` (cargo-dist generated), `.github/workflows/release-please.yml`, `release-please-config.json`, and `.release-please-manifest.json` contain **no** hardcoded `tomb-fido2` or `LeReverandNox` literals — they all derive repo/package identity from `Cargo.toml` or GitHub Actions' own context (`${{ github.repository }}`, etc.) at run time. Re-verify this after Task 2's `Cargo.toml` rename (grep the same file set for `tomb-fido2`/`tomb_fido2`); if still clean, this AC requires no edits — do not invent changes to satisfy it.
 
-- [ ] **Task 9: Full regression pass** (AC: #1, #2, #3, #4)
+- [x] **Task 9: Full regression pass** (AC: #1, #2, #3, #4)
   - `cargo build` succeeds with the new package name.
   - `make test` (mocked unit suite, AD-7) passes unchanged — this story is a pure naming/config change with zero behavioral diff, so a clean `make test` run is the acceptance bar per the sprint change proposal, not a manual audit.
   - `cargo run -- --help` shows `hypogaol` in the banner (Task 7).
@@ -108,6 +108,7 @@ Claude Sonnet 5 (claude-sonnet-5)
 - Task 6: Verified `CHANGELOG.md`'s header (`# Changelog`) contains no product-name literal — no edit needed. Historical entries (release-please-generated, tied to real `LeReverandNox/tomb-fido2` PR/commit URLs) left untouched per Dev Notes' historical-docs-stay-frozen guidance.
 - Task 7: `cargo run -- --help` now prints `Usage: hypogaol <COMMAND>` with zero `src/` changes — AD-13's placeholder-name isolation held. Confirmed no hardcoded `"tomb-fido2"`/`"tomb_fido2"` string literals anywhere in `src/`.
 - Task 8: Re-grepped `.github/workflows/{ci,release,release-please}.yml`, `release-please-config.json`, `.release-please-manifest.json` post-rename for `tomb-fido2`/`tomb_fido2`/`LeReverandNox` literals — zero matches, confirming they all derive repo/package identity from `Cargo.toml` or GitHub Actions context at run time. No edits needed.
+- Task 9: Full regression pass — `cargo build` succeeds, `make test` (174 tests) passes, `cargo run -- --help` shows `hypogaol`, `grep -c "tomb-fido2" README.md` returns 0, `grep -c "tomb" README.md` still returns 18 (expected domain-noun/hooks/dyne-tomb references, correctly left for Story 5.2). All 4 ACs satisfied.
 
 ### File List
 
@@ -136,3 +137,7 @@ Claude Sonnet 5 (claude-sonnet-5)
 - `tests/unit/unlock.rs`
 - `tests/unit/ux.rs`
 - `tests/unit/workflows.rs`
+
+## Change Log
+
+- 2026-08-02: Implemented Story 5.1 — product identity renamed to Hypogaol across `Cargo.toml`/`Cargo.lock`, `_bmad/bmm/config.yaml`, `flake.nix`, and `README.md`'s title/disclaimer/body self-references. AD-13's CLI-banner guarantee and CI/release config's repo-agnostic references both verified to need zero code changes. All 9 tasks complete, all 4 ACs satisfied, 174 unit tests passing. Status moved to `review`.
