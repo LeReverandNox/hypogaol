@@ -659,6 +659,10 @@ So that Cargo, the CLI, and the README present one consistent, permanent product
 **When** Story 5.1 lands
 **Then** `Cargo.toml`'s `name` and `repository` fields, `_bmad/bmm/config.yaml`'s `project_name`, `README.md`'s title/badges, and `CHANGELOG.md`'s header all read `Hypogaol`/`hypogaol`, and `flake.nix` references are updated to match
 
+**Given** `README.md`'s body prose refers to the product by name (e.g. "tomb-fido2 exists to do one job well...", the "Break-glass recovery (no tomb-fido2 required)" heading)
+**When** Story 5.1 lands
+**Then** every such self-reference reads `Hypogaol` instead — but references to the *domain concept* (the encrypted container, e.g. "close every tomb-fido2-managed tomb") keep the word "tomb" untouched (that's Story 5.2's job), and references to the unrelated `dyne/tomb` project (e.g. "a capability the original Tomb never had") are left alone
+
 **Given** AD-13's placeholder-name isolation (CLI/binary name sourced from exactly one place — the Cargo package name)
 **When** the package name changes
 **Then** the compiled binary and `--help` banner automatically reflect the new name with no additional literal to update, confirming AD-13's guarantee held
