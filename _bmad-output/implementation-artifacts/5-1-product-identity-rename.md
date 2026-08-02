@@ -43,7 +43,7 @@ so that Cargo, the CLI, and the README present one consistent, permanent product
   - Line 23's comment (`# Runtime tools tomb-fido2 orchestrates (AD-1) — ...`) also names the product — update to `hypogaol` for consistency, since it's read as prose describing the live tool, not a frozen historical reference.
   - No other lines in this file mention the product name.
 
-- [ ] **Task 5: Update `README.md`'s title, working-title disclaimer, and every body-prose self-reference to the product name** (AC: #1, #4)
+- [x] **Task 5: Update `README.md`'s title, working-title disclaimer, and every body-prose self-reference to the product name** (AC: #1, #4)
   - Line 1: `# tomb-fido2` → `# Hypogaol`.
   - Line 3 currently reads: `> Working title. \`tomb-fido2\` is a placeholder pending a permanent name — don't read anything into it.` The name is now permanent, so this line is now false if left as-is — replace or remove it rather than leaving a contradictory disclaimer next to the new title. Keep this edit to the disclaimer sentence itself; do **not** add tagline/pronunciation/mascot copy here — that's Story 5.3's scope, not this story's.
   - There are no badges or CI-status images currently in `README.md` (confirmed: no `![...]` badge markup) — AC1's "badges" clause is a no-op for now, not a missing requirement.
@@ -104,6 +104,7 @@ Claude Sonnet 5 (claude-sonnet-5)
 - Task 2: Renamed Cargo package (`name`, `repository`) to `hypogaol`; `cargo build` regenerated `Cargo.lock`'s package entry automatically. Discovered a consequence the story's Dev Notes didn't anticipate: since no `[lib]` section overrides it, the library crate identifier also derives from the package name, so every `use tomb_fido2::...` in `src/main.rs` and `tests/**/*.rs` broke at compile time. Fixed by mechanically renaming `tomb_fido2::` → `hypogaol::` at each import site (pure identifier rename, zero behavioral change) — required for Task 2's own `cargo build` step and Task 9's regression gate to pass. Left the one prose doc-comment mention of `` `tomb_fido2` `` in `src/adapters/exec/mod.rs:122` untouched (not a CLI-name/banner literal, so not an AD-13 violation per Task 7's carve-out). `make test` (174 tests) passes unchanged.
 - Task 3: `_bmad/bmm/config.yaml`'s `project_name` updated to `hypogaol`.
 - Task 4: `flake.nix`'s `description` string and the runtime-tools comment updated to `hypogaol`.
+- Task 5: Re-grepped `README.md` before editing to confirm the line list hadn't drifted (matched exactly). Renamed title, removed the now-false working-title disclaimer, and renamed all ~25 body-prose product-name self-references to `Hypogaol` — including the mid-sentence cases mixing product name and domain noun (e.g. line 23 "Close every **Hypogaol**-managed tomb", left `tomb` untouched). Updated the break-glass heading and its markdown anchor link to the new GitHub-generated slug (`#break-glass-recovery-no-hypogaol-required`). Left every plain domain-noun "tomb" and both `dyne/tomb` references untouched (Story 5.2's job). `make test` (174 tests) passes unchanged.
 
 ### File List
 
@@ -111,6 +112,7 @@ Claude Sonnet 5 (claude-sonnet-5)
 - `Cargo.lock`
 - `_bmad/bmm/config.yaml`
 - `flake.nix`
+- `README.md`
 - `src/main.rs`
 - `tests/hardware/main.rs`
 - `tests/unit/cli.rs`
