@@ -4,7 +4,7 @@ baseline_commit: 2c5ab66f812e5a38777599239168bf6f8446f02b
 
 # Story 5.3: Top-Level Branding Copy
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -39,14 +39,14 @@ so that the brand identity lands without any flavor leaking into functional outp
   - **If you skip this:** that fully satisfies AC #2 as written ("it may carry... but no..." is a negative constraint, not a positive requirement) — no further action needed, just note the decision in Completion Notes.
   - Either way, whatever text ends up in the banner must be name/tagline-level only — never a subcommand name, flag, or error string change (Task 3 verifies this holds).
 
-- [ ] **Task 3: Tone-boundary grep verification** (AC: #3)
+- [x] **Task 3: Tone-boundary grep verification** (AC: #3)
   - After Task 1 (and Task 2 if implemented), run and record the output of:
     - `grep -rniE "sealed until touched|gargoyle|lantern|rose.window|hypo\b" src/cli/ux.rs src/domain/` — expect **zero** matches (error/status messages and domain logic must never carry the tagline or mascot/mark vocabulary).
     - `grep -n "///" src/cli/main.rs` — manually review every subcommand/arg doc comment clap surfaces as that subcommand's own `--help` text (e.g. `Create`, `Unlock`, `Enroll`, `Revoke`, ... and their fields) and confirm none picked up themed language.
     - `grep -n "gaol\|Sealed until touched" README.md` — confirm the tagline/pronunciation note appear exactly once each, only in the header block from Task 1, not duplicated elsewhere.
   - Record the exact commands run and their output in this story's Completion Notes List — AC #3 explicitly requires this as evidence, not just a stated intention that the tone boundary was respected.
 
-- [ ] **Task 4: Full regression pass**
+- [x] **Task 4: Full regression pass**
   - `cargo build` succeeds (this story's edits are copy/config only — README.md, optionally `Cargo.toml`'s `description` field — zero behavioral surface).
   - `make test` passes unchanged (same test count as Story 5.2's final run — 174 tests) — this is a pure copy story, a clean `make test` is the acceptance bar, not a manual feature audit.
   - `cargo run -- --help` reviewed manually: confirm the top-level banner matches whatever Task 2 decided, and every subcommand's own `--help` text (`cargo run -- <subcommand> --help` for at least `create`, `unlock`, `revoke`) still reads plainly, with no flavor.
@@ -79,8 +79,26 @@ so that the brand identity lands without any flavor leaking into functional outp
 
 ### Agent Model Used
 
+claude-sonnet-5
+
 ### Debug Log References
 
 ### Completion Notes List
 
+- Task 0: Confirmed line numbers unchanged since story creation — `README.md` line 1 `# Hypogaol`, line 2 blank, line 3 begins the descriptive paragraph. `Cargo.toml`'s `[package]` table had no `description` field. `src/cli/main.rs`'s `Cli` struct used a bare `#[command(version, about)]` (lines 25-26), so the top-level `--help` banner showed no description line at all before this story.
+- Task 1: Inserted a tagline blockquote (`> Sealed until touched.`) and an italicized pronunciation note between `README.md`'s line 1 title and the existing line 3 paragraph, per AC #1. Wrote the note as "The 'gaol' in Hypogaol is pronounced like 'jail' — archaic spelling, not a typo." — kept lowercase `gaol` deliberately (not sentence-initial capitalized) so it stays unambiguous under Task 3's literal grep check. No text below the header was touched.
+- Task 2 (dev discretion): Verified with `cargo run -- --help` that the top-level banner showed no description line pre-change, as the story's Dev Notes predicted. Implemented the tagline treatment: added `description = "Hypogaol — sealed until touched."` to `Cargo.toml`'s `[package]` table. Clap's bare `about` in `src/cli/main.rs` auto-populates from `CARGO_PKG_DESCRIPTION` at compile time — no `main.rs` change needed, keeping AD-13's single-source pattern intact. Verified post-change: `cargo run -- --help` now prints "Hypogaol — sealed until touched." as the first line, followed by the unchanged `Usage:`/`Commands:`/`Options:` block.
+- Task 3: Tone-boundary grep verification, commands and output recorded verbatim:
+  - `grep -rniE "sealed until touched|gargoyle|lantern|rose.window|hypo\b" src/cli/ux.rs src/domain/` → **zero matches** (exit code 1). No flavor/mascot vocabulary in error/status messages or domain logic.
+  - `grep -n "///" src/cli/main.rs` → manually reviewed every one of the ~90 matched doc-comment lines (every subcommand and flag's clap-surfaced help text, e.g. `Create`, `Unlock`, `Enroll`, `Revoke`, plus internal fn-doc comments). All plain, technical, literal language — zero themed/flavored wording found.
+  - `grep -n "gaol\|Sealed until touched" README.md` → matches on lines 1, 3, 5, and every body line that already contains the pre-existing product name "Hypogaol" (which itself contains the substring "gaol"), since the pattern is a case-sensitive substring match, not a word-boundary match. Disambiguated with `grep -c "Sealed until touched" README.md` → **1** (tagline appears exactly once, line 3), and `grep -noP '(?<!Hypo)gaol' README.md` → line 5 (the pronunciation note) plus one incidental false-positive on line 11's auto-generated lowercase GitHub anchor fragment (`#break-glass-recovery-no-hypogaol-required`, not new prose). Confirms the tagline and the pronunciation note each appear exactly once, both confined to the Task 1 header block — no duplication elsewhere.
+- Task 4: Full regression pass. `cargo build`: clean. `make test`: 174/174 passed (identical count to Story 5.2's final run — zero regressions, as expected for a copy/config-only story). `cargo run -- --help` shows the new tagline banner line; `cargo run -- create --help`, `unlock --help`, and `revoke --help` manually reviewed — all read plainly, no flavor, unchanged from pre-story. Manual read-through of `README.md`'s new header block confirms the tagline and pronunciation note read cleanly against the existing description paragraph immediately below.
+
 ### File List
+
+- README.md
+- Cargo.toml
+
+## Change Log
+
+- 2026-08-03: Implemented Story 5.3 — added the "Sealed until touched." tagline and a "gaol"/"jail" pronunciation note to `README.md`'s header (AC #1), added the same tagline treatment to the CLI's top-level `--help` banner via `Cargo.toml`'s `description` field (AC #2, dev discretion exercised: implemented), and ran the tone-boundary grep verification confirming no flavor leaked into error/status messages, domain logic, or per-subcommand help text (AC #3). All 4 tasks complete, all 3 ACs satisfied. `cargo build` clean, `make test` 174/174 passed, zero regressions. Status moved to `review`.
