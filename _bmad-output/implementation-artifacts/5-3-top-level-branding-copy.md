@@ -4,7 +4,7 @@ baseline_commit: 2c5ab66f812e5a38777599239168bf6f8446f02b
 
 # Story 5.3: Top-Level Branding Copy
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
