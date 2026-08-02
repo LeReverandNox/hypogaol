@@ -15,13 +15,13 @@ use crate::ports::luks_backend::LuksBackend;
 /// only) keyslot to index 0.
 const BOOTSTRAP_KEYSLOT: KeyslotRef = KeyslotRef(0);
 
-/// Minimum viable tomb size: large enough to hold a LUKS2 header/keyslot area
+/// Minimum viable volume size: large enough to hold a LUKS2 header/keyslot area
 /// plus a minimal ext4 filesystem. Enforced here (not just by the CLI's
 /// `parse_size`) because a device-backed create's size can also come from an
 /// unvalidated `device_capacity` reading with no `--size` given.
 ///
 /// Confirmed empirically (`cryptsetup luksDump`, 2026-07-27): a default LUKS2
-/// header's payload offset is exactly 16 MiB, so a 16 MiB tomb leaves zero
+/// header's payload offset is exactly 16 MiB, so a 16 MiB volume leaves zero
 /// bytes for the filesystem — `luksFormat`/`luksOpen` don't reject this size
 /// outright, they fail later with "too small for activation, there is no
 /// remaining space for data", surfacing to the user as a nonsensical
@@ -29,7 +29,7 @@ const BOOTSTRAP_KEYSLOT: KeyslotRef = KeyslotRef(0);
 /// a real 16 MiB payload, comfortably above `mkfs.ext4`'s own minimum (2 MiB
 /// avoids even its degraded "too small for a journal" case, also confirmed
 /// empirically).
-pub const MIN_TOMB_SIZE_BYTES: u64 = 32 * 1024 * 1024;
+pub const MIN_VOLUME_SIZE_BYTES: u64 = 32 * 1024 * 1024;
 
 /// `progress` fires at each real stage boundary, in the real execution order
 /// (AD-19): `AllocatingBackingFile` (File targets only — a Device target
@@ -59,7 +59,7 @@ pub fn run(
             // is domain's own independent guarantee (mirroring the Device
             // branch below) rather than a trust that the CLI is the only
             // caller that will ever construct a `CreateTarget::File`.
-            if size < MIN_TOMB_SIZE_BYTES {
+            if size < MIN_VOLUME_SIZE_BYTES {
                 return Err(DomainError::DeviceTooSmall { path, size });
             }
 
@@ -123,7 +123,7 @@ pub fn run(
             // `parse_size`, but a defaulted-from-capacity size (no `--size`
             // given) never passes through that check — this is domain's own
             // independent guarantee, not a trust in the CLI having done it.
-            if resolved_size < MIN_TOMB_SIZE_BYTES {
+            if resolved_size < MIN_VOLUME_SIZE_BYTES {
                 return Err(DomainError::DeviceTooSmall {
                     path,
                     size: resolved_size,

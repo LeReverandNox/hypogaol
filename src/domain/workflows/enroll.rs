@@ -13,7 +13,7 @@ use crate::ports::luks_backend::LuksBackend;
 /// pattern as `unlock.rs`'s unused `fido2` parameter. `systemd-cryptenroll`/
 /// `cryptsetup token *` operate directly on the LUKS2 header at
 /// `mapper.source_path`, so enroll never needs `luks.open` or `fs.mount` —
-/// the tomb is never unlocked/mounted to add a key.
+/// the volume is never unlocked/mounted to add a key.
 pub fn run(
     path: &Path,
     key_label: String,
@@ -32,7 +32,7 @@ pub fn run(
     };
 
     // v1 has only one `Filesystem` variant (AD-8) — nothing to read back
-    // from the existing tomb or ask the user for.
+    // from the existing volume or ask the user for.
     let metadata = KeyMetadata {
         key_label,
         filesystem: Filesystem::Ext4,

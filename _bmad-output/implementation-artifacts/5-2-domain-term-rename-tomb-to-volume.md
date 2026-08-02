@@ -4,7 +4,7 @@ baseline_commit: 714c282c6597735a5c8ed5c901b4e5481020e35c
 
 # Story 5.2: Domain Term Rename (tomb → volume)
 
-Status: ready-for-dev
+Status: in-progress
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 

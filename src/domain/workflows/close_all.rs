@@ -13,7 +13,7 @@ use crate::ports::luks_backend::LuksBackend;
 /// distinct from a hard discovery failure).
 pub type CloseAllResults = Vec<(MapperHandle, Result<(), DomainError>)>;
 
-/// Closes every currently open/unlocked tomb in one batch (AD-17). `fido2` is
+/// Closes every currently open/unlocked volume in one batch (AD-17). `fido2` is
 /// unused beyond `preflight::check` — same AD-4 uniform three-port gate
 /// convention `close::run` already documents for its own unused `fido2`
 /// parameter.

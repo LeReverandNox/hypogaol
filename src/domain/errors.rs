@@ -32,7 +32,7 @@ pub enum DomainError {
     },
 
     #[error(
-        "resolved size {size} bytes for {} is too small for a viable tomb",
+        "resolved size {size} bytes for {} is too small for a viable volume",
         .path.display()
     )]
     DeviceTooSmall { path: PathBuf, size: u64 },
@@ -50,7 +50,7 @@ pub enum DomainError {
     #[error("{0}")]
     AdapterFailure(String),
 
-    #[error("no FIDO2 key labeled {0:?} is enrolled on this tomb")]
+    #[error("no FIDO2 key labeled {0:?} is enrolled on this volume")]
     KeyNotFound(String),
 
     #[error("exec-hooks at {} was rejected: {reason:?}", .path.display())]

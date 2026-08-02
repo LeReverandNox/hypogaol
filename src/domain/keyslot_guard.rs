@@ -4,7 +4,7 @@ use crate::domain::errors::DomainError;
 use crate::domain::types::KeyslotRef;
 use crate::ports::luks_backend::LuksBackend;
 
-/// Removes `target` only if doing so would not leave the tomb with zero valid
+/// Removes `target` only if doing so would not leave the volume with zero valid
 /// keyslots (AD-5). Originated here by Story 1.5 (CAP-8's bootstrap cleanup);
 /// `domain::workflows::revoke::run` (CAP-3) reuses this same primitive rather
 /// than reimplementing the guard.

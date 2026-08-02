@@ -90,7 +90,7 @@ pub(crate) fn run_hooks_step(
 ) -> Result<(), DomainError> {
     let mountpoint = fs.mount_point_of(mapper)?;
 
-    let tomb_name = mapper
+    let volume_name = mapper
         .source_path
         .file_stem()
         .unwrap_or(mapper.source_path.as_os_str())
@@ -112,7 +112,7 @@ pub(crate) fn run_hooks_step(
             &[
                 "close",
                 &mountpoint.to_string_lossy(),
-                &tomb_name,
+                &volume_name,
                 &mapper.source_path.to_string_lossy(),
                 &mapper.device_node().to_string_lossy(),
             ],

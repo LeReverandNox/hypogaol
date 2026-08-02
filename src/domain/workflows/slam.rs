@@ -12,7 +12,7 @@ use crate::ports::luks_backend::LuksBackend;
 /// v1 (ARCHITECTURE-SPINE.md#Deferred).
 const ESCALATION_PAUSE: std::time::Duration = std::time::Duration::from_secs(1);
 
-/// Emergency force-close of every open tomb (AD-18): discovers open tombs
+/// Emergency force-close of every open volume (AD-18): discovers open volumes
 /// the same way `close_all` does, and for each busy mount escalates through
 /// SIGTERM, SIGHUP, SIGKILL until it clears or no holders remain — with zero
 /// confirmation (AC #2, enforced entirely by the CLI layer never prompting;
@@ -104,7 +104,7 @@ fn slam_mapping(
                     // Never signal PID 0/1 (init) — a privileged SIGKILL to
                     // PID 1 can crash or reboot the host (review finding,
                     // 2026-07-28). `fuser -m` should never report either for
-                    // a tomb's mountpoint; skip defensively if it ever does.
+                    // a volume's mountpoint; skip defensively if it ever does.
                     if pid.0 > 1 {
                         let _ = fs.signal_process(pid, signal);
                     }

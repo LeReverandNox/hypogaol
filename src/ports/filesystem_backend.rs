@@ -42,12 +42,12 @@ pub trait FilesystemBackend {
     /// deliberately distinct from `device_capacity(&mapper.device_node())`:
     /// confirmed empirically on real hardware that a LUKS2 mapping's dynamic
     /// segment always reflects the *full* backing storage on every reopen,
-    /// even for a device-backed tomb created with less than the raw
+    /// even for a device-backed volume created with less than the raw
     /// device's full capacity (Story 1.6 headroom) — so the mapping's own
-    /// size can never distinguish "this tomb's filesystem currently uses
+    /// size can never distinguish "this volume's filesystem currently uses
     /// less than the raw device" from "it uses all of it." Only the
     /// filesystem's own superblock (block count × block size) reports the
-    /// tomb's true current provisioned size.
+    /// volume's true current provisioned size.
     fn filesystem_size(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<u64, DomainError>;
 
     /// Best-effort removal of a backing file this adapter created — used to
@@ -67,7 +67,7 @@ pub trait FilesystemBackend {
     /// point itself via the kernel's mount table (AD-12) — takes the mapper,
     /// never a mountpoint, since none is ever stored. Also removes the
     /// now-empty mount-point directory `mount` created, so a later re-unlock
-    /// of the same tomb gets the plain basename back rather than permanently
+    /// of the same volume gets the plain basename back rather than permanently
     /// falling back to a collision-suffixed name.
     fn umount(&self, mapper: &MapperHandle) -> Result<(), DomainError>;
 
