@@ -21,11 +21,11 @@ so that future BMAD workflow runs (sprint-status, GitHub automation) operate aga
 
 ## Tasks / Subtasks
 
-- [ ] **Task 0: Read every file this story touches before changing anything** (AC: #1, #2)
+- [x] **Task 0: Read every file this story touches before changing anything** (AC: #1, #2)
   - Read in full: `_bmad/custom/github-automation-reference.md`, `_bmad-output/specs/spec-tomb-fido2/SPEC.md` (Constraints section, line ~104), `_bmad-output/planning-artifacts/architecture/architecture-tomb-fido2-2026-07-22/ARCHITECTURE-SPINE.md` (AD-13, line ~116-120), `_bmad/custom/bmad-dev-story.toml`, `_bmad/custom/bmad-create-story.toml`, `_bmad/custom/bmad-code-review.toml`, `_bmad/custom/config.toml`, `_bmad/config.toml`, `_bmad/core/config.yaml`.
   - Confirm the current GitHub state before editing anything: `git -C . remote -v` (already confirms `origin` points to `git@github.com:LeReverandNox/hypogaol.git` — the repo rename is already done) and `gh project list --owner LeReverandNox --format json` (already confirms project number 3's `title` is already `"Hypogaol"` — the project display-name rename is already done too). This story only updates BMAD's own stored *references* to those already-renamed live resources; it does not rename anything itself.
 
-- [ ] **Task 1: Update `_bmad/custom/github-automation-reference.md`'s repo path and project display name** (AC: #1)
+- [x] **Task 1: Update `_bmad/custom/github-automation-reference.md`'s repo path and project display name** (AC: #1)
   - Change line 3 from `Repo: LeReverandNox/tomb-fido2` to `Repo: LeReverandNox/hypogaol`.
   - Change the `GitHub Project: "Tomb FIDO2", number 3` line's display name from `"Tomb FIDO2"` to `"Hypogaol"` — keep `number 3` and every ID (`projectId: PVT_kwHOAIY8w84BeI8Q`, Status field id, all four Status option ids) exactly as-is; renaming a repo/project does not change these IDs, and there is nothing to verify beyond confirming the file's prose next to the IDs — do not touch the ID lines.
 

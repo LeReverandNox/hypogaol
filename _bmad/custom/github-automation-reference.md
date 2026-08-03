@@ -1,7 +1,7 @@
 # GitHub Story-Cycle Automation Reference
 
-Repo: LeReverandNox/tomb-fido2
-GitHub Project: "Tomb FIDO2", number 3, owner LeReverandNox
+Repo: LeReverandNox/hypogaol
+GitHub Project: "Hypogaol", number 3, owner LeReverandNox
 - projectId: PVT_kwHOAIY8w84BeI8Q
 - Status field id: PVTSSF_lAHOAIY8w84BeI8QzhYlXTo
 - Status options: Backlog=f75ad846, In Progress=47fc9ee4, In Review=07ee5c6d, Done=98236657
