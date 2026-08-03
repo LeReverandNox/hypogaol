@@ -1,5 +1,15 @@
 # Deferred Work
 
+## Deferred from: code review of 5-4-update-live-planning-automation-pointers (2026-08-03)
+
+- Epic 5 completion (this is its last story) has no tracked action item for a retrospective or an `epic-5` status flip in sprint-status.yaml — out of this story's scope; a sprint-status/retro housekeeping step. [_bmad-output/implementation-artifacts/sprint-status.yaml]
+- SPEC.md/ARCHITECTURE-SPINE.md addenda aren't themselves marked append-only, so a future edit could silently reword them instead of appending a new dated addendum. [_bmad-output/specs/spec-tomb-fido2/SPEC.md:105, _bmad-output/planning-artifacts/architecture/architecture-tomb-fido2-2026-07-22/ARCHITECTURE-SPINE.md:121]
+- Task 3's `tomllib.load` check only proves the new `[core]` table is syntactically valid TOML, not that it actually overrides the installer-managed `project_name` at runtime for any BMAD tool reading it. [_bmad/custom/config.toml:8-9]
+- Both addenda cite `sprint-change-proposal-2026-08-02.md` as source of record with no version/commit pin, so a later edit to that proposal could make both citations silently stale. [_bmad-output/specs/spec-tomb-fido2/SPEC.md:105, _bmad-output/planning-artifacts/architecture/architecture-tomb-fido2-2026-07-22/ARCHITECTURE-SPINE.md:121]
+- `bmad-code-review.toml`'s `on_complete` step 1 (`gh pr list ... --state open`) has no explicit zero-match handling before step 2 uses `<number>` — pre-existing, the rename only touched the repo-path literal. [_bmad/custom/bmad-code-review.toml:9-10]
+- `bmad-dev-story.toml`'s Issue lookup (`--state open`) has no zero-match handling before instructing "move it to In Progress". [_bmad/custom/bmad-dev-story.toml:4]
+- `bmad-create-story.toml`'s Issue lookup uses `--state all`, so it can match and silently reuse an already-closed Issue with no reopen step. [_bmad/custom/bmad-create-story.toml:9]
+
 ## Deferred from: code review of 4-6-emergency-slam (2026-07-28)
 
 - Second `fs.mount_point_of` call after a failed `umount` has no "not currently mounted" tolerance, unlike sibling calls — narrow TOCTOU window. [src/domain/workflows/slam.rs:76]

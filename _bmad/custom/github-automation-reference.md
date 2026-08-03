@@ -12,7 +12,7 @@ GitHub Project: "Hypogaol", number 3, owner LeReverandNox
 - story_id = "<epic_num>.<story_num>" (e.g. "1.2")
 - slug = remainder after the second dash (e.g. "user-authentication")
 - branch = "story/<story_id>-<slug>" (e.g. "story/1.2-user-authentication")
-- epic label: 1 -> "epic:1-foundation", 2 -> "epic:2-key-lifecycle", 3 -> "epic:3-lifecycle-access", 4 -> "epic:4-advanced-operations-automation"
+- epic label: 1 -> "epic:1-foundation", 2 -> "epic:2-key-lifecycle", 3 -> "epic:3-lifecycle-access", 4 -> "epic:4-advanced-operations-automation", 5 -> "epic:5-rebrand-to-hypogaol"
 - Issue title convention: "Story <story_id>: <story title>"
 
 ## Moving a project item's Status
