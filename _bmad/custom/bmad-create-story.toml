@@ -6,8 +6,8 @@ persistent_facts = [
 on_complete = """
 GitHub story-cycle automation (idempotent — reuse existing Issue/branch, never duplicate):
 1. Derive epic label, story_id, slug, and branch name from {{story_key}} per the automation reference.
-2. Check for an existing Issue: `gh issue list -R LeReverandNox/tomb-fido2 --search "Story <story_id> in:title" --state all --json number,title,url`. Reuse it as {{issue_number}}/{{issue_url}} if found.
-3. If none exists: `gh issue create -R LeReverandNox/tomb-fido2 --title "Story <story_id>: <story title>" --body "Story file: \\`{{story_file}}\\`" --label "<epic label>"`. Capture number and URL.
+2. Check for an existing Issue: `gh issue list -R LeReverandNox/hypogaol --search "Story <story_id> in:title" --state all --json number,title,url`. Reuse it as {{issue_number}}/{{issue_url}} if found.
+3. If none exists: `gh issue create -R LeReverandNox/hypogaol --title "Story <story_id>: <story title>" --body "Story file: \\`{{story_file}}\\`" --label "<epic label>"`. Capture number and URL.
 4. Add the Issue to the project board if not already an item: `gh project item-add 3 --owner LeReverandNox --url <issue_url>`.
 5. Set its Status to Backlog via the reference mutation (option id f75ad846).
 6. If the branch `story/<story_id>-<slug>` doesn't exist locally or on origin, create it from the default branch; otherwise reuse it.

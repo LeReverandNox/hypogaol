@@ -84,7 +84,7 @@ development_status:
   5-1-product-identity-rename: done
   5-2-domain-term-rename-tomb-to-volume: done
   5-3-top-level-branding-copy: done
-  5-4-update-live-planning-automation-pointers: backlog
+  5-4-update-live-planning-automation-pointers: done
 
 action_items:
   - epic: 5
