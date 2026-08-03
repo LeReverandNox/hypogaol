@@ -42,7 +42,7 @@ so that future BMAD workflow runs (sprint-status, GitHub automation) operate aga
   - `_bmad/config.toml`'s own header names the sanctioned mechanism: "To pin a value regardless of install answers... use `_bmad/custom/config.toml` (team, committed)". Add a `[core]` table to `_bmad/custom/config.toml` with `project_name = "hypogaol"` — this file currently has no `[core]` table (only a commented example under `[agents.*]`), so this is a new addition, not an edit to existing content. Leave the commented example as-is.
   - This does not touch `_bmad/bmm/config.yaml`'s `project_name` (already `hypogaol`, fixed by Story 5.1) — that file is a different, non-installer-managed config and is out of scope here.
 
-- [ ] **Task 4: Append the SPEC.md Constraints addendum** (AC: #2)
+- [x] **Task 4: Append the SPEC.md Constraints addendum** (AC: #2)
   - Append addendum content after the existing constraint bullet at SPEC.md line 104 ("The name `tomb-fido2` is a placeholder, not final branding..."). Do not delete, edit, or reword that existing bullet — it remains accurate historical record of the constraint that drove the rename.
   - Add a short new bullet (or a clearly-marked sub-note under it) stating: the rename to `Hypogaol`/`hypogaol` executed on 2026-08-02, resolving this constraint; reference `sprint-change-proposal-2026-08-02.md` as the source of record. Keep it to 1-2 sentences — this is a pointer, not a narrative.
 
