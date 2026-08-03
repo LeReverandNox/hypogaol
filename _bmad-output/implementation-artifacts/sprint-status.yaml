@@ -85,12 +85,29 @@ development_status:
   5-2-domain-term-rename-tomb-to-volume: done
   5-3-top-level-branding-copy: done
   5-4-update-live-planning-automation-pointers: done
+  epic-5-retrospective: done
 
 action_items:
   - epic: 5
     action: "Run `make test-hardware` manually against real hardware to verify Story 5.2's rename (AC #2) — no physical FIDO2 device was available in the dev-story execution environment, so only cargo build/make test/cargo build --test hardware (typecheck) were verified automatically. RESOLVED 2026-08-02 (LeReverandNox): ran against real hardware, 21/22 passed. The 1 failure (resize_rejects_a_shrink_request_and_leaves_the_volume_untouched) is the pre-existing epic-3 grow-only-check bug recurring, not a rename regression — see that action item, reconfirmed a third time by this run."
     owner: "LeReverandNox"
     status: done
+  - epic: 5
+    action: "Fix the tier-2 resize grow-only check bug (src/domain/workflows/resize.rs's grow-only size comparison rejecting a same-size/near-minimum-size request) — third occurrence (Epic 4's 4.3 hardware run, Epic 5's 5.2 hardware run). LeReverandNox explicitly requested this be addressed before Epic 6 starts."
+    owner: "LeReverandNox/Amelia"
+    status: open
+  - epic: 5
+    action: "(Low priority, optional) Clean up the 30 residual tomb-fido2 literals still in tests/unit/*.rs (temp-dir fixture names, cli.rs's fake argv[0] slices) — deliberately deferred by Stories 5.1/5.2 as out-of-scope test fixtures, confirmed harmless."
+    owner: "unassigned"
+    status: open
+  - epic: 5
+    action: "Commission Hypogaol mascot/mark artwork from an external image-generation model (BMAD has no image-generation agent/tool available) — brand-identity.md specifies the full visual brief. Always out of Epic 5's scope (explicit non-goal), not a gap."
+    owner: "LeReverandNox"
+    status: open
+  - epic: 5
+    action: "Watch for self-reported completion-note claims (grep counts, verified statements) not matching actual grep/build/format-check output as an explicit recurring-pattern check — hit in all 4 Epic 5 stories (5.1's false no-literals claim, 5.2's undetected cargo fmt failures, 5.3's miscounted grep matches), each caught only in review."
+    owner: "Amelia"
+    status: open
   - epic: 1
     action: "Fix mount-point ownership: chown to invoking uid/gid before chmod 0700 in FilesystemBackend::mount (currently root-owned, root-only)"
     owner: "Amelia"
