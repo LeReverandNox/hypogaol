@@ -40,6 +40,7 @@ fn file_backed_happy_path_runs_every_port_call_once_in_order() {
     let fs = FakeFilesystemBackend::passing()
         .with_log(log.clone())
         .with_is_block_device(false)
+        .with_device_capacity(4096)
         .with_filesystem_size(4096);
 
     let fixture = RealFixtureFile::create("resize-file-happy-path", &[0u8; 4096]);
@@ -78,6 +79,7 @@ fn growfs_receives_whatever_read_filesystem_reports() {
     let fs = FakeFilesystemBackend::passing()
         .with_log(log.clone())
         .with_is_block_device(false)
+        .with_device_capacity(4096)
         .with_filesystem_size(4096);
 
     let fixture = RealFixtureFile::create("resize-growfs-filesystem", &[0u8; 4096]);
@@ -158,6 +160,7 @@ fn file_backed_no_op_same_size_request_is_rejected_by_tier_two() {
     let fido2 = FakeFido2Backend::passing().with_log(log.clone());
     let fs = FakeFilesystemBackend::passing()
         .with_log(log.clone())
+        .with_device_capacity(4096)
         .with_filesystem_size(4096);
 
     // Requesting exactly the current size no longer trips tier 1 (which now
@@ -212,7 +215,7 @@ fn file_backed_same_size_request_is_rejected_even_with_a_large_header_overhead()
     // filesystem is already fully grown to fill that payload.
     let fs = FakeFilesystemBackend::passing()
         .with_log(log.clone())
-        .with_device_capacity(16 * 1024 * 1024)
+        .with_mapper_capacity(16 * 1024 * 1024)
         .with_filesystem_size(16 * 1024 * 1024);
 
     let fixture = RealFixtureFile::create(
@@ -229,10 +232,87 @@ fn file_backed_same_size_request_is_rejected_even_with_a_large_header_overhead()
         &fs,
     );
 
-    let Err(DomainError::ResizeMustGrow { requested, .. }) = result else {
+    let Err(DomainError::ResizeMustGrow {
+        requested,
+        current_size,
+        ..
+    }) = result
+    else {
         panic!("expected ResizeMustGrow, got {result:?}");
     };
     assert_eq!(requested, 32 * 1024 * 1024);
+    assert_eq!(current_size, 32 * 1024 * 1024);
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "is_block_device".to_string(),
+            "read_filesystem".to_string(),
+            "open".to_string(),
+            "device_capacity".to_string(),
+            "filesystem_size".to_string(),
+            "close".to_string(),
+        ],
+        "tier 2's rejection must still close the mapping it opened"
+    );
+}
+
+// Device-backed analog of the test above — the fix's core header-derivation
+// logic (two separate `device_capacity` calls: tier 1 against the raw
+// device path, tier 2 against the mapper's own device node) is only
+// distinguishable from the pre-fix bug when the fake can actually return
+// different values for the two call sites, which `with_mapper_capacity`
+// (distinct from `with_device_capacity`) now lets it do.
+#[test]
+fn device_backed_same_size_request_is_rejected_even_with_a_large_header_overhead() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    // Raw device capacity is 32 MiB; the mapper's own payload capacity
+    // (post-header) is half of that — modeling a LUKS2 header that
+    // consumes the other half, and the filesystem is already fully grown
+    // to fill that payload.
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_is_block_device(true)
+        .with_device_capacity(32 * 1024 * 1024)
+        .with_mapper_capacity(16 * 1024 * 1024)
+        .with_filesystem_size(16 * 1024 * 1024);
+
+    let fixture =
+        RealFixtureFile::create("resize-device-same-size-with-header-overhead", &[0u8; 4096]);
+
+    let result = resize::run(
+        &fixture.0,
+        32 * 1024 * 1024,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    let Err(DomainError::ResizeMustGrow {
+        requested,
+        current_size,
+        ..
+    }) = result
+    else {
+        panic!("expected ResizeMustGrow, got {result:?}");
+    };
+    assert_eq!(requested, 32 * 1024 * 1024);
+    assert_eq!(current_size, 32 * 1024 * 1024);
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "is_block_device".to_string(),
+            "device_capacity".to_string(),
+            "read_filesystem".to_string(),
+            "open".to_string(),
+            "device_capacity".to_string(),
+            "filesystem_size".to_string(),
+            "close".to_string(),
+        ],
+        "tier 2's rejection must still close the mapping it opened"
+    );
 }
 
 // Regression test for a review finding (2026-07-26): a resize call that grew
@@ -247,6 +327,7 @@ fn file_backed_retry_after_a_partial_failure_completes_instead_of_being_rejected
     let fido2 = FakeFido2Backend::passing().with_log(log.clone());
     let fs = FakeFilesystemBackend::passing()
         .with_log(log.clone())
+        .with_device_capacity(8192)
         .with_filesystem_size(4096);
 
     // The backing file is already 8192 bytes (as if a prior resize call's
@@ -364,6 +445,7 @@ fn mid_flow_failure_after_a_successful_resize_still_closes_the_mapping() {
     let fs = FakeFilesystemBackend::passing()
         .with_log(log.clone())
         .with_is_block_device(false)
+        .with_device_capacity(4096)
         .with_filesystem_size(4096)
         .with_failure_at("growfs");
 
@@ -402,6 +484,7 @@ fn close_failure_after_a_successful_grow_reports_the_grow_succeeded() {
     let fido2 = FakeFido2Backend::passing().with_log(log.clone());
     let fs = FakeFilesystemBackend::passing()
         .with_log(log.clone())
+        .with_device_capacity(4096)
         .with_filesystem_size(4096);
 
     let fixture = RealFixtureFile::create("resize-close-failure-after-grow", &[0u8; 4096]);

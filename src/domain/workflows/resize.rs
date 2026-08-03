@@ -9,11 +9,13 @@ use crate::ports::fido2_backend::Fido2Backend;
 use crate::ports::filesystem_backend::FilesystemBackend;
 use crate::ports::luks_backend::LuksBackend;
 
-/// The largest gap `mkfs.ext4`'s own block-size rounding can leave between a
-/// fully-grown filesystem's reported size and the payload it was actually
-/// formatted against: one block, minus one byte. ext4's largest standard
-/// block size is 4096 bytes (AD-8 — v1 is ext4-only, standard tooling only).
-const MAX_EXT4_ROUNDING_GAP_BYTES: u64 = 4096 - 1;
+/// The finest granularity at which `growfs` can actually add capacity to a
+/// mounted filesystem (AD-8 — v1 is ext4-only, standard tooling only): ext4's
+/// largest standard block size. A requested payload size is floored to a
+/// multiple of this before the grow-only comparison below, since a request
+/// that can't move the filesystem by even one whole block can never
+/// succeed regardless of the raw byte count asked for.
+const EXT4_BLOCK_SIZE_BYTES: u64 = 4096;
 
 /// `fido2` is unused beyond `preflight::check` — kept in the signature only
 /// for AD-4's uniform three-port preflight gate, same as every sibling
@@ -196,22 +198,38 @@ fn grow_open_mapping(
     // raw backing storage's current size and what the mapper currently
     // exposes as payload.
     let mapper_capacity = fs.device_capacity(&mapper.device_node())?;
-    let header_size = current_raw_size.saturating_sub(mapper_capacity);
+    // The header can never exceed the raw backing storage it's carved out
+    // of — if it does, the "mapper always reflects the full backing
+    // storage" assumption this whole calculation rests on (see doc comment
+    // above) has been violated, and silently clamping here would reinstate
+    // the exact pre-fix bug with no signal that anything went wrong.
+    if mapper_capacity > current_raw_size {
+        return Err(DomainError::AdapterFailure(format!(
+            "internal invariant violated: mapper capacity ({mapper_capacity} bytes) exceeds \
+             the raw backing storage's current size ({current_raw_size} bytes) for {}",
+            path.display()
+        )));
+    }
+    let header_size = current_raw_size - mapper_capacity;
     let new_size_as_payload = new_size.saturating_sub(header_size);
 
     let live_current_size = fs.filesystem_size(mapper, filesystem)?;
 
-    // `MAX_EXT4_ROUNDING_GAP_BYTES` absorbs `mkfs.ext4`'s own harmless
-    // sub-block rounding: a fully-grown filesystem can occupy at most a
-    // whole number of blocks, so its reported size can trail the payload
-    // it was formatted against by up to one block. Without this slack, that
-    // benign gap alone would make a fully-grown filesystem look like it
-    // still owes growth, reintroducing a smaller version of the same bug.
-    if new_size_as_payload <= live_current_size + MAX_EXT4_ROUNDING_GAP_BYTES {
+    // Floor to the largest whole block `growfs` could actually reach: a
+    // fully-grown filesystem can occupy at most a whole number of blocks,
+    // so comparing the raw byte-exact payload directly would make a
+    // fully-grown filesystem look like it still owes growth whenever the
+    // payload isn't itself block-aligned, reintroducing a smaller version
+    // of the same bug. Flooring (rather than padding `live_current_size`
+    // with a flat slack) also avoids rejecting genuine growth requests that
+    // land mid-block on a filesystem that *isn't* already fully grown.
+    let new_size_as_payload_whole_blocks =
+        (new_size_as_payload / EXT4_BLOCK_SIZE_BYTES) * EXT4_BLOCK_SIZE_BYTES;
+    if new_size_as_payload_whole_blocks <= live_current_size {
         return Err(DomainError::ResizeMustGrow {
             path: path.to_path_buf(),
             requested: new_size,
-            current_size: live_current_size,
+            current_size: live_current_size + header_size,
         });
     }
 
