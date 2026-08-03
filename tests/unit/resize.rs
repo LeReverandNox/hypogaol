@@ -53,6 +53,7 @@ fn file_backed_happy_path_runs_every_port_call_once_in_order() {
             "is_block_device".to_string(),
             "read_filesystem".to_string(),
             "open".to_string(),
+            "device_capacity".to_string(),
             "filesystem_size".to_string(),
             "set_backing_file_size".to_string(),
             "resize".to_string(),
@@ -110,6 +111,7 @@ fn device_backed_happy_path_never_calls_set_backing_file_size() {
             "device_capacity".to_string(),
             "read_filesystem".to_string(),
             "open".to_string(),
+            "device_capacity".to_string(),
             "filesystem_size".to_string(),
             "resize".to_string(),
             "growfs".to_string(),
@@ -182,11 +184,55 @@ fn file_backed_no_op_same_size_request_is_rejected_by_tier_two() {
             "is_block_device".to_string(),
             "read_filesystem".to_string(),
             "open".to_string(),
+            "device_capacity".to_string(),
             "filesystem_size".to_string(),
             "close".to_string(),
         ],
         "tier 2's rejection must still close the mapping it opened"
     );
+}
+
+// Regression test for the real bug this fix addresses (reconfirmed on real
+// hardware across Story 4.3's and 5.2's `make test-hardware` runs): a
+// same-size resize request against a volume where the LUKS2 header consumes
+// a meaningful share of the raw backing storage (exactly what happens on a
+// small volume — confirmed empirically: `cryptsetup luksFormat`'s default
+// 16 MiB header is half of a 32 MiB test volume) must still be rejected.
+// Before this fix, tier 2 compared `filesystem_size` (post-header payload
+// bytes) directly against `new_size` (whole-file bytes), so the header
+// itself always looked like "still needs to grow" — this is the fake-port
+// equivalent of that exact scenario, reproducible without real hardware.
+#[test]
+fn file_backed_same_size_request_is_rejected_even_with_a_large_header_overhead() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    // Mapper payload capacity (post-header) is half the raw file size —
+    // modeling a LUKS2 header that consumes the other half, and the
+    // filesystem is already fully grown to fill that payload.
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_device_capacity(16 * 1024 * 1024)
+        .with_filesystem_size(16 * 1024 * 1024);
+
+    let fixture = RealFixtureFile::create(
+        "resize-same-size-with-header-overhead",
+        &[0u8; 32 * 1024 * 1024],
+    );
+
+    let result = resize::run(
+        &fixture.0,
+        32 * 1024 * 1024,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    let Err(DomainError::ResizeMustGrow { requested, .. }) = result else {
+        panic!("expected ResizeMustGrow, got {result:?}");
+    };
+    assert_eq!(requested, 32 * 1024 * 1024);
 }
 
 // Regression test for a review finding (2026-07-26): a resize call that grew
@@ -218,6 +264,7 @@ fn file_backed_retry_after_a_partial_failure_completes_instead_of_being_rejected
             "is_block_device".to_string(),
             "read_filesystem".to_string(),
             "open".to_string(),
+            "device_capacity".to_string(),
             "filesystem_size".to_string(),
             "set_backing_file_size".to_string(),
             "resize".to_string(),
@@ -301,6 +348,7 @@ fn device_backed_headroom_shrink_is_caught_by_tier_two_and_closes_the_mapping() 
             "device_capacity".to_string(),
             "read_filesystem".to_string(),
             "open".to_string(),
+            "device_capacity".to_string(),
             "filesystem_size".to_string(),
             "close".to_string(),
         ],
@@ -330,6 +378,7 @@ fn mid_flow_failure_after_a_successful_resize_still_closes_the_mapping() {
             "is_block_device".to_string(),
             "read_filesystem".to_string(),
             "open".to_string(),
+            "device_capacity".to_string(),
             "filesystem_size".to_string(),
             "set_backing_file_size".to_string(),
             "resize".to_string(),

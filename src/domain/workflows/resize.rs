@@ -9,6 +9,12 @@ use crate::ports::fido2_backend::Fido2Backend;
 use crate::ports::filesystem_backend::FilesystemBackend;
 use crate::ports::luks_backend::LuksBackend;
 
+/// The largest gap `mkfs.ext4`'s own block-size rounding can leave between a
+/// fully-grown filesystem's reported size and the payload it was actually
+/// formatted against: one block, minus one byte. ext4's largest standard
+/// block size is 4096 bytes (AD-8 — v1 is ext4-only, standard tooling only).
+const MAX_EXT4_ROUNDING_GAP_BYTES: u64 = 4096 - 1;
+
 /// `fido2` is unused beyond `preflight::check` — kept in the signature only
 /// for AD-4's uniform three-port preflight gate, same as every sibling
 /// workflow.
@@ -45,7 +51,12 @@ pub fn run(
     // before `read_filesystem` below so an obviously-invalid request never
     // reaches a real adapter call at all (AC #3's literal "before calling
     // any adapter" — review finding, 2026-07-26).
-    if device_backed {
+    //
+    // `current_raw_size` is also threaded into tier 2 below — it's the
+    // exact current size of the raw backing storage (file length or device
+    // capacity), needed there to convert `new_size` into the same
+    // LUKS2-payload units `filesystem_size` reports in.
+    let current_raw_size = if device_backed {
         let capacity = fs.device_capacity(path)?;
         if new_size > capacity {
             return Err(DomainError::DeviceSizeExceedsCapacity {
@@ -54,6 +65,7 @@ pub fn run(
                 capacity,
             });
         }
+        capacity
     } else {
         reject_symlink(path)?;
         let current_len = current_file_len(path)?;
@@ -70,7 +82,8 @@ pub fn run(
                 current_size: current_len,
             });
         }
-    }
+        current_len
+    };
 
     // Read only now that tier 1 has had its chance to reject — still needed
     // by tier 2 below, so it must run before `luks.open`. Can run either
@@ -88,6 +101,7 @@ pub fn run(
     let result = grow_open_mapping(
         path,
         new_size,
+        current_raw_size,
         device_backed,
         filesystem,
         progress,
@@ -145,6 +159,7 @@ fn reject_symlink(path: &Path) -> Result<(), DomainError> {
 fn grow_open_mapping(
     path: &Path,
     new_size: u64,
+    current_raw_size: u64,
     device_backed: bool,
     filesystem: Filesystem,
     progress: &dyn Fn(ResizeStage),
@@ -164,8 +179,35 @@ fn grow_open_mapping(
     // Only the filesystem's own block-count metadata can. Runs after `open`
     // (an authentication/read operation, not a mutation) but strictly
     // before any mutating call below.
+    //
+    // `filesystem_size` reports usable LUKS2-*payload* bytes (post-header),
+    // while `new_size`/`current_raw_size` are whole-file/whole-device bytes
+    // (pre-header) — comparing them directly (the pre-fix bug) understated
+    // the true available payload by the entire LUKS2 header every time,
+    // since the header is invisible on the raw-size side of the comparison.
+    // Confirmed empirically: `cryptsetup luksFormat`'s own header consumes a
+    // fixed number of bytes regardless of volume size (16 MiB by default) —
+    // half of a 32 MiB volume, and the reason a same-size resize request
+    // against a small hardware-test volume never looked "already fully
+    // grown" and silently succeeded instead of being rejected (bug,
+    // reconfirmed across Story 4.3's and 5.2's hardware runs). The header is
+    // fixed at format time and never changes size on resize, so it can be
+    // derived from values already on hand: it's exactly the gap between the
+    // raw backing storage's current size and what the mapper currently
+    // exposes as payload.
+    let mapper_capacity = fs.device_capacity(&mapper.device_node())?;
+    let header_size = current_raw_size.saturating_sub(mapper_capacity);
+    let new_size_as_payload = new_size.saturating_sub(header_size);
+
     let live_current_size = fs.filesystem_size(mapper, filesystem)?;
-    if new_size <= live_current_size {
+
+    // `MAX_EXT4_ROUNDING_GAP_BYTES` absorbs `mkfs.ext4`'s own harmless
+    // sub-block rounding: a fully-grown filesystem can occupy at most a
+    // whole number of blocks, so its reported size can trail the payload
+    // it was formatted against by up to one block. Without this slack, that
+    // benign gap alone would make a fully-grown filesystem look like it
+    // still owes growth, reintroducing a smaller version of the same bug.
+    if new_size_as_payload <= live_current_size + MAX_EXT4_ROUNDING_GAP_BYTES {
         return Err(DomainError::ResizeMustGrow {
             path: path.to_path_buf(),
             requested: new_size,
