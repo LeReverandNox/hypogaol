@@ -46,7 +46,7 @@ so that future BMAD workflow runs (sprint-status, GitHub automation) operate aga
   - Append addendum content after the existing constraint bullet at SPEC.md line 104 ("The name `tomb-fido2` is a placeholder, not final branding..."). Do not delete, edit, or reword that existing bullet — it remains accurate historical record of the constraint that drove the rename.
   - Add a short new bullet (or a clearly-marked sub-note under it) stating: the rename to `Hypogaol`/`hypogaol` executed on 2026-08-02, resolving this constraint; reference `sprint-change-proposal-2026-08-02.md` as the source of record. Keep it to 1-2 sentences — this is a pointer, not a narrative.
 
-- [ ] **Task 5: Append the ARCHITECTURE-SPINE.md AD-13 addendum** (AC: #2)
+- [x] **Task 5: Append the ARCHITECTURE-SPINE.md AD-13 addendum** (AC: #2)
   - Append addendum content after AD-13's existing rule text (ends "...architecture and planning documents may keep referring to the project as `tomb-fido2` for continuity until renamed.", line ~120). Do not rewrite AD-13's existing rule — Epic 5's own non-goals explicitly preserve Epics 1-4's and past architecture text as frozen historical record.
   - Add a short new bullet or sub-note stating: the rename executed on 2026-08-02 per `sprint-change-proposal-2026-08-02.md`; AD-13's isolation guarantee is what made the rename mechanical (Story 5.1 changed exactly the one sourced identifier — the Cargo package name — and the CLI/binary name followed automatically, per AD-13's own rule). Keep it factual and brief, consistent with the rest of this document's terse AD style.
 
