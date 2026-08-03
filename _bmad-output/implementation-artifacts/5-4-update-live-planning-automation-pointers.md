@@ -29,7 +29,7 @@ so that future BMAD workflow runs (sprint-status, GitHub automation) operate aga
   - Change line 3 from `Repo: LeReverandNox/tomb-fido2` to `Repo: LeReverandNox/hypogaol`.
   - Change the `GitHub Project: "Tomb FIDO2", number 3` line's display name from `"Tomb FIDO2"` to `"Hypogaol"` — keep `number 3` and every ID (`projectId: PVT_kwHOAIY8w84BeI8Q`, Status field id, all four Status option ids) exactly as-is; renaming a repo/project does not change these IDs, and there is nothing to verify beyond confirming the file's prose next to the IDs — do not touch the ID lines.
 
-- [ ] **Task 2: Fix the same stale repo path in the other custom BMAD automation files** (AC: #1, extended — see Dev Notes)
+- [x] **Task 2: Fix the same stale repo path in the other custom BMAD automation files** (AC: #1, extended — see Dev Notes)
   - Three other `_bmad/custom/*.toml` files hardcode `-R LeReverandNox/tomb-fido2` in `gh issue`/`gh pr` commands and are just as "live" as `github-automation-reference.md` — left unfixed, they'd keep querying/creating against the wrong repo path indefinitely:
     - `_bmad/custom/bmad-create-story.toml` (lines 9-10, `on_complete` block: `gh issue list`, `gh issue create`)
     - `_bmad/custom/bmad-dev-story.toml` (lines 4, 10-11: prose mentioning `gh issue list`, plus its own `gh pr list`/`gh pr create`)
