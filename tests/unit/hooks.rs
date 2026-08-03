@@ -145,7 +145,7 @@ struct RealFixtureDir(PathBuf);
 
 impl RealFixtureDir {
     fn create(unique_name: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("tomb-fido2-unit-test-hooks-{unique_name}"));
+        let path = std::env::temp_dir().join(format!("hypogaol-unit-test-hooks-{unique_name}"));
         std::fs::create_dir_all(&path).expect("failed to create test fixture dir");
         Self(path)
     }
