@@ -4,7 +4,7 @@ baseline_commit: 3cb4cb282f1f77fcc463a53a087583f34670d5df
 
 # Story 5.4: Update Live Planning/Automation Pointers
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -50,7 +50,7 @@ so that future BMAD workflow runs (sprint-status, GitHub automation) operate aga
   - Append addendum content after AD-13's existing rule text (ends "...architecture and planning documents may keep referring to the project as `tomb-fido2` for continuity until renamed.", line ~120). Do not rewrite AD-13's existing rule — Epic 5's own non-goals explicitly preserve Epics 1-4's and past architecture text as frozen historical record.
   - Add a short new bullet or sub-note stating: the rename executed on 2026-08-02 per `sprint-change-proposal-2026-08-02.md`; AD-13's isolation guarantee is what made the rename mechanical (Story 5.1 changed exactly the one sourced identifier — the Cargo package name — and the CLI/binary name followed automatically, per AD-13's own rule). Keep it factual and brief, consistent with the rest of this document's terse AD style.
 
-- [ ] **Task 6: Full regression pass**
+- [x] **Task 6: Full regression pass**
   - `cargo build` succeeds and `make test` passes unchanged (same test count as Story 5.3's final run — 174 tests) — this story touches zero `src/` files, so this is a pure sanity check that nothing was accidentally broken.
   - Re-run `grep -rn "tomb-fido2" _bmad/` afterward and confirm the only remaining hits are inside story files under `_bmad-output/implementation-artifacts/` (frozen historical record, e.g. this story's own Dev Notes/Tasks text, and Stories 5.1-5.3's files) — no remaining hits inside `_bmad/custom/*.toml`, `_bmad/config.toml`, or `_bmad/core/config.yaml`. `_bmad/config.toml`'s and `_bmad/core/config.yaml`'s literal `project_name = "tomb-fido2"` lines will still show up in this grep (Task 3 pins an override rather than editing them) — confirm those hits are exactly those two known lines and nothing else, not new regressions.
 
@@ -89,4 +89,24 @@ claude-sonnet-5
 
 ### Completion Notes List
 
+- Task 0: Read every file this story touches. Confirmed live GitHub state via `git remote -v` (origin already `git@github.com:LeReverandNox/hypogaol.git`) and `gh project list --owner LeReverandNox --format json` (project #3 title already `"Hypogaol"`) — this story only catches up BMAD's own stored pointers, nothing on GitHub itself needed changing.
+- Task 1: Updated `_bmad/custom/github-automation-reference.md` line 3 (`Repo:`) and line 4 (`GitHub Project:` display name) to `LeReverandNox/hypogaol` / `"Hypogaol"`. All IDs (projectId, Status field id, four Status option ids) left untouched, per AC #1.
+- Task 2: Replaced every `LeReverandNox/tomb-fido2` occurrence with `LeReverandNox/hypogaol` in the three other live automation files: `_bmad/custom/bmad-create-story.toml` (`on_complete` block, `gh issue list`/`gh issue create`), `_bmad/custom/bmad-dev-story.toml` (persistent_facts prose + `on_complete` block, `gh pr list`/`gh pr create`), `_bmad/custom/bmad-code-review.toml` (`on_complete` block, `gh pr list`/`gh pr comment`). Verified via `grep -n "tomb-fido2"` on all three — zero remaining hits.
+- Task 3: Added a new `[core]` table to `_bmad/custom/config.toml` with `project_name = "hypogaol"`, per the sanctioned override mechanism documented in `_bmad/config.toml`'s own installer-managed header. Did not hand-edit `_bmad/config.toml` or `_bmad/core/config.yaml` (both installer-managed, regenerated on install). Validated the resulting TOML parses correctly via `tomllib.load`.
+- Task 4: Appended a 2-sentence addendum bullet under SPEC.md's existing placeholder-name constraint (line 104), noting the 2026-08-02 rename and referencing `sprint-change-proposal-2026-08-02.md`. Existing bullet left unedited (frozen historical record).
+- Task 5: Appended a short addendum bullet under ARCHITECTURE-SPINE.md's AD-13 rule text, noting the 2026-08-02 rename and that AD-13's isolation guarantee made it mechanical (Story 5.1 changed exactly the one sourced identifier). Existing AD-13 rule text left unedited.
+- Task 6: Full regression pass. `cargo build`: clean (no `src/` changes, cached). `make test`: 174/174 passed — identical count to Story 5.3's final run, zero regressions. Re-ran `grep -rn "tomb-fido2" _bmad/`: only two hits remain, `_bmad/config.toml:14` and `_bmad/core/config.yaml:7` — exactly the two installer-managed lines Task 3 deliberately left in place via the override mechanism, no other hits inside `_bmad/custom/*.toml`.
+
 ### File List
+
+- _bmad/custom/github-automation-reference.md
+- _bmad/custom/bmad-create-story.toml
+- _bmad/custom/bmad-dev-story.toml
+- _bmad/custom/bmad-code-review.toml
+- _bmad/custom/config.toml
+- _bmad-output/specs/spec-tomb-fido2/SPEC.md
+- _bmad-output/planning-artifacts/architecture/architecture-tomb-fido2-2026-07-22/ARCHITECTURE-SPINE.md
+
+## Change Log
+
+- 2026-08-03: Implemented Story 5.4 — updated `github-automation-reference.md`'s repo path and project display name (AC #1), fixed the same stale `LeReverandNox/tomb-fido2` repo path in three other live custom automation files (`bmad-create-story.toml`, `bmad-dev-story.toml`, `bmad-code-review.toml`, expanded scope under AC #1's "so that" clause), pinned the stale `project_name` via a new `[core]` table in `_bmad/custom/config.toml` rather than hand-editing installer-managed files, and appended addendum notes to SPEC.md's Constraints section and ARCHITECTURE-SPINE.md's AD-13 referencing the 2026-08-02 rename (AC #2). All 7 tasks complete, both ACs satisfied. `cargo build` clean, `make test` 174/174 passed, zero regressions — this was the last story in Epic 5. Status moved to `review`.
