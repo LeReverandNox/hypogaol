@@ -4,7 +4,7 @@ baseline_commit: 3cb4cb282f1f77fcc463a53a087583f34670d5df
 
 # Story 5.4: Update Live Planning/Automation Pointers
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
