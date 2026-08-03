@@ -1,5 +1,9 @@
 # Hypogaol
 
+> Sealed until touched.
+
+*(The "gaol" in Hypogaol is pronounced like "jail" — archaic spelling, not a typo.)*
+
 A FIDO2-native reimagining of [dyne/tomb](https://github.com/dyne/tomb)'s core insight: a thin, disposable wrapper over standard, boring primitives, built to survive its own death.
 
 Hypogaol exists to do one job well: create, unlock, and maintain a LUKS2 volume holding rarely-touched, highly sensitive material — a master GPG key, a password-manager backup — using a FIDO2 security key, as reliably as a bank safe opened once a year in a crisis. It replaces the multi-tool memorization burden of `cryptsetup` + `fido2-token` + `systemd-cryptenroll` + `mkfs` + `mount` + `umount` with one CLI, without ever hiding what those tools are actually doing.
