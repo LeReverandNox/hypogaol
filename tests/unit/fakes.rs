@@ -368,6 +368,15 @@ pub struct FakeFilesystemBackend {
     path_exists: bool,
     is_block_device: bool,
     device_capacity: u64,
+    // Distinct return value for a `device_capacity` call against a mapper's
+    // own device node (`/dev/mapper/...`) as opposed to the raw backing
+    // path — `resize::run`'s tier 2 calls `device_capacity` on the mapper
+    // node specifically to derive the LUKS2 header size (raw capacity minus
+    // mapper/payload capacity), which is only a meaningful distinction if
+    // the fake can actually return two different values for the two call
+    // sites. Defaults to `device_capacity`'s own value (header size 0) so
+    // existing tests that don't model a header are unaffected.
+    mapper_capacity: Option<u64>,
     // `filesystem_size`'s return value — deliberately a separate field from
     // `device_capacity`, not derived from it: `resize::run`'s tier 2 reads
     // this instead of the mapping's raw size specifically because the two
@@ -437,6 +446,7 @@ impl FakeFilesystemBackend {
             path_exists: false,
             is_block_device: false,
             device_capacity: DEFAULT_DEVICE_CAPACITY,
+            mapper_capacity: None,
             filesystem_size: None,
             log: new_call_log(),
             fail_at: None,
@@ -464,6 +474,7 @@ impl FakeFilesystemBackend {
             path_exists: false,
             is_block_device: false,
             device_capacity: DEFAULT_DEVICE_CAPACITY,
+            mapper_capacity: None,
             filesystem_size: None,
             log: new_call_log(),
             fail_at: None,
@@ -512,6 +523,14 @@ impl FakeFilesystemBackend {
 
     pub fn with_device_capacity(mut self, value: u64) -> Self {
         self.device_capacity = value;
+        self
+    }
+
+    /// See `mapper_capacity` field doc — sets the value `device_capacity`
+    /// returns specifically when called against a mapper's own device node,
+    /// distinct from `device_capacity`'s own (raw-path) value.
+    pub fn with_mapper_capacity(mut self, value: u64) -> Self {
+        self.mapper_capacity = Some(value);
         self
     }
 
@@ -663,10 +682,14 @@ impl FilesystemBackend for FakeFilesystemBackend {
         Ok(self.is_block_device)
     }
 
-    fn device_capacity(&self, _path: &Path) -> Result<u64, DomainError> {
+    fn device_capacity(&self, path: &Path) -> Result<u64, DomainError> {
         self.log.borrow_mut().push("device_capacity".to_string());
         self.fail_if("device_capacity")?;
-        Ok(self.device_capacity)
+        if path.starts_with("/dev/mapper") {
+            Ok(self.mapper_capacity.unwrap_or(self.device_capacity))
+        } else {
+            Ok(self.device_capacity)
+        }
     }
 
     fn set_backing_file_size(&self, _path: &Path, _size: u64) -> Result<(), DomainError> {

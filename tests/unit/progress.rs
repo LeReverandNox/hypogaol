@@ -116,6 +116,7 @@ fn resize_file_backed_fires_all_three_stages_in_order() {
     let fido2 = FakeFido2Backend::passing();
     let fs = FakeFilesystemBackend::passing()
         .with_is_block_device(false)
+        .with_device_capacity(4096)
         .with_filesystem_size(4096);
 
     let fixture =
@@ -226,6 +227,7 @@ fn resize_does_not_fire_growing_filesystem_when_luks_resize_fails() {
     let fido2 = FakeFido2Backend::passing();
     let fs = FakeFilesystemBackend::passing()
         .with_is_block_device(false)
+        .with_device_capacity(4096)
         .with_filesystem_size(4096);
 
     let fixture =

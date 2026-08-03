@@ -9,6 +9,14 @@ use crate::ports::fido2_backend::Fido2Backend;
 use crate::ports::filesystem_backend::FilesystemBackend;
 use crate::ports::luks_backend::LuksBackend;
 
+/// The finest granularity at which `growfs` can actually add capacity to a
+/// mounted filesystem (AD-8 — v1 is ext4-only, standard tooling only): ext4's
+/// largest standard block size. A requested payload size is floored to a
+/// multiple of this before the grow-only comparison below, since a request
+/// that can't move the filesystem by even one whole block can never
+/// succeed regardless of the raw byte count asked for.
+const EXT4_BLOCK_SIZE_BYTES: u64 = 4096;
+
 /// `fido2` is unused beyond `preflight::check` — kept in the signature only
 /// for AD-4's uniform three-port preflight gate, same as every sibling
 /// workflow.
@@ -45,7 +53,12 @@ pub fn run(
     // before `read_filesystem` below so an obviously-invalid request never
     // reaches a real adapter call at all (AC #3's literal "before calling
     // any adapter" — review finding, 2026-07-26).
-    if device_backed {
+    //
+    // `current_raw_size` is also threaded into tier 2 below — it's the
+    // exact current size of the raw backing storage (file length or device
+    // capacity), needed there to convert `new_size` into the same
+    // LUKS2-payload units `filesystem_size` reports in.
+    let current_raw_size = if device_backed {
         let capacity = fs.device_capacity(path)?;
         if new_size > capacity {
             return Err(DomainError::DeviceSizeExceedsCapacity {
@@ -54,6 +67,7 @@ pub fn run(
                 capacity,
             });
         }
+        capacity
     } else {
         reject_symlink(path)?;
         let current_len = current_file_len(path)?;
@@ -70,7 +84,8 @@ pub fn run(
                 current_size: current_len,
             });
         }
-    }
+        current_len
+    };
 
     // Read only now that tier 1 has had its chance to reject — still needed
     // by tier 2 below, so it must run before `luks.open`. Can run either
@@ -88,6 +103,7 @@ pub fn run(
     let result = grow_open_mapping(
         path,
         new_size,
+        current_raw_size,
         device_backed,
         filesystem,
         progress,
@@ -145,6 +161,7 @@ fn reject_symlink(path: &Path) -> Result<(), DomainError> {
 fn grow_open_mapping(
     path: &Path,
     new_size: u64,
+    current_raw_size: u64,
     device_backed: bool,
     filesystem: Filesystem,
     progress: &dyn Fn(ResizeStage),
@@ -164,12 +181,55 @@ fn grow_open_mapping(
     // Only the filesystem's own block-count metadata can. Runs after `open`
     // (an authentication/read operation, not a mutation) but strictly
     // before any mutating call below.
+    //
+    // `filesystem_size` reports usable LUKS2-*payload* bytes (post-header),
+    // while `new_size`/`current_raw_size` are whole-file/whole-device bytes
+    // (pre-header) — comparing them directly (the pre-fix bug) understated
+    // the true available payload by the entire LUKS2 header every time,
+    // since the header is invisible on the raw-size side of the comparison.
+    // Confirmed empirically: `cryptsetup luksFormat`'s own header consumes a
+    // fixed number of bytes regardless of volume size (16 MiB by default) —
+    // half of a 32 MiB volume, and the reason a same-size resize request
+    // against a small hardware-test volume never looked "already fully
+    // grown" and silently succeeded instead of being rejected (bug,
+    // reconfirmed across Story 4.3's and 5.2's hardware runs). The header is
+    // fixed at format time and never changes size on resize, so it can be
+    // derived from values already on hand: it's exactly the gap between the
+    // raw backing storage's current size and what the mapper currently
+    // exposes as payload.
+    let mapper_capacity = fs.device_capacity(&mapper.device_node())?;
+    // The header can never exceed the raw backing storage it's carved out
+    // of — if it does, the "mapper always reflects the full backing
+    // storage" assumption this whole calculation rests on (see doc comment
+    // above) has been violated, and silently clamping here would reinstate
+    // the exact pre-fix bug with no signal that anything went wrong.
+    if mapper_capacity > current_raw_size {
+        return Err(DomainError::AdapterFailure(format!(
+            "internal invariant violated: mapper capacity ({mapper_capacity} bytes) exceeds \
+             the raw backing storage's current size ({current_raw_size} bytes) for {}",
+            path.display()
+        )));
+    }
+    let header_size = current_raw_size - mapper_capacity;
+    let new_size_as_payload = new_size.saturating_sub(header_size);
+
     let live_current_size = fs.filesystem_size(mapper, filesystem)?;
-    if new_size <= live_current_size {
+
+    // Floor to the largest whole block `growfs` could actually reach: a
+    // fully-grown filesystem can occupy at most a whole number of blocks,
+    // so comparing the raw byte-exact payload directly would make a
+    // fully-grown filesystem look like it still owes growth whenever the
+    // payload isn't itself block-aligned, reintroducing a smaller version
+    // of the same bug. Flooring (rather than padding `live_current_size`
+    // with a flat slack) also avoids rejecting genuine growth requests that
+    // land mid-block on a filesystem that *isn't* already fully grown.
+    let new_size_as_payload_whole_blocks =
+        (new_size_as_payload / EXT4_BLOCK_SIZE_BYTES) * EXT4_BLOCK_SIZE_BYTES;
+    if new_size_as_payload_whole_blocks <= live_current_size {
         return Err(DomainError::ResizeMustGrow {
             path: path.to_path_buf(),
             requested: new_size,
-            current_size: live_current_size,
+            current_size: live_current_size + header_size,
         });
     }
 
