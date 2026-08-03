@@ -19,7 +19,7 @@ struct RealFixtureFile(PathBuf);
 
 impl RealFixtureFile {
     fn create(unique_name: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("tomb-fido2-unit-test-{unique_name}"));
+        let path = std::env::temp_dir().join(format!("hypogaol-unit-test-{unique_name}"));
         std::fs::write(&path, []).expect("failed to create test fixture file");
         Self(path)
     }

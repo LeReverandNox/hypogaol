@@ -16,13 +16,13 @@ struct RealFixtureFile(std::path::PathBuf);
 
 impl RealFixtureFile {
     fn create(unique_name: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("tomb-fido2-unit-test-{unique_name}"));
+        let path = std::env::temp_dir().join(format!("hypogaol-unit-test-{unique_name}"));
         std::fs::write(&path, []).expect("failed to create test fixture file");
         Self(path)
     }
 
     fn create_with_contents(unique_name: &str, contents: &[u8]) -> Self {
-        let path = std::env::temp_dir().join(format!("tomb-fido2-unit-test-{unique_name}"));
+        let path = std::env::temp_dir().join(format!("hypogaol-unit-test-{unique_name}"));
         std::fs::write(&path, contents).expect("failed to create test fixture file");
         Self(path)
     }

@@ -17,7 +17,7 @@ struct RealFixtureFile(PathBuf);
 
 impl RealFixtureFile {
     fn create(unique_name: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("tomb-fido2-unit-test-{unique_name}"));
+        let path = std::env::temp_dir().join(format!("hypogaol-unit-test-{unique_name}"));
         std::fs::write(&path, []).expect("failed to create test fixture file");
         Self(path)
     }
@@ -188,7 +188,7 @@ fn open_bind_mounts_every_valid_bind_hooks_entry_after_mount_succeeds() {
     mountpoint.subdir("src-a");
     mountpoint.subdir("src-b");
     let home = RealFixtureDir::create(
-        std::env::temp_dir().join("tomb-fido2-unit-test-unlock-bind-hooks-happy-path-home"),
+        std::env::temp_dir().join("hypogaol-unit-test-unlock-bind-hooks-happy-path-home"),
     );
     home.subdir("dest-a");
     home.subdir("dest-b");
@@ -226,7 +226,7 @@ fn open_skips_an_escaping_bind_hooks_entry_with_a_warning_and_continues() {
     let mountpoint = RealFixtureDir::create(fake_mountpoint_for(&expected_name));
     mountpoint.subdir("src");
     let home = RealFixtureDir::create(
-        std::env::temp_dir().join("tomb-fido2-unit-test-unlock-bind-hooks-escaping-entry-home"),
+        std::env::temp_dir().join("hypogaol-unit-test-unlock-bind-hooks-escaping-entry-home"),
     );
     // An absolute `dest` makes `Path::join` discard `home_dir` entirely and
     // resolve straight to `mountpoint` itself — a real, existing directory,
@@ -287,7 +287,7 @@ fn open_warns_but_continues_when_bind_mount_itself_fails() {
     let mountpoint = RealFixtureDir::create(fake_mountpoint_for(&expected_name));
     mountpoint.subdir("src");
     let home = RealFixtureDir::create(
-        std::env::temp_dir().join("tomb-fido2-unit-test-unlock-bind-mount-call-fails-home"),
+        std::env::temp_dir().join("hypogaol-unit-test-unlock-bind-mount-call-fails-home"),
     );
     home.subdir("dest");
     std::fs::write(mountpoint.0.join("bind-hooks"), "src dest\n")
@@ -397,7 +397,7 @@ fn open_hard_errors_and_rolls_back_when_exec_hooks_guardrail_fails() {
     let mountpoint = RealFixtureDir::create(fake_mountpoint_for(&expected_name));
     mountpoint.subdir("src");
     let home = RealFixtureDir::create(
-        std::env::temp_dir().join("tomb-fido2-unit-test-unlock-exec-hooks-guardrail-fails-home"),
+        std::env::temp_dir().join("hypogaol-unit-test-unlock-exec-hooks-guardrail-fails-home"),
     );
     home.subdir("dest");
     std::fs::write(mountpoint.0.join("bind-hooks"), "src dest\n")

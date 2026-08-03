@@ -79,7 +79,7 @@ fn help_text(args: &[&str]) -> String {
 
 #[test]
 fn top_level_help_lists_all_subcommands() {
-    let help = help_text(&["tomb-fido2", "--help"]);
+    let help = help_text(&["hypogaol", "--help"]);
     assert!(help.contains("create"));
     assert!(help.contains("unlock"));
     assert!(help.contains("enroll"));
@@ -89,21 +89,21 @@ fn top_level_help_lists_all_subcommands() {
 
 #[test]
 fn create_help_lists_file_and_device_modes() {
-    let help = help_text(&["tomb-fido2", "create", "--help"]);
+    let help = help_text(&["hypogaol", "create", "--help"]);
     assert!(help.contains("file"));
     assert!(help.contains("device"));
 }
 
 #[test]
 fn unlock_help_lists_path_as_positional() {
-    let help = help_text(&["tomb-fido2", "unlock", "--help"]);
+    let help = help_text(&["hypogaol", "unlock", "--help"]);
     assert!(help.contains("<PATH>"));
     assert!(!help.contains("--path"));
 }
 
 #[test]
 fn unlock_help_lists_read_only_flag() {
-    let help = help_text(&["tomb-fido2", "unlock", "--help"]);
+    let help = help_text(&["hypogaol", "unlock", "--help"]);
     assert!(help.contains("--read-only"));
 }
 
@@ -122,21 +122,21 @@ fn unlock_success_message_mentions_read_only_when_set() {
 
 #[test]
 fn create_file_help_lists_path_as_positional() {
-    let help = help_text(&["tomb-fido2", "create", "file", "--help"]);
+    let help = help_text(&["hypogaol", "create", "file", "--help"]);
     assert!(help.contains("<PATH>"));
     assert!(!help.contains("--path"));
 }
 
 #[test]
 fn create_device_help_lists_path_as_positional() {
-    let help = help_text(&["tomb-fido2", "create", "device", "--help"]);
+    let help = help_text(&["hypogaol", "create", "device", "--help"]);
     assert!(help.contains("<PATH>"));
     assert!(!help.contains("--path"));
 }
 
 #[test]
 fn enroll_help_lists_path_as_positional_and_label_as_a_flag() {
-    let help = help_text(&["tomb-fido2", "enroll", "--help"]);
+    let help = help_text(&["hypogaol", "enroll", "--help"]);
     assert!(help.contains("<PATH>"));
     assert!(!help.contains("--path"));
     assert!(help.contains("--label"));
@@ -144,7 +144,7 @@ fn enroll_help_lists_path_as_positional_and_label_as_a_flag() {
 
 #[test]
 fn revoke_help_lists_path_as_positional_and_label_as_a_flag() {
-    let help = help_text(&["tomb-fido2", "revoke", "--help"]);
+    let help = help_text(&["hypogaol", "revoke", "--help"]);
     assert!(help.contains("<PATH>"));
     assert!(!help.contains("--path"));
     assert!(help.contains("--label"));
@@ -152,33 +152,33 @@ fn revoke_help_lists_path_as_positional_and_label_as_a_flag() {
 
 #[test]
 fn info_help_lists_path_as_positional() {
-    let help = help_text(&["tomb-fido2", "info", "--help"]);
+    let help = help_text(&["hypogaol", "info", "--help"]);
     assert!(help.contains("<PATH>"));
     assert!(!help.contains("--path"));
 }
 
 #[test]
 fn enroll_help_lists_the_explicit_device_selection_flags() {
-    let help = help_text(&["tomb-fido2", "enroll", "--help"]);
+    let help = help_text(&["hypogaol", "enroll", "--help"]);
     assert!(help.contains("--fido2-device"));
     assert!(help.contains("--unlock-fido2-device"));
 }
 
 #[test]
 fn create_file_help_lists_the_fido2_device_flag() {
-    let help = help_text(&["tomb-fido2", "create", "file", "--help"]);
+    let help = help_text(&["hypogaol", "create", "file", "--help"]);
     assert!(help.contains("--fido2-device"));
 }
 
 #[test]
 fn create_device_help_lists_the_fido2_device_flag() {
-    let help = help_text(&["tomb-fido2", "create", "device", "--help"]);
+    let help = help_text(&["hypogaol", "create", "device", "--help"]);
     assert!(help.contains("--fido2-device"));
 }
 
 #[test]
 fn resize_help_lists_path_as_positional_and_size_as_a_flag() {
-    let help = help_text(&["tomb-fido2", "resize", "--help"]);
+    let help = help_text(&["hypogaol", "resize", "--help"]);
     assert!(help.contains("<PATH>"));
     assert!(!help.contains("--path"));
     assert!(help.contains("--size"));
@@ -187,7 +187,7 @@ fn resize_help_lists_path_as_positional_and_size_as_a_flag() {
 #[test]
 fn enroll_rejects_fido2_device_flag_given_without_its_unlock_pair() {
     let result = Cli::try_parse_from([
-        "tomb-fido2",
+        "hypogaol",
         "enroll",
         "/tmp/some-volume",
         "--label",
@@ -204,7 +204,7 @@ fn enroll_rejects_fido2_device_flag_given_without_its_unlock_pair() {
 #[test]
 fn enroll_rejects_unlock_fido2_device_flag_given_without_its_pair() {
     let result = Cli::try_parse_from([
-        "tomb-fido2",
+        "hypogaol",
         "enroll",
         "/tmp/some-volume",
         "--label",
@@ -221,7 +221,7 @@ fn enroll_rejects_unlock_fido2_device_flag_given_without_its_pair() {
 #[test]
 fn enroll_accepts_both_explicit_device_flags_together() {
     let result = Cli::try_parse_from([
-        "tomb-fido2",
+        "hypogaol",
         "enroll",
         "/tmp/some-volume",
         "--label",

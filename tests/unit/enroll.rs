@@ -15,7 +15,7 @@ struct RealFixtureFile(PathBuf);
 
 impl RealFixtureFile {
     fn create(unique_name: &str) -> Self {
-        let path = std::env::temp_dir().join(format!("tomb-fido2-unit-test-enroll-{unique_name}"));
+        let path = std::env::temp_dir().join(format!("hypogaol-unit-test-enroll-{unique_name}"));
         std::fs::write(&path, []).expect("failed to create test fixture file");
         Self(path)
     }
@@ -36,7 +36,7 @@ fn preflight_failure_short_circuits_before_any_mutating_call() {
     let fs = FakeFilesystemBackend::passing().with_log(log.clone());
 
     let result = enroll::run(
-        &PathBuf::from("/tmp/tomb-fido2-unit-test-enroll-does-not-exist"),
+        &PathBuf::from("/tmp/hypogaol-unit-test-enroll-does-not-exist"),
         "backup".to_string(),
         Fido2DeviceSelection::Interactive,
         false,
