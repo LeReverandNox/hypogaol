@@ -93,9 +93,9 @@ action_items:
     owner: "LeReverandNox"
     status: done
   - epic: 5
-    action: "Fix the tier-2 resize grow-only check bug (src/domain/workflows/resize.rs's grow-only size comparison rejecting a same-size/near-minimum-size request) — third occurrence (Epic 4's 4.3 hardware run, Epic 5's 5.2 hardware run). LeReverandNox explicitly requested this be addressed before Epic 6 starts."
+    action: "Fix the tier-2 resize grow-only check bug (src/domain/workflows/resize.rs's grow-only size comparison rejecting a same-size/near-minimum-size request) — third occurrence (Epic 4's 4.3 hardware run, Epic 5's 5.2 hardware run). LeReverandNox explicitly requested this be addressed before Epic 6 starts. RESOLVED 2026-08-03 (Amelia/LeReverandNox, PR #57): root cause was not mkfs overhead on small volumes as originally suspected — confirmed empirically via cryptsetup luksFormat/luksDump that the LUKS2 header consumes a fixed ~16 MiB regardless of volume size, so filesystem_size (post-header payload bytes) was being compared directly against new_size (whole-file bytes), always understating available payload by the header. Fixed by deriving the header size from values already on hand and converting new_size into payload units before comparing. make test-hardware's 4 resize_* scenarios reconfirmed passing on real hardware by LeReverandNox, including the previously-failing grow-only rejection case."
     owner: "LeReverandNox/Amelia"
-    status: open
+    status: done
   - epic: 5
     action: "(Low priority, optional) Clean up the 30 residual tomb-fido2 literals still in tests/unit/*.rs (temp-dir fixture names, cli.rs's fake argv[0] slices) — deliberately deferred by Stories 5.1/5.2 as out-of-scope test fixtures, confirmed harmless."
     owner: "unassigned"
