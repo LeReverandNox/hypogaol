@@ -1,92 +1,156 @@
-# Review — ARCHITECTURE-SPINE.md (tomb-fido2)
+# Architecture Spine Review — Epic 6 (CAP-18..25) amendment
 
-**Reviewed:** `_bmad-output/planning-artifacts/architecture/architecture-tomb-fido2-2026-07-22/ARCHITECTURE-SPINE.md`
-**Against:** `_bmad-output/specs/spec-tomb-fido2/SPEC.md`
-**Date:** 2026-07-22
+**Reviewed:** `ARCHITECTURE-SPINE.md` (updated 2026-08-08), against the good-spine checklist,
+with spot-checks against `src/ports/*.rs`, `src/domain/workflows/*.rs`, and
+`src/adapters/exec/mod.rs`.
+
+Note: this supersedes an earlier review in this same file, written against the original
+7-capability v1 spine. That review's findings (undecided token write-path, AD-5 "valid
+keyslot" ambiguity, no CI/testing strategy, AD-4 enforcement mechanism) have all since
+been resolved in the current spine (AD-2's token schema, AD-5's FIDO2-token-specific
+definition, AD-7's testing strategy, AD-4's "first statement inside the workflow
+function itself" wording) and are not re-raised here.
 
 ## Verdict
 
-The spine is well-scoped and its five ADs are individually sound, but it leaves the single mechanism its entire "no side-channel state" premise depends on (the token JSON write path) undecided, has one AD whose counting rule can silently violate a hard SPEC constraint, and is missing a decision on how the initiative verifies correctness — not a pass as-is.
+Solid, well-reasoned amendment overall — the pre-Epic-6 ADs spot-checked (AD-3, AD-5,
+AD-8, AD-9's pre-CAP-23 shape, AD-14, AD-17, AD-18, and AD-21's device-enumeration reuse
+claim) match the real code exactly, including subtle details (token-then-keyslot removal
+order, `.status()` with inherited stdio in `enroll_fido2_key`, `close`/`slam`/`close_all`
+sequencing, `privileged()`/`invoking_identity()` reuse). But one new invariant — AD-20 —
+has a Rule that does not actually work for its own primary target scenario, and a second
+— AD-21 — has an unaddressed precision gap at unlock. Both are exactly the kind of
+divergence risk this checklist exists to catch, so this is not a clean pass as-is.
 
----
+## Findings
 
-## 1. Divergence points for the level below — mostly covered, one central gap
+### 1. [CRITICAL] AD-20's `lock_target` cannot be acquired before AD-9's own ordering requires it, for the single most common `create` case
 
-The spine correctly identifies and governs the big forks: never reimplement crypto (AD-1), never persist side-channel state (AD-2), never let secrets touch tomb-fido2's process (AD-3), one shared preflight (AD-4), last-keyslot guard in-domain (AD-5). All 7 capabilities are mapped to a governing AD or design element in the Capability → Architecture Map, and none are left unmapped.
+**Where:** AD-20 (lines 167–171), cross-referenced by AD-9 (line 95: "acquires AD-20's
+per-invocation lock, then takes one `CreateTarget` enum argument").
 
-**Gap — the token JSON write path is not actually decided.** AD-2's rule is "written into the LUKS2 header itself via cryptsetup's token JSON metadata," and the ER diagram shows a 3-field payload (`label`, `credential_id`, `created_at`). But:
+AD-20's Rule mandates `lock_target(path)` take `flock(2)` on "an open fd to the path,
+canonicalized via the same helper AD-12's mapping-name derivation already uses." That
+helper is `domain::mapping_name::mapping_name()`, confirmed in
+`src/domain/mapping_name.rs:38` to call `std::fs::canonicalize(path)`, which **errors if
+the path does not exist**.
 
-- Real LUKS2 FIDO2 enrollment via `systemd-cryptenroll` creates a token of type `systemd-fido2`, whose JSON schema (`fido2-credential`, `fido2-rp`, etc.) is owned and parsed by systemd's own cryptsetup plugin, not by tomb-fido2. The spine never says whether tomb-fido2 (a) piggybacks custom fields onto that same `systemd-fido2` token object, (b) defines its own separate custom LUKS2 token type just to hold `label`/`created_at` alongside the `systemd-fido2` token, or (c) something else.
-- The `LuksBackend` port in the Structural Seed only lists `open/close/add_key/remove_key/list_tokens` — there is no method for *writing* token metadata at all. It's unclear what `enroll.rs` is actually supposed to call to make AD-2 true.
-- No schema-version field is present in the token payload, which matters given the product's own multi-year "bank safe" time horizon (SPEC's "Why") — a future tomb-fido2 change to the metadata shape has no migration hook.
+AD-9's Rule mandates the lock be acquired *before* `CreateTarget` is even matched — i.e.
+before the File-branch's `path_exists` check and long before `set_backing_file_size`
+allocates the file. Confirmed in `src/domain/workflows/create.rs:50-67`: today, `preflight`
+runs first, then the `match target`, then `fs.path_exists`, then allocation — all *before*
+any `mapping_name` call, which today happens only later inside `bootstrap_and_provision`
+(line 162), after the file already exists.
 
-This is exactly the kind of thing two independently-built units (enroll.rs authoring the token vs. revoke.rs/unlock.rs reading it, or a future contributor) could resolve incompatibly, and it sits at the foundation of AD-2. This is the spine's most important gap.
+For `CreateTarget::File` targeting a brand-new path — the ordinary, most common `create`
+invocation — canonicalizing that path before it exists is impossible with the mandated
+helper. The spine gives no resolution for this, so two independent implementers will
+diverge exactly as AD-20 exists to prevent:
+- One might canonicalize the parent directory instead and lock that — silently breaking
+  the "same helper AD-12 already uses" requirement and changing lock granularity to
+  "one file per directory" rather than "one file per path."
+- One might open the path with `O_CREAT` to get a lockable fd — which spuriously makes
+  `path_exists(path)` return `true` on the very first invocation, sending a brand-new
+  `create` down AD-9's "does this path already have a marker token" branch and refusing
+  or mishandling what should be a clean new-file create.
+- One might reorder locking to after allocation — silently contradicting AD-9's own
+  explicit "then acquires AD-20's ... lock, then takes one `CreateTarget`" ordering, and
+  reopening exactly the TOCTOU race AD-20 was written to close for two concurrent
+  `create`s at a brand-new path.
 
-**Minor gap — FIDO2 device selection policy.** `ports::fido2_backend` is described only as "device discovery, capability probe." Nothing says what unlock/enroll do when zero or multiple FIDO2 devices are present (auto-pick the only one? error? interactively list and prompt?). Given CAP-5 requires plain-language guidance at "every interactive step," this is a real behavioral fork, not a cosmetic one, and it's currently silent.
+This needs an explicit rule (e.g., lock derived from the *parent directory's* canonical
+path + file basename, decoupled from AD-12's mapping-name helper, with that decoupling
+stated explicitly) before it's implementable without divergence.
 
-## 2. AD Rule enforceability
+### 2. [MEDIUM-HIGH] AD-21's PIN warning can't reliably identify "the device about to be used" at unlock
 
-| AD | Enforceable? | Notes |
-|---|---|---|
-| AD-1 | Yes | Checkable via Cargo.toml dependency audit / review. |
-| AD-2 | Yes | Structurally clear (no sidecar file, explicit path arg). |
-| AD-3 | Yes | Checkable in `adapters::exec` (stdio config per call). |
-| AD-4 | **Weak** | See below. |
-| AD-5 | **Ambiguous in practice** | See below. |
+**Where:** AD-21 (lines 173–177).
 
-**AD-4 is stated but not structurally enforced.** The Rule says preflight is "invoked first by every workflow," but the Structural Seed puts `unlock.rs`, `enroll.rs`, and `revoke.rs` as three independent files with no shared entry point, wrapper, or type-level gate shown that would force the call. Nothing stops one workflow from forgetting to call preflight except code-review discipline — which is precisely the failure mode AD-4 exists to prevent for the *underlying tools*, now reintroduced one level up for the workflows themselves. Recommend naming the actual enforcement mechanism (e.g., a single `run_workflow(f: impl FnOnce(...))` wrapper in `cli/main.rs` that all three commands go through, or a marker type only obtainable after a passed preflight check).
+AD-21's Rule says the PIN warning fires "for any device about to be used, whenever
+`client_pin` is `true`," reusing the existing point-in-time `Fido2Device` enumeration
+already shared by `LuksBackend::open`'s presence-wait loop. That reuse claim is accurate
+against the real code (`wait_for_enough_fido2_devices(1)` at
+`src/adapters/exec/mod.rs:1075`, immediately before `cryptsetup open`).
 
-**AD-5's counting rule doesn't specify what a "valid keyslot" is, and this can silently violate a hard SPEC constraint.** A real LUKS2 volume needs a non-FIDO2 (passphrase) keyslot to bootstrap before the first FIDO2 key can even be enrolled — the spine itself acknowledges this indirectly via AD-3's mention of "existing-passphrase authentication during enroll." SPEC's Constraints are explicit: "No fallback auth paths: FIDO2 is the exclusive unlock mechanism — no GPG or keyfile escape hatch." If AD-5's guard counts *all* keyslots (as literally written — "counts valid keyslots via `LuksBackend`"), a volume with one leftover bootstrap passphrase keyslot plus one FIDO2 keyslot would pass the `> 1` check when revoking the FIDO2 keyslot — leaving the passphrase as the sole remaining unlock method. That satisfies AD-5's literal rule while violating the SPEC's exclusivity constraint and defeating CAP-3's success criterion (which implicitly means "other enrolled FIDO2 keys still work," not "some other keyslot still works"). The spine needs to say explicitly: (a) the guard counts FIDO2-token keyslots specifically, not raw keyslot count, and (b) whether/when the bootstrap passphrase keyslot is removed to actually reach the "FIDO2-exclusive" end state the SPEC requires.
+But at `enroll`/`create` time "the device about to be used" is unambiguous — it's
+whichever device `Fido2DeviceSelection` resolved to. At **unlock**, tomb-fido2 does no
+device selection at all: `wait_for_enough_fido2_devices(1)` only confirms *at least one*
+device is present, then `cryptsetup luksOpen` internally matches the LUKS2 token against
+whichever plugged-in device actually holds the matching credential — invisible to
+`domain`/`adapters::exec`. If more than one FIDO2 device is plugged in at unlock time (a
+normal case for anyone using per-key labels, CAP-18's own motivating scenario), AD-21's
+rule as written would warn about every `client_pin: true` device in the enumeration
+indiscriminately, including devices unrelated to this tomb — a false-positive warning
+that undercuts AD-21's own "Prevents" clause ("a PIN-required device surprising the
+user... instead of before it") by training users to expect warnings that don't
+correspond to the device actually used. This gap is unaddressed by the Rule and should
+be scoped explicitly (e.g., state that the unlock-time warning is "any PIN-required
+device present," not "the device that will actually be used" — a real, and currently
+unstated, difference from the enroll/create case).
 
-## 3. Deferred section — nothing that matters is silently left open
+### 3. [LOW-MEDIUM] Undefined cross-reference: "AR-Dev5" is cited four times but defined nowhere
 
-- Distro packaging beyond GitHub Releases: non-behavioral, fine to defer.
-- FIDO2 PIN-required device UX: the security-relevant half (secret handling) is already governed by AD-3; only cosmetic prompt wording is deferred. Fine.
-- Concurrent invocations against the same device: acceptable to defer for a single-user tool, though a one-line note on why this is safe (e.g., "cryptsetup takes an exclusive header lock") would remove reader doubt cheaply.
+**Where:** Stack table rows for cargo-llvm-cov/cargo-audit/Codecov (lines 211-213),
+Capability Map row for CAP-21 (line 288).
 
-No item in Deferred lets two independently-built units diverge in a way that changes correctness or security — as long as the token-schema gap in §1 and the AD-5 ambiguity in §2 are actually closed (they are not currently deferred — they're just unaddressed, which is worse).
+AR-Dev1 through AR-Dev4 are real, defined entries in `epics.md`'s "Additional
+Requirements — Tooling / DevOps" section, and are cited that way consistently elsewhere
+in this repo's docs (e.g. `implementation-artifacts/1-2-*.md`, `1-3-*.md`). AR-Dev5 is
+not defined anywhere — `grep -rn "AR-Dev5" epics.md` returns nothing. Its only other
+occurrence in the repo is a same-day decision note in `.memlog.md` ("captured as a new
+AR-Dev5 item... not a spine invariant") — i.e. the spine was written assuming a
+companion update to `epics.md` that doesn't appear to have landed. A reader following
+the spine's own citation convention to look up what AR-Dev5 actually requires will find
+nothing. Low functional risk (CAP-21's own SPEC.md entry is self-contained), but it's a
+dangling reference in a document whose whole purpose is to be an authoritative,
+closed-loop contract.
 
-## 4. Named tech — verified against current versions (web-checked, 2026-07-22)
+### 4. [LOW] Stack table: "serde + serde_json" row overstates precision — the two crates are pinned to different versions
 
-| Name | Spine version | Verified current | Verdict |
-|---|---|---|---|
-| Rust (rustc/cargo) | 1.90.0 | 1.97.1 (stable, released 2026-07-16) | **Stale** — ~7 releases / ~10 months behind, with no note that 1.90.0 is a deliberate MSRV pin rather than stale research. |
-| clap | 4.6.2 | 4.6.2 | Current. |
-| serde / serde_json | 1.0.228 | 1.0.228 | Current. |
-| thiserror | 2.0.18 | 2.0.18 | Current. |
-| anyhow | 1.0.103 | 1.0.103 (released 2026-06-25) | Current. |
-| cargo-dist | ~0.32.x | 0.32.0 (released 2026-05-21) | Current. |
-| release-please | "current" | 17.10.3 exists | **Fails the check outright** — no version is actually given, unlike every other row. "current" is not a verifiable pin. |
-| cryptsetup | 2.8.6, verified locally | 2.8.6 stable | Current, and correctly marked as locally verified. |
-| systemd | 261, verified locally | not independently re-checked | Marked as locally verified — acceptable per the same standard applied to cryptsetup. |
+**Where:** Stack table, line 196: `serde + serde_json (token JSON schema) | 1.0.229`.
 
-Two rows fail the "versions given, not stale-sounding" bar: Rust (stale) and release-please (no version given at all).
+`Cargo.toml` pins `serde = "1.0.229"` and `serde_json = "1.0.151"` — two different
+versions collapsed into one table row under one version number. Minor, but this table's
+whole premise is "Snapshot verified 2026-07-22... re-resolve against Cargo.lock at build
+time" — a reader taking the table at face value would misreport `serde_json`'s version.
+Doesn't affect any AD's enforceability, but undercuts the "verified-current" claim the
+checklist asked to spot-check.
 
-## 5. Spec coverage
+### 5. [LOW] AD-3's stderr-piping amendment doesn't flag the pipe-buffer deadlock hazard it introduces
 
-All 7 capabilities (CAP-1..7) are explicitly mapped in the Capability → Architecture Map. Constraints are covered: standard-primitives-only → AD-1; memory hygiene → AD-3; last-keyslot → AD-5 (see caveat above); no sidecar/no backup-awareness → AD-2 and explicit non-scope; break-glass README → Structural Seed's README.md line; compiled-binary requirement → satisfied by choosing Rust; zero-FIDO2-knowledge UX → CAP-5/`cli::ux`; physical-presence-not-configurable → trivially satisfied by AD-1 (no custom logic layered on top of cryptsetup's native token mode). Non-goals aren't contradicted. Nothing from the SPEC is unaddressed.
+**Where:** AD-3 (line 58, "Amended (Epic 6, CAP-25)").
 
-## 6. Whole-initiative dimensions — one left silent
+Today's `enroll_fido2_key` call (`src/adapters/exec/mod.rs:1341-1362`) uses `.status()`
+with all three streams fully inherited — confirmed by its own comment ("stdin/stdout/
+stderr all stay inherited in both branches"). AD-3's amendment for CAP-25 changes this to
+inherited stdin/stdout but *piped* stderr on the same call, for a subprocess that can
+block for an arbitrarily long human touch/PIN wait. Piping one stream while inheriting
+others requires actively draining the piped stderr on a separate thread while the child
+is running (`Command::spawn` + manual stream handling) — using `Stdio::piped()` and only
+reading it after the process exits (or via `.output()`, which is also disallowed here
+since it would capture stdout too) risks the OS pipe buffer filling during a long wait
+and deadlocking the child. The Rule states the *what* (pipe stderr, not stdin/stdout)
+but not the *how*, leaving a correctness pitfall for whoever implements it. Worth a
+one-line implementation note.
 
-Per-dimension check for the initiative altitude:
+## Minor / non-blocking
 
-- **Design paradigm / module boundaries:** decided (hexagonal, explicit).
-- **Data & state:** decided (AD-2, token JSON — modulo the write-path gap above).
-- **Error handling / logging:** decided (Consistency Conventions: typed enum, stderr-only, no telemetry).
-- **Config:** decided (no config file, CLI-args-only).
-- **Deployment & release packaging:** decided (cargo-dist + release-please, GitHub Releases; distro packaging explicitly deferred).
-- **Platform/environment scope:** decided (Linux only; specific cryptsetup/systemd feature flags named).
-- **Infra/provider strategy:** not applicable — the tool has no server/hosted component, so there is genuinely nothing to decide here. Worth one explicit line ("no infra: single local binary, no network calls") so a reader can tell this was considered and not merely forgotten, but not a real gap.
-- **Operations / verification strategy:** **silent.** There is no decision, deferred item, or open question anywhere in the spine about how unlock/enroll/revoke get tested or verified before a release ships — no mention of CI, of testing against real (or loop-backed) LUKS2 volumes, or of how FIDO2 hardware interaction gets exercised without a physical key on every run (e.g., a virtual CTAP2 authenticator in CI). For a tool whose whole value proposition is being trustworthy under crisis stress on irreversible operations (revoke, last-keyslot removal), and which already commits to a release pipeline (cargo-dist/release-please) that presumably gates on *something*, this is a whole operational dimension left completely unaddressed. This should be decided, deferred with a stated reason, or raised as an explicit open question — right now it's just absent.
-
----
-
-## Findings, ranked by severity
-
-1. **(High)** Token JSON metadata write-path is undecided — no stated token type strategy (reuse `systemd-fido2` vs. custom type), no port method to write metadata, no schema-version field. This is the mechanism AD-2 depends on and it's the most likely source of real divergence between independently-built units.
-2. **(High)** AD-5's last-keyslot guard doesn't specify "valid keyslot" = FIDO2-token keyslot specifically. As literally written it can be satisfied while a leftover bootstrap passphrase keyslot silently violates the SPEC's "FIDO2 exclusive, no fallback auth" constraint.
-3. **(Medium)** Testing/CI/verification strategy for the whole initiative is entirely silent — not decided, not deferred, not flagged as an open question — despite the tool performing irreversible operations on real disk headers.
-4. **(Medium)** AD-4 ("preflight invoked first by every workflow") has no structural enforcement mechanism named; it's convention across three independently-written files with nothing shown that actually guarantees it.
-5. **(Low)** Two Stack entries fail "verified-current": Rust 1.90.0 is ~7 releases behind current stable (1.97.1) with no MSRV rationale given; release-please is listed as "current" with no actual version number, unlike every other row.
-
-Minor/non-blocking: FIDO2 multi-device selection policy is unaddressed in `ports::fido2_backend`; infra/provider dimension would benefit from one explicit "not applicable" line rather than silence.
+- AD-9's prose signature for `bootstrap_format_and_open(path, size, filesystem) ->
+  MapperHandle` omits the `name` parameter present in the real trait
+  (`src/ports/luks_backend.rs:20-26`). Cosmetic — the Structural Seed and the port file
+  itself carry the correct signature — but worth tightening since AD-9 is the passage a
+  new implementer is most likely to read first.
+- Deferred section re-read critically: none of the six entries leave an ambiguous
+  "how does X behave" gap that could cause two units to diverge — each is a clean
+  "not implemented" cutline (fixed defaults, out-of-scope operations, additive-later
+  filesystem types), not an underspecified behavior. No finding here.
+- SPEC.md CAP-18..25 all have a corresponding row in the Capability → Architecture Map,
+  and their AD text tracks the SPEC intent/success text closely (checked CAP-18, 19, 22,
+  23, 24, 25 side by side). No obviously missing capability.
+- Stack table's "no pinned version, preflight checks presence" annotations
+  (e2fsprogs/util-linux/psmisc/xfsprogs/btrfs-progs) and "latest stable, re-resolve"
+  annotations (cargo-llvm-cov/cargo-audit) are consistently and explicitly flagged, not a
+  silent gap — this part of the checklist item passes.
+- No whole dimension the initiative altitude owns was found left silent; all Consistency
+  Conventions rows and the Deferred section together cover naming, data/format,
+  state/logging/config, and CLI-alias conventions for the new capabilities.

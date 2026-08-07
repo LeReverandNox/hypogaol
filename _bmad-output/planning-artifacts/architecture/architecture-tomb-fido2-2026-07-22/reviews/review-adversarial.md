@@ -1,100 +1,126 @@
----
-name: 'tomb-fido2 — adversarial architecture review'
-type: architecture-review
-reviews: ../ARCHITECTURE-SPINE.md
-created: '2026-07-22'
-method: 'two-implementer divergence attack'
----
+# Adversarial Review — ARCHITECTURE-SPINE.md (Epic 6 amendments: CAP-18..25 / AD-9, AD-20, AD-21 focus)
 
-# Adversarial Review — ARCHITECTURE-SPINE.md (tomb-fido2)
+Reviewed: `architecture-tomb-fido2-2026-07-22/ARCHITECTURE-SPINE.md`, `updated: 2026-08-08`.
 
-## Method
-
-For each Architectural Decision (AD), I constructed two engineers (or two AI agents) each implementing a *different* piece of the system (typically: one on `enroll`, one on `revoke`, or one on the token schema, one on the CLI dispatch), each reading only the spine and its own capability slice, each satisfying every applicable AD to the letter. I then asked: do their outputs actually interoperate? Every "no" below is a hole — a place the spine states a rule but not the *shape* or *ownership* needed to make two independent, letter-compliant implementations converge.
-
-## Verdict
-
-The spine's five ADs are individually sound but under-specify **three shared contracts** that every workflow depends on: the token JSON schema (including who creates it and via which tool), the definition of "valid keyslot" the last-keyslot guard counts, and the call-site ownership of preflight and of the two-step keyslot+token mutation. Each gap lets two fully-compliant implementations produce code that is individually correct and jointly incompatible or unsafe.
+Method: for each candidate hole, state the ambiguous instruction verbatim, two letter-compliant interpretations two independent implementers could each honestly reach, and why the divergence is real (not stylistic). Findings are ranked by severity of the resulting incompatibility/race.
 
 ---
 
-## Finding 1 — Token JSON schema has no owner, no field contract, and no fixed `type` (Severity: Critical)
+## Finding 1 (severe) — Final-cleanup sub-order of marker-token removal vs. transient-keyslot removal is unstated, and the "wrong" order silently destroys a completed tomb
 
-**The two units:** Engineer A implements `enroll` by shelling out to `systemd-cryptenroll --fido2-device=auto <device>`. Engineer B implements `enroll` by driving `fido2-token` directly to mint a credential, then using `cryptsetup token import` to hand-roll a bespoke LUKS2 token JSON blob.
+**Quote (AD-9):** "`domain` then enrolls the real FIDO2 key via `Fido2Backend`/`systemd-cryptenroll`... then removes the transient passphrase keyslot via AD-5's guarded removal primitive **and removes the CAP-23 marker token, both as create's final cleanup step.**"
 
-**Why both satisfy the letter:** AD-1 only requires that no crypto/FIDO2 library is linked and that only `cryptsetup`/`systemd-cryptenroll`/`fido2-token` are invoked — both A and B qualify, they just pick different tools from the allowed set. AD-2 only requires that per-key state live in "cryptsetup's token JSON metadata" — both do that too. The ER-diagram sketch (`label`, `credential_id`, `created_at`) is described as illustrative ("Token JSON metadata... schema below") but is not a JSON Schema: no field casing convention, no required `type` string, no `keyslots` array (which LUKS2's own token spec *mandates* on every token, and which the ER diagram omits entirely), no encoding for `credential_id` (base64 vs hex vs opaque systemd blob), no timestamp format.
+This sentence names two removals — transient keyslot, marker token — as "both" one final step, but never states which happens first. AD-9's own crash-safety argument for CAP-23 depends entirely on that sub-order, and the sentence's surface reading (keyslot named first, marker named second) points at the *dangerous* order.
 
-**Where they diverge:**
-- Engineer A's token, produced by `systemd-cryptenroll`, has `type: "systemd-fido2"` and systemd's own field set (`fido2-credential`, `fido2-salt`, `fido2-rp`, `fido2-client-pin-required`, …). There is no `label` field anywhere in that schema — systemd-cryptenroll has no such option — so CAP-5's "per-key label" has nowhere to live unless A does a *second*, separate `cryptsetup token import` to bolt a label onto systemd's token, which is a step the spine never describes.
-- Engineer B's token has `type: "tomb-fido2"`, snake_case fields, `credential_id` as base64, `created_at` as ISO-8601.
-- A's `unlock`/`revoke` code (written expecting to parse `type: "systemd-fido2"`) cannot read B's tokens, and vice versa. Worse: cryptsetup itself dispatches unlock behavior by `type` at the C-plugin level for `systemd-fido2` tokens (it can auto-unlock via its bundled plugin) but would silently ignore a `tomb-fido2`-typed token as "unknown," meaning A's device unlocks via cryptsetup's own machinery while B's requires tomb-fido2 to fully reimplement the unlock token-read/hmac-secret-request dance in `adapters::exec` — a fundamentally different `unlock` workflow shape, not just a data format difference.
+**Interpretation A (safe):** remove the marker token first, transient keyslot second. If the process crashes between the two, `has_marker_token` now reads `false` on a fully-working, FIDO2-enrolled tomb. A later `create` on the same path sees `has_luks2_header = true`, `has_marker_token = false`, and refuses as "genuine foreign file" — annoying (the stray transient passphrase keyslot is now permanently un-removable through `create`'s own resume path, and it is invisible to `revoke`'s guard too, since AD-5 defines "valid keyslot" as one with an associated `systemd-fido2` token, which the transient keyslot never has), but no data is destroyed.
 
-**AD to tighten:** Pin AD-1/AD-2 (or add a new AD-6) to state explicitly: which tool creates the token (`systemd-cryptenroll` vs raw `cryptsetup token import`), the exact `type` string, and a versioned JSON Schema (field names, casing, encodings, and the mandatory `keyslots` array) that every workflow reads/writes.
+**Interpretation B (catastrophic, and the order the sentence's word order literally suggests):** remove the transient keyslot first, marker token second. If the process crashes in that window, the marker token is still present on a tomb that is otherwise complete and in use (FIDO2 key enrolled, transient keyslot already gone). AD-9 states the marker is "structural proof nothing of value survived" and that when it's present, resume "proceeds to formatting **regardless of `confirmed`'s value**" with "no confirmation prompt." Re-running `create` against this path therefore re-runs `luksFormat` and silently wipes a fully-functional tomb with no warning — the exact scenario CAP-23 exists to prevent, reintroduced by the ordering CAP-23 itself never pins.
 
----
-
-## Finding 2 — "Valid keyslot" in the last-keyslot guard is undefined; the guard's own port has no keyslot-counting method (Severity: Critical)
-
-**The two units:** Engineer A (implements `LuksBackend` for `revoke`) adds a new `list_keyslots()` method that parses `cryptsetup luksDump` and counts every enabled keyslot in the header (0–31), FIDO2-backed or plain-passphrase alike. Engineer B (implements `revoke` against the Structural Seed's trait list, which only lists `list_tokens` — not `list_keyslots`) satisfies AD-5's wording ("counts valid keyslots via `LuksBackend`") by counting `list_tokens().len()` instead, since that's the only enumeration method the seed actually specifies.
-
-**Why both satisfy the letter:** AD-5 says only "counts valid keyslots via `LuksBackend`... aborts if count `<= 1`." It never says the count must come from keyslot enumeration rather than token enumeration, and the Structural Seed's trait signature (`open/close/add_key/remove_key/list_tokens`) doesn't even offer a keyslot-listing primitive — so B's reading is arguably *more* letter-compliant than A's, since A had to invent a method the seed doesn't list.
-
-**Where they diverge, concretely:**
-- Tokens and keyslots are not 1:1 in LUKS2: a keyslot can exist with no token (e.g., the original passphrase slot from `luksFormat`, before any FIDO2 enrollment), and a token can go stale (its `keyslots` array can point at a slot ID that a bare `cryptsetup luksKillSlot` — run outside tomb-fido2, which AD-2's break-glass design explicitly permits — has already removed).
-- B's guard (`list_tokens().len() <= 1`) will **refuse** to revoke a FIDO2 credential down to one remaining token even when three untouched passphrase keyslots survive it (false-positive block — annoying but safe).
-- The dangerous direction: if a user has 2 FIDO2 tokens but one token has gone stale (its keyslot was already killed via raw cryptsetup break-glass), B's count reads "2 valid" and permits removing the second — leaving **zero working keyslots**, a full lockout, while technically never violating "`<=1` aborts" because B counted tokens, not live keyslots.
-- A's implementation, counting actual header keyslots, would not have this failure mode but silently treats a token-less legacy passphrase slot as "1 more valid slot," which changes whether a revoke of the *last FIDO2 key* is permitted (A permits it if a passphrase slot survives; a stricter reading of the tool's threat model — cold-storage, FIDO2-only — might want that blocked too).
-
-**AD to tighten:** AD-5 must define "valid keyslot" precisely (does it mean "enabled in the LUKS2 header" or "has a live, tool-verifiable credential/device behind it") and must name the exact `LuksBackend` method it's counted from — adding that method to the Structural Seed's trait list, not leaving it to be inferred.
+Both implementers are reading the same sentence and each can defend their order as compliant, because the sentence names two actions in one clause without a stated sequence — unlike AD-5, which is explicit and reasoned about revoke's token-then-keyslot order for exactly this class of crash-safety concern, AD-9 never makes the analogous statement for its own final cleanup pair.
 
 ---
 
-## Finding 3 — Interrupted revoke: no pinned order between `remove-key` and `token-remove`, so a crash produces two different, opposite failure modes (Severity: High)
+## Finding 2 (severe) — `has_marker_token`'s precondition contract is defined two different (and contradictory) ways by the file-backed vs. device-backed branches
 
-**The two units:** Engineer A's `revoke` calls `remove-key` (kill the keyslot) first, then `token-remove` (delete the now-stale token JSON) second. Engineer B does the reverse: `token-remove` first, then `remove-key`.
+**Quote, file-backed branch:** "`false` (no valid LUKS2 header at all, or one without the marker) means a genuine foreign file" — stated as the direct, unconditional result of calling `has_marker_token(path)` with **no prior `has_luks2_header` check** in that branch's control flow at all.
 
-**Why both satisfy the letter:** AD-5 only says the count check happens "before any mutating adapter call" and names both calls as a pair ("remove-key/token-remove") without ordering them. Both A and B run the count check first, then both mutating calls — fully compliant.
+**Quote, device-backed branch:** "if `LuksBackend::has_luks2_header(path)` is `false`, resolve the size... If a header *is* present, the same `has_marker_token(path)` check... decides the outcome" — `has_marker_token` is only ever invoked **after** `has_luks2_header` has already confirmed a header exists.
 
-**Where they diverge:** If the process is killed, the device sleeps, or the second subprocess call fails between the two steps:
-- **A's failure mode:** a token JSON entry survives referencing a keyslot ID that no longer exists — a "dangling token." Any later `list_tokens()`-based enumeration (which, per Finding 2, may be the *only* keyslot count Engineer B's guard uses) now overcounts valid keyslots, potentially green-lighting a subsequent revoke that produces an actual lockout.
-- **B's failure mode:** the keyslot survives but its token metadata is gone — an "orphaned keyslot." Per AD-2, tomb-fido2's only bookkeeping surface is token JSON, so this keyslot becomes permanently invisible to every tomb-fido2 workflow (no label, unlistable, unrevokable through the tool) while still being a live, working unlock method nobody can see or account for — and it still consumes a "valid keyslot" count slot in whichever counting scheme (Finding 2) is used, further muddying future guard decisions.
+These two branches embed two different, incompatible assumptions about the same shared port method:
 
-Both are real, opposite-shaped bugs, and the spine gives no idempotent-recovery rule (e.g., "on next invocation, detect and reconcile dangling tokens / orphaned keyslots before proceeding") and no atomicity requirement.
+**Interpretation A:** `has_marker_token(path)` is self-contained and safe to call on any existing path, including one with no valid LUKS2 header at all (a plain file, a truncated/corrupted header) — it internally does the equivalent of `has_luks2_header` and returns `false` cleanly if that fails. This is what the file-backed branch's parenthetical requires, since it calls `has_marker_token` directly on any `path_exists == true` target without a preceding header check.
 
-**AD to tighten:** Add an AD specifying (a) the mandatory order of the two mutating calls in `revoke` (and the analogous two calls in `enroll` — see Finding 5), and (b) a reconciliation/self-heal step preflight (AD-4) must run to detect dangling tokens or orphaned keyslots before any workflow proceeds.
+**Interpretation B:** `has_marker_token(path)` requires a valid header as a precondition and its behavior on a header-less path is undefined/unspecified (it may error, panic on an unwrap of `luksDump` output, or return a `Result` that the device-backed branch's explicit prior gate exists specifically to avoid triggering). This is what the device-backed branch's control flow implies by never calling it without a preceding `has_luks2_header == true`.
 
----
-
-## Finding 4 — Preflight's call site is unpinned: "domain enforces its own invariant" vs "cli enforces it once" are both AD-4-compliant but give different safety guarantees (Severity: Medium)
-
-**The two units:** Engineer A puts `preflight::run()?` as the first statement inside each of `domain::workflows::{unlock,enroll,revoke}` (defense-in-depth: any caller of the domain function, from any entry point, is protected). Engineer B puts a single `preflight::run()?` call in `cli/main.rs` before dispatch, and leaves the three workflow functions assuming it already ran.
-
-**Why both satisfy the letter:** AD-4 says preflight "is invoked first by every workflow" and "no mutating call proceeds unless it passes" — both readings deliver that outcome as observed from the CLI. Nothing in the spine states which layer is *responsible* for the call, only that it happens before mutation.
-
-**Where they diverge:** In the hexagonal paradigm the spine itself declares, domain is supposed to be safely callable independent of any particular driving adapter. Under B's design, calling `domain::workflows::revoke()` directly — from a test harness, a future second front-end, or from another workflow that internally reuses `unlock` logic — silently skips the dependency/capability gate, because the guarantee lives one layer up in `cli`. Under A's design it's actually enforced at the boundary the spine cares about (domain, not cli). Two engineers each building one workflow under B's assumption, then integrated with a caller who assumed A's, get an ungated mutating path with nobody having written the gate at all.
-
-**AD to tighten:** AD-4 should explicitly assign the call site to `domain` (each workflow function calls it internally, not cli), consistent with the hexagonal principle that domain enforces its own invariants regardless of caller.
+An implementer who builds the real `has_marker_token` to Interpretation B (plausible, since it's the *only* branch of AD-9 that shows explicit defensive gating) breaks the file-backed branch's documented behavior the moment it's invoked directly against a `path_exists == true` target with a corrupted/truncated header or an unrelated non-LUKS2 file — instead of the promised "no confirmation, refuse" outcome, the call errors in a way AD-9 never names or routes anywhere (there is no `DomainError` variant for this scenario named in the doc). This is not hypothetical: a truncated/corrupted LUKS2 header (explicitly one of the two scenarios the prompt calls out) is exactly the case where `has_luks2_header`'s own behavior is itself unspecified (does it do a full parse-validate, or a cheap magic-byte check that would return `true` on a header that's present-but-corrupt, versus `false`?) — so the file-backed and device-backed branches can genuinely diverge on which outcome ("refuse cleanly" vs "unhandled error") a corrupted header produces, purely as a function of which branch the target happens to hit.
 
 ---
 
-## Finding 5 — AD-3 (passthrough stdio) and AD-2 (must capture credential_id into token JSON) collide inside enrollment, and the two ways to resolve the collision produce different port shapes (Severity: Medium)
+## Finding 3 (moderate-severe) — Device-backed marker-resume branch never restates size resolution/validation, leaving a shrunk-device case unhandled
 
-**The two units:** Engineer A runs FIDO2 credential creation + LUKS keyslot add as a **single** subprocess call with fully inherited/passthrough stdio (satisfying AD-3 for that call, since PIN entry and possibly existing-passphrase entry happen inside it) and, because passthrough means no stdout is captured, does a **second, separate, non-secret** call afterward (`fido2-token -L` / `cryptsetup luksDump`) to reconstruct the credential_id for the token JSON. Engineer B instead splits enrollment into an explicit first call that creates the FIDO2 credential with **captured** stdout to get the credential_id programmatically (still passing the PIN through some side channel), followed by a separate cryptsetup call to add the keyslot and write the token.
+**Quote:** "if `LuksBackend::has_luks2_header(path)` is `false`, resolve the size (a user-given size must not exceed `FilesystemBackend::device_capacity(path)`, rejected if it does... if omitted, default to that full capacity) and require `confirmed == true`... If a header *is* present, the same `has_marker_token(path)` check... decides the outcome: `true` proceeds to formatting **regardless of `confirmed`'s value**."
 
-**Why both satisfy the letter:** AD-3 only constrains "any subprocess invocation that may involve secret entry" to passthrough stdio and forbids capturing secret-adjacent output *in that call*. Neither design captures secrets in the same call as a PIN/passphrase prompt — both comply.
+Size resolution/validation against `device_capacity` is stated only inside the `has_luks2_header == false` sub-branch. The `has_luks2_header == true` + `has_marker_token == true` (marker-resume) sub-branch says only "proceeds to formatting" — it never restates whether size is re-resolved/re-validated. Contrast with the file-backed branch, which explicitly says "**Either way**, once past this gate, call `set_backing_file_size`" — file-backed spells out that both sub-branches converge on the same allocation step; device-backed has no equivalent "either way" sentence for size resolution.
 
-**Where they diverge:** A's `Fido2Backend`/`LuksBackend` need a "read back what was just enrolled" query method that must run after the fact and correctly correlate "the token that was just created" (race-prone if two enrollments could ever be in flight, and the spine's own Deferred section admits concurrent invocations are unhandled). B's ports need a "create-credential-with-captured-id" method that must still isolate the PIN entry from the captured stdout stream within the same logical operation — a materially different subprocess/pty handling strategy. The two `Fido2Backend` implementations are not interchangeable, and neither is dictated or ruled out by the spine.
+**Interpretation A:** size resolution is a universal precondition of `bootstrap_format_and_open` regardless of which sub-branch got there, so an implementer re-resolves/re-validates size against current `device_capacity` even on the marker-resume path, naturally handling a device that has shrunk since the original crashed attempt (e.g., the path now points at a smaller LUN/loop device than when the marker was written).
 
-**AD to tighten:** AD-3 (or a new AD) should specify the concrete enrollment call sequence — which call captures what, and how credential_id is obtained without ever needing to demux a single stream that mixes secret passthrough and captured structured output.
+**Interpretation B:** size resolution is scoped, by the text's own structure, to the `has_luks2_header == false` sub-branch only — since the marker-resume sub-branch "proceeds... regardless of `confirmed`," an implementer reasonably reads that as "skip the whole preceding gate block, including size resolution, and reuse whatever size argument was already passed in" (or `None`), passing a stale/unvalidated size straight into `bootstrap_format_and_open`. On a device that has shrunk since the marker was written, this either makes `luksFormat` fail confusingly mid-resume (better case) or, if the size argument silently defaults/threads through as a smaller-than-declared LUKS2 payload spec, produces a header describing more space than the device now has.
 
 ---
 
-## Summary Table
+## Finding 4 (moderate-severe) — AD-20's per-mapping lock in `close_all`/`slam` is not pinned to per-iteration acquire/drop, and the doc's own phrasing points at the wrong model
 
-| # | Severity | Clash |
-|---|----------|-------|
-| 1 | Critical | Token JSON schema/type/owner-tool unspecified — enroll via systemd-cryptenroll vs raw `cryptsetup token import` produce non-interoperable, differently-typed tokens |
-| 2 | Critical | "Valid keyslot" undefined + `LuksBackend` has no keyslot-counting method — token-count vs keyslot-count guards diverge on exactly the case AD-5 exists to prevent |
-| 3 | High | No pinned order for `remove-key`/`token-remove` (or the analogous enroll pair) — interruption produces dangling tokens (A) or invisible orphaned keyslots (B), both corrupting future guard counts |
-| 4 | Medium | Preflight call-site unpinned (domain-internal vs cli-only) — changes whether the gate holds when domain is called other than through cli |
-| 5 | Medium | AD-3 passthrough vs AD-2 capture-for-token-JSON collide in enroll; two resolutions imply two incompatible port method shapes |
+**Quote:** "Every mutating `domain::workflows::*` function (`create`, `enroll`, `revoke`, `close`, `resize`, and **transitively `close_all`/`slam` per mapping**) acquires this lock as its **second statement, immediately after `preflight` (AD-4) passes**." Compare AD-4's own statement about `close_all`/`slam`: "`info`, `close_all`, and `slam`... each call `preflight` **first too**" — describing one `preflight` call at the top of the batch function, not one per mapping. AD-17 describes the per-mapping sequence starting from "hooks, then bind-hooks teardown, then primary `umount`, then `LuksBackend::close`" — it never mentions a lock acquisition step in that per-mapping sequence at all, and `close_all`/`slam` are explicitly said to need "no original device/file path" (AD-17), so there is no single path `lock_target` could be called against once, at the batch level, the way `preflight` is.
+
+**Interpretation A (correct-by-necessity):** because there is no single batch-level path, the lock must be acquired and dropped once per mapping, inside the loop, scoped to that mapping's own close attempt — matching AD-17's per-mapping error-isolation model (each mapping's `Result` is independent) and the parenthetical "per mapping."
+
+**Interpretation B:** an implementer pattern-matching AD-4's explicit "preflight runs once, at the top, for `close_all`/`slam`" onto AD-20's "immediately after preflight passes" (since AD-20 is phrased as directly following AD-4's placement rule, and AD-4's Epic-6 amendment text — "AD-20's per-invocation lock is acquired immediately after this gate passes, never before it and never folded into it" — reads as talking about *the same, single* gate-then-lock pair AD-4 describes for `close_all`) treats "transitively... per mapping" as loosely meaning "this AD's guarantee extends to close_all/slam in aggregate" rather than "re-executed on every loop iteration," and either (a) skips locking for the batch workflows entirely (there being no batch-level path to lock against, and the spine never shows the loop body literally calling `lock_target`), or (b) locks only the first mapping discovered and holds that single guard for the whole loop, satisfying "acquired... as its second statement" read as a single event in the function's lifetime. Neither reading is contradicted by any sentence that explicitly writes out "call `lock_target` inside the per-mapping loop body, drop it before advancing to the next mapping" — that sentence does not exist anywhere in the document; it is inferred, not stated. Since two concurrent `close_all` invocations, or a `close_all` racing an individual `revoke`, on overlapping mappings, is precisely the class of bug AD-20 exists to close, an implementer following Interpretation B reopens the race AD-20 claims is closed, while remaining consistent with every sentence actually written.
+
+---
+
+## Finding 5 (moderate) — `lock_target`'s canonicalization is pinned to "the same helper," but that helper's export shape (one atomic function vs. two composable pieces) is never specified, and `lock_target`'s real implementation sits in a different layer (`adapters::exec`) than the helper it must reuse (`domain::mapping_name`)
+
+**Quote (AD-20):** "`flock(2)`... on an open fd to the path, canonicalized via **the same helper** AD-12's mapping-name derivation already uses." **Quote (Structural Seed, `mapping_name.rs`):** "**single shared canonicalize+hash helper** (AD-12)." **Quote (Structural Seed, `adapters/exec/`):** "`lock_target` (AD-20) uses `flock(2)` on an open fd."
+
+AD-12 places its canonicalize+hash helper in `domain` specifically because "no subprocess is involved" — implying `domain` hosts pure helpers of this kind. `lock_target`'s real implementation, per the Structural Seed, lives in `adapters::exec`, alongside the actual `flock(2)` syscall. For `adapters::exec`'s `lock_target` to canonicalize "via the same helper" as `domain::mapping_name`, either (a) `mapping_name.rs` must expose its canonicalize step as a separately callable function distinct from the full hash-producing call, which `adapters::exec` then imports and calls, or (b) "the same helper" is read loosely as "the same canonicalization *semantics*," and `adapters::exec` re-implements realpath resolution locally (e.g. `std::fs::canonicalize` called directly inside `lock_target`), never actually calling into `domain::mapping_name`.
+
+**Interpretation A:** `mapping_name.rs` is refactored to export a public `canonicalize(path) -> PathBuf` used both by `mapping_name()` internally and by `adapters::exec::lock_target` — a true single source, satisfying the letter and the intent.
+
+**Interpretation B:** since the Structural Seed calls `mapping_name.rs` a "**single** shared canonicalize+hash helper" (singular, one function, no mention of a separately exported canonicalize step), and `lock_target` sits in a different module (`adapters::exec`) that has no stated dependency on `domain::mapping_name`, an implementer reasonably treats "the same helper" as describing equivalent behavior, not a shared call site, and writes `lock_target`'s canonicalization independently. This compiles, passes every test AD-7 describes (fakes don't exercise real canonicalization), and is functionally identical for ordinary symlinked device paths today — but it is a second, textually distinct canonicalization routine that can silently drift from `domain::mapping_name`'s the moment either one gains any device-specific normalization AD-12 doesn't yet have (e.g. resolving `/dev/disk/by-id/...` aliases, handling a path with a trailing slash, or normalizing relative-to-CWD arguments differently) — at which point the mapping name and the lock target for the *same underlying device* could diverge, which is exactly the two-independently-written-call-sites failure AD-12 was written to prevent, now reopened one layer down by AD-20.
+
+---
+
+## Finding 6 (moderate) — AD-21's proactive PIN warning is specified to print from inside `adapters::exec`'s private (non-port) resolver/loop code, breaking the architecture's own "plain-language text only at the `cli` boundary" convention and leaving it outside AD-7's unit-test harness
+
+**Quote (Consistency Conventions):** "domain errors are a typed enum... translated to plain-language text only at the `cli` boundary — **never inside `domain`**; progress stages follow the same translate-at-the-boundary shape." **Quote (AD-21):** "Both existing call sites **print** a plain-language PIN warning for any device about to be used, whenever `client_pin` is `true`, before the blocking touch/PIN subprocess call" — where "both existing call sites" are named as living inside `adapters::exec`'s private enumeration/resolver machinery ("none of this enumeration machinery is itself a port method... FIDO2 device-selection UX lives inside `adapters::exec`, not `domain`/`cli`").
+
+The Structural Seed's `cli/ux.rs` entry lists exactly what plain-language text the `cli` layer owns: "domain-error -> plain-language translation (CAP-5, incl. lock-contention CAP-24 and **PIN-retry CAP-25** errors); `translate_stage` (AD-19)" — the *reactive* PIN-retry warning (captured from stderr) is explicitly routed through `cli::ux`. The *proactive* `client_pin` warning AD-21 introduces is never added to that list, and AD-21's own text has it printed directly, in place, inside `adapters::exec`.
+
+**Interpretation A:** treat AD-21's "print" literally — `adapters::exec` performs the actual `println!`/output call itself, directly at the two (or three — see Finding 7) resolver/loop sites, bypassing `cli::ux` entirely. This is what the paragraph's plain language most directly supports, and it avoids inventing a new port method (which AD-21 explicitly rules out) — but it means a real, user-facing message now originates from the one layer (`adapters::exec`) that AD-7's unit-test suite never exercises (fakes stand in for the whole port; the real `adapters::exec` resolver/print code is only reached by the manual hardware suite), and it is architecturally the only user-facing text in the whole system that does not flow through `cli::ux::translate`/`translate_stage`.
+
+**Interpretation B:** an implementer who takes the "never inside `domain`... translate-at-the-boundary" convention as a whole-of-architecture rule (not scoped narrowly to `domain`) instead threads `client_pin` as data up through the already-returned `Fido2Device`/selection result to `domain`/`cli`, and prints the warning at the `cli` boundary alongside the existing PIN-retry warning — consistent with every other user-facing string in the document, but requiring `domain::workflows::unlock`'s presence-wait interaction and `enroll`'s device-selection flow to each surface a new "warn before touch" seam that doesn't exist today, which AD-21 never describes and which is a materially different code shape (a data/callback path) than "print... at the call site."
+
+Both are defensible: A follows AD-21's literal words at the cost of contradicting the doc's own stated boundary convention; B follows the boundary convention at the cost of inventing plumbing AD-21 never mentions and arguably violates AD-21's explicit "no new port method" intent if implemented via a return-value change to a port trait method's signature.
+
+---
+
+## Finding 7 (minor-moderate) — "Both existing call sites" undercounts by name, and coverage of `create`'s bootstrap enrollment is inferred, not stated
+
+**Quote (AD-21):** "already shared by `LuksBackend::open`'s presence-wait loop **and** `Fido2Backend::enroll_fido2_key`'s `Fido2DeviceSelection::Interactive`**/**`Explicit` resolvers... **Both** existing call sites print a plain-language PIN warning."
+
+The parenthetical names what reads as three distinct blocking-call sites — `open`'s loop, the `Interactive` resolver, and the `Explicit` resolver — then the operative sentence collapses them to "both." An implementer who reads "enroll's device-selection resolvers" as one unit (because `Interactive`/`Explicit` share a common entry function) naturally warns both; an implementer who treats them as genuinely separate code paths (plausible — `Explicit` skips the interactive menu and waits on a directly-named device, a materially different control flow) could add the warning only to the more commonly-exercised `Interactive` path and consider "the enroll call site" (singular, as "both" implies) done, silently missing PIN warnings on `--device`-style explicit enrollment.
+
+Separately, AD-16 states `create`'s bootstrap-enrollment step calls the same `enroll_fido2_key` — implying it funnels through the same resolvers and is therefore covered "for free" if the warning lives in the shared resolver code (Finding 6, Interpretation A). But AD-21 never says this explicitly, and `create`'s CLI flags (per the Structural Seed's `cli/main.rs` list) show no `--device`-style flag for `create` at all, leaving it ambiguous whether `create`'s bootstrap step reuses `Interactive`/`Explicit` verbatim or calls a simpler, bespoke "just use the only/first device" helper that bypasses both resolvers — in which case neither call site's warning fires for `create`, and a spine reader checking only AD-21 (not cross-referencing AD-16 and AD-9) would have no way to know coverage is incomplete for `create`.
+
+---
+
+## Finding 8 (minor) — PIN-warning repetition inside `unlock`'s presence-wait loop is unspecified: once vs. every poll tick
+
+**Quote (AD-21):** "print a plain-language PIN warning... before the blocking touch/PIN subprocess call." `open`'s presence-wait loop (per AD-1/CAP-1's existing design, reused unmodified here) polls repeatedly until the device is touched, and `Fido2Device`/`client_pin` is populated by a `fido2-token -I` call that AD-21 says happens "per enumerated device" — i.e., potentially on every poll iteration if the loop re-enumerates each tick.
+
+**Interpretation A:** the warning prints once, before the loop is entered.
+**Interpretation B:** each poll iteration is itself "the blocking... subprocess call" the sentence refers to, so the warning (correctly, per the letter) prints on every retry — spamming the same PIN warning to the terminal once per poll interval until the user touches the key.
+
+Neither reading is excluded by the text; the difference is a real, user-visible behavioral divergence between two compliant implementations, though lower-severity than Findings 1–6 since it affects UX polish rather than correctness or data safety.
+
+---
+
+## Non-findings (explicitly checked, found adequately specified)
+
+- **CAP-19 scaffold mount/write/unmount vs. CAP-23 marker write/removal, overall total order:** the AD-9 paragraph states one continuous linear narrative — bootstrap (incl. marker **write**) → `mkfs` → optional scaffold mount/write/unmount → FIDO2 enroll → transient-keyslot removal + marker **removal** ("final cleanup step"). Scaffold is textually and logically pinned strictly before marker removal in every reading; there is no plausible alternate ordering here. (The real hole in this territory is Finding 1 — the sub-order *within* the final cleanup pair — not the scaffold step's placement.)
+- **AD-20's canonicalization *source*:** the spine does correctly pin `lock_target` to "the same helper" as AD-12 rather than leaving canonicalization unaddressed — the residual ambiguity is only in the export/module-boundary mechanics (Finding 5), not a from-scratch omission.
+
+---
+
+## Summary table
+
+| # | Severity | Locus | One-line risk |
+|---|---|---|---|
+| 1 | Severe | AD-9 final cleanup | Unstated marker-vs-keyslot removal order; literal reading enables silent destruction of a completed tomb on crash |
+| 2 | Severe | AD-9 `has_marker_token` | File- and device-backed branches assume contradictory preconditions for the same port method |
+| 3 | Moderate-severe | AD-9 device resume | Size re-validation on marker-resume path (shrunk device) never restated, unlike file-backed's explicit "either way" |
+| 4 | Moderate-severe | AD-20 + close_all/slam | Per-mapping lock acquire/drop scoping inferred, not stated; wording nudges toward batch-level/skipped locking |
+| 5 | Moderate | AD-20 canonicalization | "Same helper" doesn't pin export shape; adapters-layer reimplementation is letter-compliant and can drift |
+| 6 | Moderate | AD-21 print boundary | Proactive PIN warning specified to print from `adapters::exec`, contradicting the doc's own cli-boundary convention |
+| 7 | Minor-moderate | AD-21 call-site count | "Both" undercounts Interactive/Explicit/create-bootstrap; coverage of create is inferred not stated |
+| 8 | Minor | AD-21 loop repetition | Warning-once vs. warning-per-poll-tick inside unlock's presence-wait loop is unspecified |
