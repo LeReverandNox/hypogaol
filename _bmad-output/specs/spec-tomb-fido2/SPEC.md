@@ -84,6 +84,38 @@ This tool exists to serve one job: store rarely-accessed, highly sensitive mater
   - **intent:** User gets real step-by-step progress messages during create and resize, naming each real stage as it begins and completes, replacing the Story 1.5 stopgap of one message before and one after the whole operation.
   - **success:** Running create or resize prints a distinct message for each real stage of that operation in order (e.g. allocating, formatting as LUKS2, creating the filesystem, enrolling the FIDO2 key for create; resizing the LUKS2 mapping, growing the filesystem for resize), not just a single start/end message.
 
+- **CAP-18**
+  - **intent:** User can supply a custom label for the first FIDO2 key enrolled during create's bootstrap step, mirroring enroll's existing required `--label` flag, instead of always getting the tool's default label.
+  - **success:** Create accepts an optional `--label`; when given, the tomb's `key_label` metadata equals the supplied value; when omitted, the tool falls back to today's default label, unchanged.
+
+- **CAP-19**
+  - **intent:** User can optionally have create scaffold example bind-hooks/exec-hooks template files into a new volume, so hooks (CAP-16) are discoverable without consulting docs first.
+  - **success:** When requested, create writes commented-out example bind-hooks entries and a non-executable exec-hooks stub into the volume root; when not requested (default), no template files are written.
+
+- **CAP-20**
+  - **intent:** User can use one-letter shorthand aliases for each subcommand's primary flags, in addition to the existing long forms, across the whole CLI.
+  - **success:** `--help` for every subcommand documents a short alias for its options; each documented short alias behaves identically to its long form.
+
+- **CAP-21**
+  - **intent:** Contributors and users see repository-hygiene badges (build status, license, latest release, MSRV) in the README header at a glance, with code-coverage and security-audit badges added once their underlying instrumentation exists.
+  - **success:** README header displays build-status, license (GPL-3.0-or-later), latest-release, MSRV, coverage, and security-audit badges, each linking to the resource it reflects (Actions run, LICENSE file, GitHub Releases, Codecov). Coverage badge uses `cargo-llvm-cov` instrumentation reported to Codecov. Security-audit badge uses `cargo-audit`, run as a gating CI job — a known RustSec advisory fails the build, not just the badge.
+
+- **CAP-22**
+  - **intent:** User can create/resize a tomb using XFS or Btrfs as the filesystem, in addition to today's ext4-only support, via the existing additive `FilesystemBackend` port design (AD-8). For Btrfs, the tool uses `mkfs.btrfs`'s `--mixed` mode (data and metadata share one block group) so small tombs are viable at Btrfs's much lower mixed-mode minimum size (~18 MiB) instead of standard mode's ~114 MiB floor.
+  - **success:** `--filesystem xfs`/`btrfs` are accepted by create; resize's growfs step uses the matching tool (`xfs_growfs`, `btrfs filesystem resize`) read from the same `filesystem` token field; a small Btrfs tomb (e.g. 20 MiB) that would fail under standard mode succeeds via `--mixed`; break-glass recoverability holds identically to ext4.
+
+- **CAP-23**
+  - **intent:** User can re-run create against the same destination after a crash/interruption during a prior create attempt, and have the tool detect the partial attempt and restart it clean, rather than being left with an unrecoverable partial tomb (AD-9's known gap) or a false "destination already exists" refusal. Detection uses a hypogaol-owned custom LUKS2 token (empty `keyslots` array, inert at unlock — the same token mechanism AD-2 already uses for `key_label`/`filesystem`) written immediately after `luksFormat` succeeds and removed as the last step of create, alongside the existing bootstrap-keyslot cleanup.
+  - **success:** Re-running create after a simulated mid-bootstrap interruption against the same destination wipes the partial attempt and restarts create from scratch, resulting in the same fully-created, unlockable tomb as an uninterrupted run — no manual cleanup required first. A destination whose LUKS2 header lacks the marker token (a genuine pre-existing volume) still refuses exactly as today.
+
+- **CAP-24**
+  - **intent:** Tool prevents two simultaneous invocations against the same tomb from racing past each other in a way that corrupts state or bypasses a safety guard, particularly AD-5's live-count last-keyslot guard.
+  - **success:** Running two revoke invocations concurrently against a tomb with exactly two valid keyslots, each targeting a different key, never results in both succeeding (which would leave zero valid keyslots) — the second invocation either serializes behind the first or fails cleanly with a clear "another operation is in progress" error.
+
+- **CAP-25**
+  - **intent:** Tool gives plain-language guidance when the FIDO2 device involved in an operation has a device-level PIN configured, consistent with CAP-5's zero-FIDO2-knowledge posture — distinct from user-verification (CAP-13), which cryptsetup's `systemd-fido2` plugin already reads automatically at unlock with no code change needed. Detection is proactive: the device's `clientPin` status is queried (`fido2-token -L`/`-I`) during preflight/device enumeration, before the user is ever prompted to touch it.
+  - **success:** Enrolling or unlocking with a PIN-required device shows a clear warning that PIN entry will be required, surfaced before the touch prompt, not only after a failure; a wrong-PIN retry shows a plain-language warning naming that retries are limited and what happens if they run out, never a generic "authentication failed".
+
 ## Constraints
 
 - Standard, low-level, well-tested primitives only — LUKS/dm-crypt + FIDO2 hmac-secret. No proprietary formats, no single-vendor-maintained crypto.
@@ -99,7 +131,7 @@ This tool exists to serve one job: store rarely-accessed, highly sensitive mater
 - Read-only unlock (CAP-11) must refuse writes at both the LUKS2/dm-crypt mapping level and the filesystem mount level — a filesystem-level-only read-only mount (plain `mount -o ro` over a read-write dm-crypt mapping) does not satisfy this capability.
 - Creating a file-backed tomb (CAP-8) never requires a pre-existing backing file — the tool allocates it at the given destination path and size as part of create, ruling out any workflow that expects the user to run `dd`/`fallocate`/`truncate` manually beforehand.
 - A device-backed tomb (CAP-8) defaults to the target device/partition's full capacity when no size is given; a user-supplied size is accepted and may be smaller than the device's actual capacity (to leave free space for a later CAP-10 grow), but must never exceed it.
-- Create refuses outright rather than overwriting: a file-backed destination that already exists, or a device-backed target that already carries a LUKS2 header, both abort the operation before any formatting happens.
+- Create refuses outright rather than overwriting: a file-backed destination that already exists, or a device-backed target that already carries a LUKS2 header, both abort the operation before any formatting happens — **except** when the existing LUKS2 header carries CAP-23's hypogaol-owned marker token, identifying it as this tool's own crashed partial attempt rather than a genuine pre-existing file/volume; that case wipes and restarts create clean instead of refusing.
 - Device-backed create is inherently higher-risk than file-backed (the wrong device vs. a typo'd file path) — the tool must show an explicit warning describing the impending wipe and data loss and require the user's explicit confirmation before formatting any device target, even when no existing LUKS2 header was detected.
 - The name `tomb-fido2` is a placeholder, not final branding — a permanent name is still pending. CLI/binary name, package/module name, user-facing strings, and on-disk metadata field names must not hardcode it or assume its permanence, so a future rename requires no redesign.
   - **Addendum (2026-08-02):** the rename to `Hypogaol`/`hypogaol` executed on 2026-08-02, resolving this constraint. See `sprint-change-proposal-2026-08-02.md` for the source of record.
@@ -114,6 +146,7 @@ This tool exists to serve one job: store rarely-accessed, highly sensitive mater
 - Remote or delegated unlock beyond what cryptsetup's native FIDO2 token mode offers.
 - Post-quantum-readiness features.
 - Shrinking an existing tomb — resize is grow-only for v1.
+- Exposing the full `systemd-cryptenroll` FIDO2 flag set (`--fido2-credential-algorithm`, `--fido2-salt-file`, `--fido2-parameters-in-header`, `--fido2-with-client-pin`, `--fido2-with-user-presence`) during enrollment — deferred, not declined: if built, these would be fully optional/opt-in (mirroring `systemd-cryptenroll` itself), so a non-technical user in crisis never sees or needs them, and this would not actually conflict with NFR3/NFR5 the way blanket exposure would. Deferred anyway because the need is fully speculative — no concrete user or use case has hit this wall yet. Revisit if a real need surfaces.
 
 ## Success signal
 
@@ -124,3 +157,4 @@ A user who has never touched the tool before can, in a real crisis, unlock and m
 - The Should-Have items from the source brainstorm (break-glass README procedure, 3-2-1 backup disclaimer) are folded into Constraints here rather than kept as separate capabilities, since they bend documentation/design decisions rather than describing testable tool behavior.
 - Two implementation-mechanism questions raised by the Epic 4 brainstorm are intentionally left unresolved here and deferred to the architecture step, since they are HOW, not WHAT, and don't block any capability's intent/success: (1) whether `unlock`/`resize`'s existing token-based `open` call needs any change to support a UV-enrolled key (CAP-13), or cryptsetup's token machinery already handles it transparently; (2) the concrete mechanism by which close-all/slam (CAP-14/15) live-enumerates "all currently open tombs" without a registry.
 - Existing Non-goals (remote/delegated unlock beyond cryptsetup's native token mode, post-quantum-readiness, shrink) were reconfirmed against the Epic 4 candidate features — none of CAP-12..17 touch them.
+- CAP-19's template scaffolding is opt-in via a flag, default off — avoids surprising users with unrequested files in their volume; not directly confirmed, inferred from "optionally" in the source backlog wording.
