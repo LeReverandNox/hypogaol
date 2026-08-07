@@ -156,6 +156,4 @@ A user who has never touched the tool before can, in a real crisis, unlock and m
 ## Assumptions
 
 - The Should-Have items from the source brainstorm (break-glass README procedure, 3-2-1 backup disclaimer) are folded into Constraints here rather than kept as separate capabilities, since they bend documentation/design decisions rather than describing testable tool behavior.
-- Two implementation-mechanism questions raised by the Epic 4 brainstorm are intentionally left unresolved here and deferred to the architecture step, since they are HOW, not WHAT, and don't block any capability's intent/success: (1) whether `unlock`/`resize`'s existing token-based `open` call needs any change to support a UV-enrolled key (CAP-13), or cryptsetup's token machinery already handles it transparently; (2) the concrete mechanism by which close-all/slam (CAP-14/15) live-enumerates "all currently open tombs" without a registry.
 - Existing Non-goals (remote/delegated unlock beyond cryptsetup's native token mode, post-quantum-readiness, shrink) were reconfirmed against the Epic 4 candidate features — none of CAP-12..17 touch them.
-- CAP-19's template scaffolding is opt-in via a flag, default off — avoids surprising users with unrequested files in their volume; not directly confirmed, inferred from "optionally" in the source backlog wording.
