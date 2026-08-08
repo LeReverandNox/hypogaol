@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use hypogaol::domain::errors::DomainError;
+use hypogaol::domain::mapping_name;
 use hypogaol::domain::types::{CreateTarget, Filesystem};
 use hypogaol::domain::workflows::create::{self, MIN_VOLUME_SIZE_BYTES};
 use hypogaol::ports::fido2_backend::Fido2DeviceSelection;
@@ -1062,5 +1063,299 @@ fn device_branch_failure_closes_the_mapping_without_removing_any_backing_file() 
             "enroll_fido2_key".to_string(),
             "close".to_string(),
         ]
+    );
+}
+
+#[test]
+fn create_with_scaffold_hooks_true_mounts_writes_templates_and_unmounts_after_mkfs() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing().with_log(log.clone());
+
+    let fixture = RealFixtureFile::create("scaffold-hooks-true-file");
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_VOLUME_SIZE_BYTES,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        None,
+        true,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+
+    // AD-9's real execution order: scaffolding lands strictly after mkfs and
+    // strictly before final marker/keyslot cleanup (AC #3).
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "path_exists".to_string(),
+            "set_backing_file_size".to_string(),
+            "close_stale_mapping".to_string(),
+            "bootstrap_format_and_open".to_string(),
+            "enroll_fido2_key".to_string(),
+            "mkfs".to_string(),
+            "mount".to_string(),
+            "scaffold_hook_templates".to_string(),
+            "umount".to_string(),
+            "remove_marker_token".to_string(),
+            "list_fido2_keyslots".to_string(),
+            "remove_key".to_string(),
+            "close".to_string(),
+        ]
+    );
+
+    // The exact mountpoint `mount` returned is what gets threaded into
+    // `scaffold_hook_templates` — not a stand-in.
+    let expected_name = mapping_name::mapping_name(&fixture.0).unwrap();
+    assert_eq!(
+        fs.last_scaffold_hook_templates_mountpoint(),
+        Some(PathBuf::from(format!("/tmp/fake-mount-{expected_name}")))
+    );
+}
+
+#[test]
+fn create_with_scaffold_hooks_false_never_mounts_for_scaffolding() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing().with_log(log.clone());
+
+    let fixture = RealFixtureFile::create("scaffold-hooks-false-file");
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_VOLUME_SIZE_BYTES,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        None,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "path_exists".to_string(),
+            "set_backing_file_size".to_string(),
+            "close_stale_mapping".to_string(),
+            "bootstrap_format_and_open".to_string(),
+            "enroll_fido2_key".to_string(),
+            "mkfs".to_string(),
+            "remove_marker_token".to_string(),
+            "list_fido2_keyslots".to_string(),
+            "remove_key".to_string(),
+            "close".to_string(),
+        ],
+        "with scaffold_hooks false, the write path must never even be reached"
+    );
+    assert_eq!(fs.last_scaffold_hook_templates_mountpoint(), None);
+}
+
+#[test]
+fn create_device_with_scaffold_hooks_true_mounts_writes_templates_and_unmounts_after_mkfs() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_device_capacity(MIN_VOLUME_SIZE_BYTES * 2);
+
+    let fixture = RealFixtureFile::create("scaffold-hooks-true-device");
+    let target = CreateTarget::Device {
+        path: fixture.0.clone(),
+        size: None,
+        confirmed: true,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        None,
+        true,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "has_luks2_header".to_string(),
+            "device_capacity".to_string(),
+            "close_stale_mapping".to_string(),
+            "bootstrap_format_and_open".to_string(),
+            "enroll_fido2_key".to_string(),
+            "mkfs".to_string(),
+            "mount".to_string(),
+            "scaffold_hook_templates".to_string(),
+            "umount".to_string(),
+            "remove_marker_token".to_string(),
+            "list_fido2_keyslots".to_string(),
+            "remove_key".to_string(),
+            "close".to_string(),
+        ]
+    );
+
+    let expected_name = mapping_name::mapping_name(&fixture.0).unwrap();
+    assert_eq!(
+        fs.last_scaffold_hook_templates_mountpoint(),
+        Some(PathBuf::from(format!("/tmp/fake-mount-{expected_name}")))
+    );
+}
+
+#[test]
+fn create_device_with_scaffold_hooks_false_never_mounts_for_scaffolding() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_device_capacity(MIN_VOLUME_SIZE_BYTES * 2);
+
+    let fixture = RealFixtureFile::create("scaffold-hooks-false-device");
+    let target = CreateTarget::Device {
+        path: fixture.0.clone(),
+        size: None,
+        confirmed: true,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        None,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "has_luks2_header".to_string(),
+            "device_capacity".to_string(),
+            "close_stale_mapping".to_string(),
+            "bootstrap_format_and_open".to_string(),
+            "enroll_fido2_key".to_string(),
+            "mkfs".to_string(),
+            "remove_marker_token".to_string(),
+            "list_fido2_keyslots".to_string(),
+            "remove_key".to_string(),
+            "close".to_string(),
+        ],
+        "with scaffold_hooks false, the write path must never even be reached"
+    );
+    assert_eq!(fs.last_scaffold_hook_templates_mountpoint(), None);
+}
+
+#[test]
+fn create_scaffold_hook_templates_failure_still_unmounts_before_returning_the_error() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_failure_at("scaffold_hook_templates");
+
+    let fixture = RealFixtureFile::create("scaffold-hooks-scaffold-failure");
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_VOLUME_SIZE_BYTES,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        None,
+        true,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_err(), "expected Err, got {result:?}");
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "path_exists".to_string(),
+            "set_backing_file_size".to_string(),
+            "close_stale_mapping".to_string(),
+            "bootstrap_format_and_open".to_string(),
+            "enroll_fido2_key".to_string(),
+            "mkfs".to_string(),
+            "mount".to_string(),
+            "scaffold_hook_templates".to_string(),
+            "umount".to_string(),
+            "close".to_string(),
+            "remove_backing_file".to_string(),
+        ],
+        "a scaffold_hook_templates failure must still unmount before returning the error, or \
+         the outer luks.close misreports device-busy instead of the real failure"
+    );
+}
+
+#[test]
+fn create_scaffold_hooks_umount_failure_after_a_scaffold_failure_wraps_as_rollback_cleanup_also_failed(
+) {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+
+    let fixture = RealFixtureFile::create("scaffold-hooks-scaffold-and-umount-failure");
+    let expected_name = mapping_name::mapping_name(&fixture.0).unwrap();
+    let fs = FakeFilesystemBackend::passing()
+        .with_failure_at("scaffold_hook_templates")
+        .with_umount_failure_for(&expected_name);
+
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_VOLUME_SIZE_BYTES,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        None,
+        true,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(
+        matches!(result, Err(DomainError::RollbackCleanupAlsoFailed { .. })),
+        "expected Err(DomainError::RollbackCleanupAlsoFailed), got {result:?}"
     );
 }
