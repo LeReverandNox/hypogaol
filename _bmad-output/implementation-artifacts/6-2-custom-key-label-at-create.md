@@ -4,7 +4,7 @@ baseline_commit: 919c684d43a5917ffd4497a7360376fefc76aa0b
 
 # Story 6.2: Custom Key Label at Create
 
-Status: in-progress
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
