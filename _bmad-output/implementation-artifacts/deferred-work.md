@@ -120,6 +120,15 @@
 
 - Internal test/temp-file fixtures still embed the old product name — not user-facing, out of this story's narrow scope (Cargo/config/flake/README/CHANGELOG/CI); natural pickup for Story 5.2 since it already touches these same files for the `tomb`→`volume` domain-noun rename. [src/adapters/exec/mod.rs:251,2251; tests/hardware/main.rs; tests/unit/*.rs]
 
+## Deferred from: code review of 6-1-crash-safe-create-resume (2026-08-08)
+
+- `luksFormat` and the marker-token write are non-atomic, sequential subprocess calls — inherent to the two-subprocess-call mechanism (no atomic cryptsetup primitive combines format + token-import); a crash in that narrow window loses the marker permanently, but the fallback is "refuses to resume, same as a genuine pre-existing volume" — the pre-CAP-23 baseline behavior, not new data loss. [src/adapters/exec/mod.rs:894-919]
+
+## Deferred from: manual hardware verification of 6-1-crash-safe-create-resume (2026-08-08)
+
+- **Stale-mapping gap found during manual crash-simulation — fixed directly in this story, not deferred.** See `6-1-crash-safe-create-resume.md`'s Review Findings/Completion Notes for the fix (`LuksBackend::close_stale_mapping`, called unconditionally at the top of `bootstrap_and_provision`).
+- `create device` requires the whole CLI invocation to run as root (already tracked below, 1-6 review) — confirmed again live, plus a concrete UX direction from this session: elevate privileges automatically when needed (e.g. re-exec via `sudo`/`pkexec`) rather than requiring the operator to prefix the whole command with `sudo` themselves. Not fixed in this story — genuinely a different, broader concern (affects every privileged operation, not just `create`).
+
 ## Deferred from: code review of 5-3-top-level-branding-copy (2026-08-03)
 
 - Task 3's tone-boundary grep omits `src/cli/main.rs` (where the real runtime `println!`/`eprintln!` strings live) and its flavor-vocabulary pattern doesn't cover all of brand-identity.md's mascot/palette terms (e.g. "gothic", "warden", "moss", "amber", "keyhole", "tracery", "blackletter") — re-running the check with `main.rs` and the expanded vocabulary included still returns zero matches today, so no live violation; flag for future stories that extend Epic 5's tone-boundary checks. [_bmad-output/implementation-artifacts/5-3-top-level-branding-copy.md, Task 3]

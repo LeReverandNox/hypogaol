@@ -63,9 +63,66 @@ fn refuses_before_touching_anything_if_destination_already_exists() {
         other => panic!("expected DomainError::DestinationExists, got {other:?}"),
     }
 
-    // Only the existence check itself ran — no file allocated, no LUKS
-    // formatting attempted (AC #2).
-    assert_eq!(*log.borrow(), vec!["path_exists".to_string()]);
+    // The existence check ran, then has_marker_token (CAP-23's
+    // resume check, defaulting to false here) confirmed this is a genuine
+    // pre-existing destination — no file allocated, no LUKS formatting
+    // attempted (AC #2/#3).
+    assert_eq!(
+        *log.borrow(),
+        vec!["path_exists".to_string(), "has_marker_token".to_string()]
+    );
+}
+
+#[test]
+fn file_backed_resume_proceeds_through_the_full_happy_path_with_no_confirmation_involved() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing()
+        .with_log(log.clone())
+        .with_has_marker_token(true);
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing()
+        .with_path_exists(true)
+        .with_log(log.clone());
+
+    let fixture = RealFixtureFile::create("file-resume-happy-path");
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_VOLUME_SIZE_BYTES,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+
+    // A marker-verified destination falls through exactly as if it hadn't
+    // existed (AC #1): the same happy-path sequence runs, just with
+    // has_marker_token inserted where the refusal would otherwise have
+    // returned.
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "path_exists".to_string(),
+            "has_marker_token".to_string(),
+            "set_backing_file_size".to_string(),
+            "close_stale_mapping".to_string(),
+            "bootstrap_format_and_open".to_string(),
+            "enroll_fido2_key".to_string(),
+            "mkfs".to_string(),
+            "remove_marker_token".to_string(),
+            "list_fido2_keyslots".to_string(),
+            "remove_key".to_string(),
+            "close".to_string(),
+        ]
+    );
 }
 
 #[test]
@@ -141,9 +198,11 @@ fn happy_path_runs_every_port_call_once_in_order() {
         vec![
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
+            "close_stale_mapping".to_string(),
             "bootstrap_format_and_open".to_string(),
             "enroll_fido2_key".to_string(),
             "mkfs".to_string(),
+            "remove_marker_token".to_string(),
             "list_fido2_keyslots".to_string(),
             "remove_key".to_string(),
             "close".to_string(),
@@ -244,6 +303,7 @@ fn enroll_failure_closes_the_mapping_and_removes_the_backing_file() {
         vec![
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
+            "close_stale_mapping".to_string(),
             "bootstrap_format_and_open".to_string(),
             "enroll_fido2_key".to_string(),
             "close".to_string(),
@@ -284,6 +344,7 @@ fn mkfs_failure_closes_the_mapping_and_removes_the_backing_file() {
         vec![
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
+            "close_stale_mapping".to_string(),
             "bootstrap_format_and_open".to_string(),
             "enroll_fido2_key".to_string(),
             "mkfs".to_string(),
@@ -329,7 +390,54 @@ fn bootstrap_format_and_open_failure_removes_the_backing_file_without_closing_a_
         vec![
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
+            "close_stale_mapping".to_string(),
             "bootstrap_format_and_open".to_string(),
+            "remove_backing_file".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn close_stale_mapping_failure_aborts_before_bootstrap_format_and_open_ever_runs() {
+    // A stale mapping that's still busy/mounted (e.g. for an unrelated
+    // reason under the same deterministic name) must never be forced
+    // through — create aborts instead of proceeding to reformat, and never
+    // even reaches bootstrap_format_and_open (review finding, 2026-08-08).
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing()
+        .with_log(log.clone())
+        .with_failure_at("close_stale_mapping");
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing().with_log(log.clone());
+
+    let fixture = RealFixtureFile::create("close-stale-mapping-failure");
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_VOLUME_SIZE_BYTES,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_err(), "expected Err, got {result:?}");
+    // bootstrap_format_and_open never runs — matches the existing
+    // File-branch convention that any bootstrap_and_provision error after
+    // set_backing_file_size triggers remove_backing_file, same as the
+    // bootstrap_format_and_open-itself-fails case above.
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "path_exists".to_string(),
+            "set_backing_file_size".to_string(),
+            "close_stale_mapping".to_string(),
             "remove_backing_file".to_string(),
         ]
     );
@@ -369,9 +477,11 @@ fn device_happy_path_with_no_size_given_uses_the_full_capacity() {
         vec![
             "has_luks2_header".to_string(),
             "device_capacity".to_string(),
+            "close_stale_mapping".to_string(),
             "bootstrap_format_and_open".to_string(),
             "enroll_fido2_key".to_string(),
             "mkfs".to_string(),
+            "remove_marker_token".to_string(),
             "list_fido2_keyslots".to_string(),
             "remove_key".to_string(),
             "close".to_string(),
@@ -415,9 +525,11 @@ fn device_happy_path_with_a_size_smaller_than_capacity_uses_the_requested_size()
         vec![
             "has_luks2_header".to_string(),
             "device_capacity".to_string(),
+            "close_stale_mapping".to_string(),
             "bootstrap_format_and_open".to_string(),
             "enroll_fido2_key".to_string(),
             "mkfs".to_string(),
+            "remove_marker_token".to_string(),
             "list_fido2_keyslots".to_string(),
             "remove_key".to_string(),
             "close".to_string(),
@@ -503,9 +615,126 @@ fn device_with_existing_luks2_header_refuses_even_when_confirmed() {
         other => panic!("expected DomainError::DeviceAlreadyFormatted, got {other:?}"),
     }
 
-    // Header check runs first and wins — nothing else is ever called, even
-    // though `confirmed` was true (AC #4: not bypassable by confirming).
-    assert_eq!(*log.borrow(), vec!["has_luks2_header".to_string()]);
+    // Header check runs first, then has_marker_token (defaulting to false
+    // here) confirms this is a genuine pre-existing header, not a
+    // marker-verified resume — nothing else is ever called, even though
+    // `confirmed` was true (AC #4: not bypassable by confirming).
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "has_luks2_header".to_string(),
+            "has_marker_token".to_string()
+        ]
+    );
+}
+
+#[test]
+fn device_backed_resume_proceeds_even_when_not_confirmed() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing()
+        .with_log(log.clone())
+        .with_has_luks2_header(true)
+        .with_has_marker_token(true);
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_device_capacity(MIN_VOLUME_SIZE_BYTES * 2);
+
+    let fixture = RealFixtureFile::create("device-resume-not-confirmed");
+    let target = CreateTarget::Device {
+        path: fixture.0.clone(),
+        size: None,
+        confirmed: false,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+
+    // confirmed: false never triggers DeviceConfirmationRequired — a
+    // marker-verified resume skips that check entirely (AC #2), proving
+    // confirmation is genuinely skipped, not just defaulted.
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "has_luks2_header".to_string(),
+            "has_marker_token".to_string(),
+            "device_capacity".to_string(),
+            "close_stale_mapping".to_string(),
+            "bootstrap_format_and_open".to_string(),
+            "enroll_fido2_key".to_string(),
+            "mkfs".to_string(),
+            "remove_marker_token".to_string(),
+            "list_fido2_keyslots".to_string(),
+            "remove_key".to_string(),
+            "close".to_string(),
+        ]
+    );
+}
+
+#[test]
+fn device_backed_resume_still_enforces_size_against_capacity() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing()
+        .with_log(log.clone())
+        .with_has_luks2_header(true)
+        .with_has_marker_token(true);
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_device_capacity(1024);
+
+    let fixture = RealFixtureFile::create("device-resume-size-exceeds-capacity");
+    let target = CreateTarget::Device {
+        path: fixture.0.clone(),
+        size: Some(2048),
+        confirmed: false,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    match result {
+        Err(DomainError::DeviceSizeExceedsCapacity {
+            path,
+            requested,
+            capacity,
+        }) => {
+            assert_eq!(path, fixture.0);
+            assert_eq!(requested, 2048);
+            assert_eq!(capacity, 1024);
+        }
+        other => panic!("expected DomainError::DeviceSizeExceedsCapacity, got {other:?}"),
+    }
+
+    // Confirmation was skipped entirely (marker-verified resume, AC #2),
+    // but size resolution against device_capacity still ran unconditionally
+    // — a device shrunk since the crashed attempt is still caught.
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "has_luks2_header".to_string(),
+            "has_marker_token".to_string(),
+            "device_capacity".to_string()
+        ]
+    );
 }
 
 #[test]
@@ -633,6 +862,7 @@ fn device_branch_failure_closes_the_mapping_without_removing_any_backing_file() 
         vec![
             "has_luks2_header".to_string(),
             "device_capacity".to_string(),
+            "close_stale_mapping".to_string(),
             "bootstrap_format_and_open".to_string(),
             "enroll_fido2_key".to_string(),
             "close".to_string(),

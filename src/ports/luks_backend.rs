@@ -12,6 +12,36 @@ pub trait LuksBackend {
     /// refusal check) — a pure query, no mutation.
     fn has_luks2_header(&self, path: &Path) -> Result<bool, DomainError>;
 
+    /// `true` only for a path with a valid LUKS2 header carrying the marker;
+    /// `false` for no header, an unreadable/invalid header, or a valid
+    /// header without the marker (AD-9, CAP-23) — a single self-contained
+    /// check, safe to call on any path regardless of what's already been
+    /// verified about it.
+    fn has_marker_token(&self, path: &Path) -> Result<bool, DomainError>;
+
+    /// Removes the marker token written by `bootstrap_format_and_open`.
+    /// Called only after a fully successful create, before the bootstrap
+    /// keyslot is removed (AD-9's safe-ordering requirement, CAP-23 AC #4).
+    fn remove_marker_token(&self, path: &Path) -> Result<(), DomainError>;
+
+    /// Closes any dm-crypt mapping already active under `name`, tolerating
+    /// "no such mapping" as `Ok(())` — the expected common case for a fresh
+    /// create (never touched before) or a prior attempt that already closed
+    /// cleanly. Exists for CAP-23: a real process-death crash between a
+    /// successful `luksOpen` and `bootstrap_and_provision`'s own cleanup
+    /// leaves exactly this kind of orphaned mapping under the deterministic
+    /// name a resume attempt recomputes (`mapping_name` is a pure hash of
+    /// the canonicalized path), blocking `bootstrap_format_and_open`'s
+    /// `luksFormat` call before the marker-verified resume logic ever gets a
+    /// chance to run. Any failure other than "doesn't exist" (e.g. the
+    /// mapping exists but is still busy/mounted) propagates — this must
+    /// never force through a mapping that's still legitimately in active
+    /// use. Called unconditionally at the start of `bootstrap_and_provision`
+    /// for both fresh and marker-verified-resume creates — safe either way,
+    /// since a stale mapping under this exact name can only exist if this
+    /// tool itself already got as far as `luksOpen` on this same path.
+    fn close_stale_mapping(&self, name: &str) -> Result<(), DomainError>;
+
     /// Formats a brand-new LUKS2 header at `path` seeded with a transient random
     /// passphrase, then opens it as `name`, returning the resulting mapping
     /// (AD-9). `size` constrains the LUKS2 payload to exactly that many bytes

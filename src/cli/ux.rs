@@ -195,6 +195,34 @@ fn translate_adapter_failure(inner: &str) -> String {
             .to_string();
     }
 
+    // `create`'s own CAP-23 resume-marker write (`bootstrap_format_and_open`,
+    // right after `luksFormat`, before FIDO2 enrollment even begins) — its
+    // underlying `cryptsetup token import` call's `{cmd:?}` Debug dump
+    // contains the same `"token" "import"` substring `ENROLLMENT_MARKERS`
+    // below matches on, which would otherwise misreport this as a failed
+    // FIDO2 enrollment. Checked first for that reason (marker-bleed guard,
+    // review finding, 2026-08-08).
+    if inner.contains("create-marker-write") {
+        return "Hypogaol formatted this volume but couldn't finish its crash-recovery \
+                bookkeeping. No filesystem or security key was set up yet — try again."
+            .to_string();
+    }
+
+    // `create`'s own CAP-23 resume-marker removal (`finish_provisioning`'s
+    // final cleanup, after enrollment and `mkfs` already succeeded) — its
+    // underlying `cryptsetup token remove` call produces the same message
+    // shape as `revoke`'s own `remove_key` token removal below, which would
+    // otherwise misreport a `create` cleanup failure as a failed `revoke`.
+    // Checked first for that reason (marker-bleed guard, review finding,
+    // 2026-08-08). Re-running `create` against the same destination finishes
+    // this cleanup automatically, since the marker is still present.
+    if inner.contains("create-marker-remove") {
+        return "Your volume was created successfully, but Hypogaol couldn't finish cleaning up \
+                internally afterward. Re-running create against the same destination will finish \
+                the cleanup."
+            .to_string();
+    }
+
     // FIDO2 enrollment failures (`enroll_fido2_key`'s own body — its
     // transient temp key file, its `systemd-cryptenroll` call, and its token
     // export/import/parse helpers) — checked first since several of these

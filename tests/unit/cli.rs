@@ -2,7 +2,8 @@ use std::path::Path;
 
 use clap::Parser;
 use hypogaol::cli::main::{
-    confirms_revoke, confirms_wipe, parse_size, unlock_intro_message, unlock_success_message, Cli,
+    confirms_revoke, confirms_wipe, device_create_confirmation, parse_size, unlock_intro_message,
+    unlock_success_message, Cli,
 };
 use hypogaol::domain::workflows::create::MIN_VOLUME_SIZE_BYTES;
 
@@ -56,6 +57,36 @@ fn confirms_wipe_requires_exactly_yes() {
     assert!(!confirms_wipe("y"));
     assert!(!confirms_wipe(""));
     assert!(!confirms_wipe("no"));
+}
+
+#[test]
+fn device_create_confirmation_fresh_device_declined() {
+    assert_eq!(device_create_confirmation(false, false), (false, false));
+}
+
+#[test]
+fn device_create_confirmation_fresh_device_confirmed() {
+    assert_eq!(device_create_confirmation(false, true), (true, true));
+}
+
+#[test]
+fn device_create_confirmation_marker_verified_resume_skips_prompt_and_proceeds() {
+    // The prompt is never asked on this path (`wipe_confirmed` is always
+    // `false` at the real call site) — `confirmed` must stay `false` (no
+    // interactive "yes" was obtained; `domain`'s own fresh marker check is
+    // the real authority) while `announce` is still `true` (work is expected
+    // to proceed). This is the regression guard for the confirmation-bypass
+    // review finding (2026-08-08): an explicit decline must never be
+    // silently overridden by marker state.
+    assert_eq!(device_create_confirmation(true, false), (false, true));
+}
+
+#[test]
+fn device_create_confirmation_marker_verified_resume_ignores_stale_wipe_confirmed() {
+    // Defensive: even if a caller somehow passed `wipe_confirmed: true`
+    // alongside `marker_verified_resume: true`, `confirmed` must still come
+    // back `false` — resume is authorized by the marker, never by this flag.
+    assert_eq!(device_create_confirmation(true, true), (false, true));
 }
 
 #[test]

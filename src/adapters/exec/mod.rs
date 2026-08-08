@@ -18,6 +18,13 @@ use crate::ports::fido2_backend::{Fido2Backend, Fido2DeviceSelection};
 use crate::ports::filesystem_backend::FilesystemBackend;
 use crate::ports::luks_backend::LuksBackend;
 
+/// Distinct LUKS2 token `type` string for CAP-23's crash-safe-resume
+/// marker — a sibling token to `systemd-fido2`, not an extra field on it
+/// (AD-2's previously-flagged fallback mechanism, now realized for real).
+/// An inert token with an empty `keyslots` array: it references no keyslot,
+/// so its mere presence has zero effect on unlock/open behavior.
+const CREATE_MARKER_TOKEN_TYPE: &str = "hypogaol-create-marker";
+
 /// Real subprocess implementation of all three ports (AD-1).
 ///
 /// Caches the transient bootstrap passphrase (AD-3/AD-9) between
@@ -321,6 +328,26 @@ fn run_piping_stdin(cmd: &mut Command, input: &[u8]) -> Result<(), String> {
             "{cmd:?} failed: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         ))
+    }
+}
+
+/// Shared by `close` (an already-open mapper the caller knows exists) and
+/// `close_stale_mapping` (a name that may or may not currently be mapped —
+/// the caller checks presence first).
+fn run_cryptsetup_close(name: &str) -> Result<(), DomainError> {
+    let output = privileged("cryptsetup")
+        .arg("close")
+        .arg(name)
+        .output()
+        .map_err(|e| DomainError::AdapterFailure(format!("failed to run cryptsetup close: {e}")))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(DomainError::AdapterFailure(format!(
+            "cryptsetup close failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )))
     }
 }
 
@@ -823,6 +850,65 @@ impl LuksBackend for ExecAdapter {
         }
     }
 
+    fn has_marker_token(&self, path: &Path) -> Result<bool, DomainError> {
+        // Looser contract than has_luks2_header: no header, an unreadable
+        // header, or a valid header simply lacking the marker are all
+        // `Ok(false)` here — only a genuine read failure of an otherwise
+        // marker-carrying header would be a real problem, and none of these
+        // states can distinguish that from "no marker" anyway.
+        let Ok(metadata) = dump_json_metadata(path) else {
+            return Ok(false);
+        };
+        let Ok(tokens) = tokens_object(&metadata) else {
+            return Ok(false);
+        };
+        Ok(tokens.values().any(|token| {
+            token.get("type").and_then(Value::as_str) == Some(CREATE_MARKER_TOKEN_TYPE)
+        }))
+    }
+
+    fn remove_marker_token(&self, path: &Path) -> Result<(), DomainError> {
+        let metadata = dump_json_metadata(path)?;
+        // All matching tokens, not just the first: a corrupted/tampered
+        // header could in principle carry more than one marker-typed token,
+        // and leaving a stray one behind would reintroduce the exact
+        // "surviving marker read as resumable" hazard AD-9's ordering rule
+        // exists to prevent (review finding, 2026-08-08).
+        let token_ids: Vec<String> = tokens_object(&metadata)?
+            .iter()
+            .filter(|(_, token)| {
+                token.get("type").and_then(Value::as_str) == Some(CREATE_MARKER_TOKEN_TYPE)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+
+        for token_id in token_ids {
+            let output = Command::new("cryptsetup")
+                .args(["token", "remove", "--token-id", &token_id])
+                .arg(path)
+                .output()
+                .map_err(|e| {
+                    DomainError::AdapterFailure(format!("create-marker-remove failed: {e}"))
+                })?;
+
+            if !output.status.success() {
+                // `create-marker-remove` prefix distinct from `remove_key`'s
+                // own token-removal error text: both call `cryptsetup token
+                // remove` and previously shared identical message shapes,
+                // which `ux.rs`'s revoke-specific bucket matched on —
+                // misreporting this cleanup-step failure (end of a
+                // successful `create`) as a failed `revoke` (review finding,
+                // 2026-08-08).
+                return Err(DomainError::AdapterFailure(format!(
+                    "create-marker-remove failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
     fn bootstrap_format_and_open(
         &self,
         path: &Path,
@@ -850,6 +936,27 @@ impl LuksBackend for ExecAdapter {
             passphrase.as_bytes(),
         )
         .map_err(DomainError::AdapterFailure)?;
+
+        // Written immediately after luksFormat succeeds, folded into this
+        // same FormattingLuks2 progress window rather than a stage of its
+        // own (CAP-23). No --token-id: a brand-new token, never replacing
+        // one (confirmed empirically, Task 0 spike).
+        //
+        // Prefixed with a `create-marker-write` marker distinct from
+        // `write_fido2_token_metadata`'s own `token import` calls: both
+        // embed the command's `{cmd:?}` Debug dump, which contains the
+        // literal substring `"token" "import"` that `ux.rs`'s
+        // `ENROLLMENT_MARKERS` matches on. Without this prefix, a failure
+        // here — before FIDO2 enrollment even begins — would misreport as
+        // "Enrolling your security key didn't complete" (review finding,
+        // 2026-08-08).
+        run_piping_stdin(
+            Command::new("cryptsetup")
+                .args(["token", "import"])
+                .arg(path),
+            format!(r#"{{"type":"{CREATE_MARKER_TOKEN_TYPE}","keyslots":[]}}"#).as_bytes(),
+        )
+        .map_err(|e| DomainError::AdapterFailure(format!("create-marker-write failed: {e}")))?;
 
         run_piping_stdin(
             privileged("cryptsetup")
@@ -1047,22 +1154,18 @@ impl LuksBackend for ExecAdapter {
     }
 
     fn close(&self, mapper: &MapperHandle) -> Result<(), DomainError> {
-        let output = privileged("cryptsetup")
-            .arg("close")
-            .arg(&mapper.name)
-            .output()
-            .map_err(|e| {
-                DomainError::AdapterFailure(format!("failed to run cryptsetup close: {e}"))
-            })?;
+        run_cryptsetup_close(&mapper.name)
+    }
 
-        if output.status.success() {
-            Ok(())
-        } else {
-            Err(DomainError::AdapterFailure(format!(
-                "cryptsetup close failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            )))
+    fn close_stale_mapping(&self, name: &str) -> Result<(), DomainError> {
+        // Same presence check `umount` already uses to distinguish "no
+        // mapping at all" from a real failure (src/adapters/exec/mod.rs's
+        // `umount`): `/dev/mapper/<name>` only exists while device-mapper
+        // has an active mapping under that name.
+        if !PathBuf::from(format!("/dev/mapper/{name}")).exists() {
+            return Ok(());
         }
+        run_cryptsetup_close(name)
     }
 
     fn open(&self, path: &Path, name: &str, read_only: bool) -> Result<MapperHandle, DomainError> {

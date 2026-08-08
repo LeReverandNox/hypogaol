@@ -51,7 +51,12 @@ pub fn run(
 
     match target {
         CreateTarget::File { path, size } => {
-            if fs.path_exists(&path) {
+            // A destination that already exists is only refused if it
+            // doesn't carry CAP-23's marker token — a marker-verified
+            // resume falls through exactly as if the path hadn't existed,
+            // with no confirmation prompt (AC #1). A genuine pre-existing
+            // file/volume (no marker) refuses unchanged (AC #3).
+            if fs.path_exists(&path) && !luks.has_marker_token(&path)? {
                 return Err(DomainError::DestinationExists(path));
             }
 
@@ -93,14 +98,24 @@ pub fn run(
         } => {
             // Order is load-bearing (AD-9): the header check must win even
             // when `confirmed` is true (AC #4), so it runs unconditionally
-            // first. Confirmation is checked second, independent of header
-            // state (AC #5). Size resolution/validation runs last, since it
+            // first. A header with CAP-23's marker token is a
+            // marker-verified resume: it skips the confirmation check
+            // entirely (AC #2), same as the File branch skips its
+            // confirmation-free refusal. A header without the marker
+            // refuses unchanged. Size resolution/validation runs last on
+            // every path that reaches it — including resume — since it
             // needs an extra adapter call and has no bearing on whether the
             // destination should be refused outright.
-            if luks.has_luks2_header(&path)? {
-                return Err(DomainError::DeviceAlreadyFormatted(path));
-            }
-            if !confirmed {
+            let marker_verified_resume = if luks.has_luks2_header(&path)? {
+                if luks.has_marker_token(&path)? {
+                    true
+                } else {
+                    return Err(DomainError::DeviceAlreadyFormatted(path));
+                }
+            } else {
+                false
+            };
+            if !marker_verified_resume && !confirmed {
                 return Err(DomainError::DeviceConfirmationRequired);
             }
 
@@ -160,6 +175,21 @@ fn bootstrap_and_provision(
     fs: &dyn FilesystemBackend,
 ) -> Result<(), DomainError> {
     let name = mapping_name::mapping_name(path)?;
+
+    // A real process-death crash between a prior attempt's successful
+    // luksOpen and this function's own close-on-completion below skips that
+    // cleanup entirely — dm-crypt mappings are kernel objects, independent
+    // of the process that opened them. Left unhandled, a marker-verified
+    // resume attempt would compute this exact deterministic name and its
+    // luksFormat call below would fail (device/name busy) before ever
+    // reaching that logic. Safe to run unconditionally on a fresh create
+    // too: a mapping can only exist under this exact name if this tool
+    // already reached luksOpen on this same path, and any failure other
+    // than "no such mapping" (e.g. still busy/mounted for an unrelated
+    // reason) correctly aborts here rather than forcing through a mapping
+    // still in legitimate use.
+    luks.close_stale_mapping(&name)?;
+
     progress(CreateStage::FormattingLuks2);
     let mapper = luks.bootstrap_format_and_open(path, &name, size, filesystem)?;
 
@@ -213,5 +243,13 @@ fn finish_provisioning(
     progress(CreateStage::CreatingFilesystem);
     fs.mkfs(mapper, filesystem)?;
 
+    // Marker removed first, bootstrap keyslot second — this order is
+    // load-bearing (AD-9/CAP-23 AC #4). A crash between the two leaves a
+    // harmless stray keyslot on an already-functional volume, correctly
+    // read as "genuine pre-existing volume" (no marker) by a future
+    // create's has_marker_token check. The reverse order would let a
+    // future create misread a completed volume's surviving marker as
+    // resumable and silently wipe it.
+    luks.remove_marker_token(&mapper.source_path)?;
     keyslot_guard::remove_keyslot_guarded(luks, &mapper.source_path, BOOTSTRAP_KEYSLOT)
 }

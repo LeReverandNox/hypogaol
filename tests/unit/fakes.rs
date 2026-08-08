@@ -31,6 +31,7 @@ pub struct FakeLuksBackend {
     prerequisites: Result<(), Vec<String>>,
     keyslots: RefCell<Vec<KeyslotInfo>>,
     has_luks2_header: bool,
+    has_marker_token: bool,
     log: CallLog,
     fail_at: Option<&'static str>,
     last_bootstrap_size: RefCell<Option<u64>>,
@@ -68,6 +69,7 @@ impl FakeLuksBackend {
                 key_label: "primary".to_string(),
             }]),
             has_luks2_header: false,
+            has_marker_token: false,
             log: new_call_log(),
             fail_at: None,
             last_bootstrap_size: RefCell::new(None),
@@ -87,6 +89,7 @@ impl FakeLuksBackend {
             prerequisites: Err(missing(missing_deps)),
             keyslots: RefCell::new(Vec::new()),
             has_luks2_header: false,
+            has_marker_token: false,
             log: new_call_log(),
             fail_at: None,
             last_bootstrap_size: RefCell::new(None),
@@ -123,6 +126,11 @@ impl FakeLuksBackend {
 
     pub fn with_has_luks2_header(mut self, value: bool) -> Self {
         self.has_luks2_header = value;
+        self
+    }
+
+    pub fn with_has_marker_token(mut self, value: bool) -> Self {
+        self.has_marker_token = value;
         self
     }
 
@@ -209,6 +217,26 @@ impl LuksBackend for FakeLuksBackend {
         self.log.borrow_mut().push("has_luks2_header".to_string());
         self.fail_if("has_luks2_header")?;
         Ok(self.has_luks2_header)
+    }
+
+    fn has_marker_token(&self, _path: &Path) -> Result<bool, DomainError> {
+        self.log.borrow_mut().push("has_marker_token".to_string());
+        self.fail_if("has_marker_token")?;
+        Ok(self.has_marker_token)
+    }
+
+    fn remove_marker_token(&self, _path: &Path) -> Result<(), DomainError> {
+        self.log
+            .borrow_mut()
+            .push("remove_marker_token".to_string());
+        self.fail_if("remove_marker_token")
+    }
+
+    fn close_stale_mapping(&self, _name: &str) -> Result<(), DomainError> {
+        self.log
+            .borrow_mut()
+            .push("close_stale_mapping".to_string());
+        self.fail_if("close_stale_mapping")
     }
 
     fn bootstrap_format_and_open(

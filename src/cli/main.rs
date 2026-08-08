@@ -19,6 +19,7 @@ use crate::domain::workflows::revoke;
 use crate::domain::workflows::slam;
 use crate::domain::workflows::unlock;
 use crate::ports::fido2_backend::Fido2DeviceSelection;
+use crate::ports::luks_backend::LuksBackend;
 
 // `name`/`version`/`about` are populated by clap from this crate's own
 // `CARGO_PKG_*` metadata (AD-13) — never a hardcoded product-name literal.
@@ -296,7 +297,10 @@ pub fn confirms_wipe(input: &str) -> bool {
 /// could be pasted/scripted without the user ever reading the warning, which
 /// would undercut the whole point of a wrong-device confirmation gate.
 /// `domain::workflows::create::run` enforces the check itself regardless —
-/// this is never trusted as the sole gate.
+/// this is never trusted as the sole gate. Only called when
+/// `marker_verified_device_resume` is `false` — a marker-verified resume
+/// skips this prompt entirely (CAP-23, AC #2) rather than answering it on
+/// the user's behalf.
 fn confirm_device_wipe(path: &Path) -> bool {
     println!(
         "WARNING: this will erase any existing data on {} and format it as a new encrypted volume.",
@@ -309,11 +313,47 @@ fn confirm_device_wipe(path: &Path) -> bool {
     io::stdin().read_line(&mut input).is_ok() && confirms_wipe(&input)
 }
 
+/// Whether `path` is a crash-interrupted create the tool can safely resume
+/// without asking again (CAP-23): a real LUKS2 header carrying the
+/// `hypogaol-create-marker` token. Any query failure (unreadable device,
+/// permission error) falls back to `false`, the safe direction — it just
+/// means the user sees the normal wipe prompt rather than getting a resume
+/// silently granted. This is a pre-check only: `domain::workflows::create::run`
+/// makes its own independent, authoritative determination of the same
+/// condition and never trusts this CLI-side result — see `run_create`'s doc
+/// comment for why `confirmed` stays `false` even when this returns `true`.
+fn marker_verified_device_resume(adapter: &ExecAdapter, path: &Path) -> bool {
+    adapter.has_luks2_header(path).unwrap_or(false)
+        && adapter.has_marker_token(path).unwrap_or(false)
+}
+
+/// The `confirmed` field passed to `domain::workflows::create::run` and the
+/// `announce` flag passed to `run_create`, given the marker precheck and
+/// (when the prompt wasn't skipped) the interactive wipe prompt's answer.
+/// Split out from the `CreateMode::Device` arm so this decision is
+/// unit-testable without stdin or a real adapter — mirrors `confirms_wipe`'s
+/// convention. `confirmed` stays honest (`false`) on a marker-verified
+/// resume since no interactive "yes" was actually obtained; `domain`'s own
+/// fresh marker check is the real authority there (see
+/// `marker_verified_device_resume`'s doc comment) and fails safe if it ever
+/// disagrees with this pre-check. `announce` is `true` whenever the call is
+/// expected to proceed, which includes the resume case.
+pub fn device_create_confirmation(
+    marker_verified_resume: bool,
+    wipe_confirmed: bool,
+) -> (bool, bool) {
+    let confirmed = !marker_verified_resume && wipe_confirmed;
+    let announce = marker_verified_resume || confirmed;
+    (confirmed, announce)
+}
+
 /// Builds the adapter, runs `create::run`, and reports the result — shared by
 /// both `create` subcommands. `announce` gates the "Creating volume..." message:
 /// the Device arm passes `false` when the user already declined the wipe
-/// confirmation, so the message doesn't imply work started when the call is
-/// about to fail immediately on `domain`'s own confirmation check.
+/// confirmation (call is about to fail immediately on `domain`'s own
+/// confirmation check) — but passes `true` for a marker-verified resume even
+/// though `confirmed` itself is `false` there, since that path is expected to
+/// succeed on `domain`'s own independent marker check.
 fn run_create(
     target: CreateTarget,
     filesystem: Filesystem,
@@ -746,7 +786,20 @@ pub fn run() {
                 fido2_device,
                 user_verification,
             } => {
-                let confirmed = confirm_device_wipe(&path);
+                let precheck_adapter = ExecAdapter::default();
+                let marker_verified_resume =
+                    marker_verified_device_resume(&precheck_adapter, &path);
+                // The prompt is skipped entirely on a marker-verified resume
+                // (CAP-23, AC #2) rather than answered on the user's behalf;
+                // `wipe_confirmed` is simply unused by
+                // `device_create_confirmation` in that case.
+                let wipe_confirmed = if marker_verified_resume {
+                    false
+                } else {
+                    confirm_device_wipe(&path)
+                };
+                let (confirmed, announce) =
+                    device_create_confirmation(marker_verified_resume, wipe_confirmed);
                 let display_path = path.display().to_string();
                 let target = CreateTarget::Device {
                     path,
@@ -760,7 +813,7 @@ pub fn run() {
                     user_verification,
                     selection,
                     &display_path,
-                    confirmed,
+                    announce,
                 );
             }
         },
