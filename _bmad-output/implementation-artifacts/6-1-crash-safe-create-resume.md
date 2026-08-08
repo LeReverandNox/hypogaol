@@ -4,7 +4,7 @@ baseline_commit: 6dde5fde519f191896bd568f149aa891039ffee0
 
 # Story 6.1: Crash-Safe Create Resume
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
