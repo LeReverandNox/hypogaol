@@ -121,4 +121,11 @@ pub trait FilesystemBackend {
     /// failed signal (e.g. the process already exited between
     /// `processes_using` and this call) rather than treating it as fatal.
     fn signal_process(&self, pid: Pid, signal: Signal) -> Result<(), DomainError>;
+
+    /// Writes `domain::hooks::BIND_HOOKS_TEMPLATE`/`EXEC_HOOKS_TEMPLATE`
+    /// (CAP-19, AD-9) into `mountpoint` as `bind-hooks` and
+    /// `exec-hooks.example` respectively — an unprivileged write, needing no
+    /// FIDO2 selection: by the time `create` calls this, `mount` has already
+    /// chowned `mountpoint` to the invoking user.
+    fn scaffold_hook_templates(&self, mountpoint: &Path) -> Result<(), DomainError>;
 }

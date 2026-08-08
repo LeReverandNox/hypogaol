@@ -10,6 +10,7 @@ use serde_json::Value;
 use zeroize::Zeroizing;
 
 use crate::domain::errors::DomainError;
+use crate::domain::hooks;
 use crate::domain::mapping_name;
 use crate::domain::types::{
     Filesystem, HookFileMeta, KeyMetadata, KeyslotInfo, KeyslotRef, MapperHandle, Pid, Signal,
@@ -2233,6 +2234,23 @@ impl FilesystemBackend for ExecAdapter {
                 String::from_utf8_lossy(&output.stderr).trim()
             )))
         }
+    }
+
+    fn scaffold_hook_templates(&self, mountpoint: &Path) -> Result<(), DomainError> {
+        // Unprivileged, deliberately — same reasoning as `run_hook`/
+        // `invoking_home_dir`: this process never runs elevated as a whole,
+        // and `mount` has already chowned `mountpoint` to the invoking user
+        // by the time this is ever called.
+        std::fs::write(mountpoint.join("bind-hooks"), hooks::BIND_HOOKS_TEMPLATE).map_err(
+            |e| DomainError::AdapterFailure(format!("failed to write bind-hooks template: {e}")),
+        )?;
+        std::fs::write(
+            mountpoint.join("exec-hooks.example"),
+            hooks::EXEC_HOOKS_TEMPLATE,
+        )
+        .map_err(|e| {
+            DomainError::AdapterFailure(format!("failed to write exec-hooks.example template: {e}"))
+        })
     }
 }
 
