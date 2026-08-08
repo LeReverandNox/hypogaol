@@ -9,6 +9,49 @@ use std::path::{Path, PathBuf};
 use crate::domain::types::HookFileMeta;
 use crate::ports::filesystem_backend::FilesystemBackend;
 
+/// Scaffolded at `create` time when `--scaffold-hooks` is given (CAP-19),
+/// written verbatim to a new volume's `bind-hooks` file. Every example line
+/// is `#`-prefixed, which makes it 3 whitespace-separated tokens (`#`,
+/// source, dest) rather than the 2 `parse_bind_hooks` requires for a live
+/// entry — so this template parses to zero live entries *by construction*,
+/// with no comment-syntax awareness added to the parser itself.
+pub const BIND_HOOKS_TEMPLATE: &str = "\
+# Example bind-hooks configuration for this volume.
+#
+# Each line below maps a path inside this volume (first column) to a path
+# under your $HOME (second column). Hypogaol bind-mounts the volume-relative
+# path onto the $HOME-relative one every time this volume is unlocked.
+#
+# Uncomment and edit the lines below to activate:
+#
+# mail          mail
+# .gnupg        .gnupg
+# .mozilla      .mozilla
+";
+
+/// Scaffolded at `create` time when `--scaffold-hooks` is given (CAP-19),
+/// written to a new volume as `exec-hooks.example` — never the live
+/// `exec-hooks` name, since AD-14's guardrail hard-errors `open` on a
+/// non-executable file under that exact name. Non-executable by default (a
+/// plain file write sets no execute bit); renaming it to `exec-hooks` and
+/// `chmod +x`-ing it activates it as a normal exec-hooks script.
+pub const EXEC_HOOKS_TEMPLATE: &str = "\
+#!/bin/sh
+# Example exec-hooks script for this volume.
+#
+# To activate it: rename this file to \"exec-hooks\" and run
+#   chmod +x exec-hooks
+# Hypogaol then runs it automatically as the invoking user (never with
+# elevated privilege) on open and close:
+#
+#   open <mountpoint>
+#   close <mountpoint> <volume-name> <loopback-device> <mapper-device>
+#
+# This example is a safe no-op — edit it to add your own automation.
+
+exit 0
+";
+
 /// One parsed line from a volume's `bind-hooks` file: a volume-root-relative
 /// source and a `$HOME`-relative destination.
 #[derive(Debug, Clone, PartialEq, Eq)]
