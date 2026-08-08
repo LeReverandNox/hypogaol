@@ -35,7 +35,7 @@ so that I get a clean, fully-created volume instead of being stuck with an unrec
     - `fn remove_marker_token(&self, path: &Path) -> Result<(), DomainError>` — removes the marker token written by `bootstrap_format_and_open`; called only after a fully successful create, before the bootstrap keyslot is removed (AC #4).
   - Update every other `LuksBackend` implementor: `tests/unit/fakes.rs`'s `FakeLuksBackend` needs both methods added (mirror the `has_luks2_header` field/builder pattern: a `has_marker_token: bool` field, `.with_has_marker_token(bool)` builder, both constructors (`passing()`/`failing()`) defaulting it `false`; log both calls the same way `"has_luks2_header"` is logged at `tests/unit/fakes.rs:209`; `remove_marker_token` just logs and respects `fail_at`, no return value to fake).
 
-- [ ] **Task 2: Write the marker token inside `bootstrap_format_and_open`** (AC: #1, #2)
+- [x] **Task 2: Write the marker token inside `bootstrap_format_and_open`** (AC: #1, #2)
   - `src/adapters/exec/mod.rs`, inside `impl LuksBackend for ExecAdapter { fn bootstrap_format_and_open ... }` (currently lines 826-947): immediately after the `luksFormat` call succeeds (after line 852) and before the `luksOpen` call (line 854), add the marker-token write using the command confirmed in Task 0's spike. Empty `keyslots` array, distinct custom `type` string (not `systemd-fido2` — this is the AD-2 fallback token type, not an extra field on the enrollment token).
   - Per the architecture spine: "the CAP-23 marker-token write is deliberately **not** a stage of its own — it happens inside `bootstrap_format_and_open`, folded into the existing `FormattingLuks2` progress window" — do not add a new `CreateStage` variant for it.
 

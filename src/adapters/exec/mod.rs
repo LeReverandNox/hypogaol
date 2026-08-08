@@ -18,6 +18,13 @@ use crate::ports::fido2_backend::{Fido2Backend, Fido2DeviceSelection};
 use crate::ports::filesystem_backend::FilesystemBackend;
 use crate::ports::luks_backend::LuksBackend;
 
+/// Distinct LUKS2 token `type` string for CAP-23's crash-safe-resume
+/// marker — a sibling token to `systemd-fido2`, not an extra field on it
+/// (AD-2's previously-flagged fallback mechanism, now realized for real).
+/// An inert token with an empty `keyslots` array: it references no keyslot,
+/// so its mere presence has zero effect on unlock/open behavior.
+const CREATE_MARKER_TOKEN_TYPE: &str = "hypogaol-create-marker";
+
 /// Real subprocess implementation of all three ports (AD-1).
 ///
 /// Caches the transient bootstrap passphrase (AD-3/AD-9) between
@@ -848,6 +855,16 @@ impl LuksBackend for ExecAdapter {
                 ])
                 .arg(path),
             passphrase.as_bytes(),
+        )
+        .map_err(DomainError::AdapterFailure)?;
+
+        // Written immediately after luksFormat succeeds, folded into this
+        // same FormattingLuks2 progress window rather than a stage of its
+        // own (CAP-23). No --token-id: a brand-new token, never replacing
+        // one (confirmed empirically, Task 0 spike).
+        run_piping_stdin(
+            Command::new("cryptsetup").args(["token", "import"]).arg(path),
+            format!(r#"{{"type":"{CREATE_MARKER_TOKEN_TYPE}","keyslots":[]}}"#).as_bytes(),
         )
         .map_err(DomainError::AdapterFailure)?;
 
