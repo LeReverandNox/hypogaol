@@ -42,6 +42,7 @@ pub fn run(
     filesystem: Filesystem,
     user_verification: bool,
     key_label: Option<String>,
+    scaffold_hooks: bool,
     fido2_selection: Fido2DeviceSelection,
     progress: &dyn Fn(CreateStage),
     luks: &dyn LuksBackend,
@@ -82,6 +83,7 @@ pub fn run(
                 filesystem,
                 user_verification,
                 key_label,
+                scaffold_hooks,
                 fido2_selection,
                 progress,
                 luks,
@@ -156,6 +158,7 @@ pub fn run(
                 filesystem,
                 user_verification,
                 key_label,
+                scaffold_hooks,
                 fido2_selection,
                 progress,
                 luks,
@@ -172,6 +175,7 @@ fn bootstrap_and_provision(
     filesystem: Filesystem,
     user_verification: bool,
     key_label: Option<String>,
+    scaffold_hooks: bool,
     fido2_selection: Fido2DeviceSelection,
     progress: &dyn Fn(CreateStage),
     luks: &dyn LuksBackend,
@@ -206,6 +210,7 @@ fn bootstrap_and_provision(
         filesystem,
         user_verification,
         key_label,
+        scaffold_hooks,
         fido2_selection,
         progress,
         luks,
@@ -226,6 +231,7 @@ fn finish_provisioning(
     filesystem: Filesystem,
     user_verification: bool,
     key_label: Option<String>,
+    scaffold_hooks: bool,
     fido2_selection: Fido2DeviceSelection,
     progress: &dyn Fn(CreateStage),
     luks: &dyn LuksBackend,
@@ -248,6 +254,25 @@ fn finish_provisioning(
 
     progress(CreateStage::CreatingFilesystem);
     fs.mkfs(mapper, filesystem)?;
+
+    // Scaffolding must land strictly after mkfs (a filesystem must exist to
+    // hold the files) and strictly before final marker/keyslot cleanup
+    // (AD-9's Rule, AC #3) — no separate FIDO2 selection needed, since
+    // `mapper` is already live at this point.
+    if scaffold_hooks {
+        progress(CreateStage::ScaffoldingHookTemplates);
+        let mountpoint = fs.mount(mapper, false)?;
+        let scaffold_result = fs.scaffold_hook_templates(&mountpoint);
+        match fs.umount(mapper) {
+            Ok(()) => scaffold_result?,
+            Err(umount_err) => {
+                return Err(match scaffold_result {
+                    Ok(()) => umount_err,
+                    Err(scaffold_err) => scaffold_err.with_rollback_cleanup_failure(umount_err),
+                });
+            }
+        }
+    }
 
     // Marker removed first, bootstrap keyslot second — this order is
     // load-bearing (AD-9/CAP-23 AC #4). A crash between the two leaves a

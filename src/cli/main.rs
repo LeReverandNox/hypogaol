@@ -155,6 +155,12 @@ enum CreateMode {
         #[arg(long, value_enum, default_value = "ext4")]
         filesystem: CliFilesystem,
 
+        /// Scaffold a commented-out example bind-hooks file and a
+        /// non-executable exec-hooks.example stub into the new volume, so
+        /// you can discover the hooks format without consulting docs first.
+        #[arg(long)]
+        scaffold_hooks: bool,
+
         /// Label for the bootstrap key enrolled during create, shown later
         /// when listing enrolled keys. Defaults to "primary" when omitted.
         #[arg(long, value_parser = parse_label)]
@@ -187,6 +193,12 @@ enum CreateMode {
         /// Filesystem to create inside the volume
         #[arg(long, value_enum, default_value = "ext4")]
         filesystem: CliFilesystem,
+
+        /// Scaffold a commented-out example bind-hooks file and a
+        /// non-executable exec-hooks.example stub into the new volume, so
+        /// you can discover the hooks format without consulting docs first.
+        #[arg(long)]
+        scaffold_hooks: bool,
 
         /// Label for the bootstrap key enrolled during create, shown later
         /// when listing enrolled keys. Defaults to "primary" when omitted.
@@ -369,6 +381,7 @@ fn run_create(
     filesystem: Filesystem,
     user_verification: bool,
     key_label: Option<String>,
+    scaffold_hooks: bool,
     fido2_selection: Fido2DeviceSelection,
     display_path: &str,
     announce: bool,
@@ -384,6 +397,7 @@ fn run_create(
         filesystem,
         user_verification,
         key_label,
+        scaffold_hooks,
         fido2_selection,
         &|stage: CreateStage| println!("{}", ux::translate_create_stage(&stage)),
         &adapter,
@@ -776,6 +790,7 @@ pub fn run() {
                 path,
                 size,
                 filesystem,
+                scaffold_hooks,
                 label,
                 fido2_device,
                 user_verification,
@@ -788,6 +803,7 @@ pub fn run() {
                     filesystem.into(),
                     user_verification,
                     label,
+                    scaffold_hooks,
                     selection,
                     &display_path,
                     true,
@@ -797,6 +813,7 @@ pub fn run() {
                 path,
                 size,
                 filesystem,
+                scaffold_hooks,
                 label,
                 fido2_device,
                 user_verification,
@@ -827,6 +844,7 @@ pub fn run() {
                     filesystem.into(),
                     user_verification,
                     label,
+                    scaffold_hooks,
                     selection,
                     &display_path,
                     announce,
