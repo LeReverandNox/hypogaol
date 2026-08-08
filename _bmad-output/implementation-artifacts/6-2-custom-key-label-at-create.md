@@ -46,7 +46,7 @@ so that my newly created volume's key is labeled the same way I'd label any key 
   - Add the same pair for the Device-backed branch, mirroring `create_device_with_user_verification_true_threads_it_to_bootstrap_enrollment` (lines 240-266).
   - Update **every** existing `create::run(...)` call site in this file (~20 occurrences) to pass the new `key_label` argument in its new position (use `None` for every test that doesn't care about labeling, matching how these same tests already pass `false`/`Fido2DeviceSelection::Interactive` for parameters they don't care about) — a compile error from a missed call site is expected and exhaustive; fix every one, don't silence with a default.
 
-- [ ] **Task 5: CLI-level tests for the new flag** (AC: #1, #2)
+- [x] **Task 5: CLI-level tests for the new flag** (AC: #1, #2)
   - Extend `tests/unit/cli.rs`: add `create_file_help_lists_label_as_a_flag` and `create_device_help_lists_label_as_a_flag`, mirroring `enroll_help_lists_path_as_positional_and_label_as_a_flag`/`revoke_help_lists_path_as_positional_and_label_as_a_flag` (lines 168-182) — assert `help.contains("--label")` for `["hypogaol", "create", "file", "--help"]` and `["hypogaol", "create", "device", "--help"]`.
   - If `run_create`'s signature changed in a way that breaks any existing `tests/unit/cli.rs` coverage of `run_create`/`device_create_confirmation` (Story 6.1 added `device_create_confirmation` tests there), update call sites the same way Task 4 does for `tests/unit/create.rs` — check before assuming none are affected.
 
@@ -113,6 +113,7 @@ so that my newly created volume's key is labeled the same way I'd label any key 
 - Task 3: `FakeFido2Backend` gained a `key_label_received: RefCell<Option<String>>` field/accessor, mirroring `user_verification_received`'s `Cell` pattern but using `RefCell` since `String` isn't `Copy`. `enroll_fido2_key`'s `metadata` parameter is now read (renamed from `_metadata`).
 - Task 4: Added `create_with_label_threads_it_into_the_enrolled_key_metadata`, `create_without_label_falls_back_to_the_default_label`, and the Device-backed equivalents to `tests/unit/create.rs`. Updated every existing `create::run(...)` call site to pass the new `key_label` argument (`None` where the test doesn't care) — this included **three files the story didn't originally enumerate**: `tests/unit/workflows.rs` (1 site) and `tests/unit/progress.rs` (3 sites, both submodules of the `unit` test binary), plus `tests/hardware/main.rs` (22 sites, its own gated binary) — all fixed the same way (compile-error-driven, as the story anticipated for the ~20 sites it did call out). `cargo build --tests` is green across every test binary.
 - `cargo test --lib --bins` (17 passed) and `cargo test --test unit` (190 passed = 186 baseline + 4 new) both green.
+- Task 5: Added `create_file_help_lists_label_as_a_flag`/`create_device_help_lists_label_as_a_flag` to `tests/unit/cli.rs`, mirroring `enroll_help_lists_path_as_positional_and_label_as_a_flag`. `run_create`/`device_create_confirmation` have no direct `tests/unit/cli.rs` coverage (`run_create` is a private, un-unit-tested fn; `device_create_confirmation`'s own signature is unchanged by this story), so no call sites needed updating there. `cargo test --test unit` now at 192 passed (190 + 2 new).
 
 ### File List
 
@@ -123,3 +124,4 @@ so that my newly created volume's key is labeled the same way I'd label any key 
 - `tests/unit/workflows.rs` (modified)
 - `tests/unit/progress.rs` (modified)
 - `tests/hardware/main.rs` (modified)
+- `tests/unit/cli.rs` (modified)

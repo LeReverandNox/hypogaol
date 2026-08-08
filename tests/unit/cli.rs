@@ -208,6 +208,18 @@ fn create_device_help_lists_the_fido2_device_flag() {
 }
 
 #[test]
+fn create_file_help_lists_label_as_a_flag() {
+    let help = help_text(&["hypogaol", "create", "file", "--help"]);
+    assert!(help.contains("--label"));
+}
+
+#[test]
+fn create_device_help_lists_label_as_a_flag() {
+    let help = help_text(&["hypogaol", "create", "device", "--help"]);
+    assert!(help.contains("--label"));
+}
+
+#[test]
 fn resize_help_lists_path_as_positional_and_size_as_a_flag() {
     let help = help_text(&["hypogaol", "resize", "--help"]);
     assert!(help.contains("<PATH>"));
