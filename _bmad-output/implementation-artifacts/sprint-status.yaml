@@ -89,7 +89,7 @@ development_status:
 
   epic-6: in-progress
   6-1-crash-safe-create-resume: done
-  6-2-custom-key-label-at-create: ready-for-dev
+  6-2-custom-key-label-at-create: in-progress
   6-3-hook-template-scaffolding-at-create: backlog
   6-4-xfs-and-btrfs-filesystem-support: backlog
   6-5-concurrent-invocation-guard: backlog
