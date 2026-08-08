@@ -24,7 +24,7 @@ so that I get a clean, fully-created volume instead of being stuck with an unrec
 
 ## Tasks / Subtasks
 
-- [ ] **Task 0: Read every file this story touches before changing anything, then spike the marker-token cryptsetup mechanics** (AC: #1, #2, #3, #4)
+- [x] **Task 0: Read every file this story touches before changing anything, then spike the marker-token cryptsetup mechanics** (AC: #1, #2, #3, #4)
   - Read in full: `src/domain/workflows/create.rs` (217 lines), `src/ports/luks_backend.rs` (79 lines), `src/adapters/exec/mod.rs` lines 686-960 (the `LuksBackend` impl block covering `has_luks2_header`, `bootstrap_format_and_open`, `write_fido2_token_metadata`), `src/domain/keyslot_guard.rs`, `src/domain/errors.rs`, `tests/unit/fakes.rs` (`FakeLuksBackend`, lines ~30-260), `tests/unit/create.rs`.
   - **Spike (throwaway, real hardware/devshell) before writing production code**, same discipline as prior stories' Task 0 spikes (Story 1.5's token-tolerance spike, Story 3.2's `resize --token-only` spike): confirm the exact `cryptsetup token import` invocation that adds a **brand-new** token (not replacing an existing one) with a custom `type` string and an empty `keyslots` array, and confirm whether omitting `--token-id` auto-assigns the next free slot or is rejected. AD-2 already flags this general mechanism ("fallback if [systemd-fido2 extra fields are] rejected... write a second, sibling LUKS2 token of a distinct custom type") as spike-then-implement, and CAP-23 is the first *real* use of it — nothing today already proves the exact command syntax. Record the confirmed command in Dev Notes before Task 1.
   - Confirm empirically that `cryptsetup token export --token-id <marker-id>` (or a `luksDump --dump-json-metadata` scan, matching `find_systemd_fido2_token_ids`'s existing pattern at `src/adapters/exec/mod.rs:397`) is a reliable way to detect the marker's presence/id for both the read (`has_marker_token`) and removal (`remove_marker_token`) paths.
@@ -87,6 +87,13 @@ so that I get a clean, fully-created volume instead of being stuck with an unrec
   - Self-reported completion-note claims not matching actual grep/build/test output hit in all 4 Epic 5 stories, caught only in review (Amelia-owned retro action item, still open). Verify every count/claim in Task 9's Completion Notes against real command output before writing it down.
   - Marker-bleed across workflows sharing `adapters::exec` error strings hit 3 times across Epic 2/3 (retro action item, in-progress). This story adds new adapter error paths (`has_marker_token`, `remove_marker_token`) — check `src/cli/ux.rs`'s plain-language translation doesn't accidentally swallow or misroute these into an unrelated workflow's error bucket.
 - **Hardware verification convention:** this codebase's standing pattern (Stories 4.3, 5.1, 5.2 action items) is to explicitly state in Completion Notes whether real hardware was available and what was/wasn't verified on it, rather than silently claiming full verification from fakes/mocks alone. Follow that here for Task 9's crash-simulation check.
+
+- **Task 0 spike findings (confirmed empirically, scratch 32 MiB LUKS2 file in `/tmp`, real `cryptsetup 2.8.6` from this repo's Nix devshell, 2026-08-08):**
+  - `echo '{"type":"hypogaol-create-marker","keyslots":[]}' | cryptsetup token import <path>` with **no `--token-id`** creates a brand-new token and auto-assigns the next free token id (confirmed id `0` on an empty header, then id `1` for a second distinct-type token added afterward) — it does not require or default to replacing an existing token. `--token-replace` (used by `write_fido2_token_metadata` for editing an already-known id) is not needed here.
+  - `cryptsetup token export --token-id <id> <path>` reliably reads back the exact JSON written, confirming the export-based detection pattern works the same way for the marker as it does for `write_fido2_token_metadata`'s existing systemd-fido2 use.
+  - `cryptsetup token remove --token-id <id> <path>` cleanly removes just that token, leaving any other tokens (e.g. a `systemd-fido2` one) untouched.
+  - Detection should follow the existing `dump_json_metadata`/`tokens_object` scan pattern (`find_systemd_fido2_token_ids`, `src/adapters/exec/mod.rs:397`), matching on `type == "hypogaol-create-marker"` — no new JSON-parsing approach needed.
+  - Chosen marker token type string: `hypogaol-create-marker` (distinct from `systemd-fido2`, matches the project's rebranded name per Epic 5).
 
 ### Project Structure Notes
 
