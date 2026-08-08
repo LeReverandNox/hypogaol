@@ -386,6 +386,44 @@ fn create_device_without_label_falls_back_to_the_default_label() {
 }
 
 #[test]
+fn create_with_an_unusual_label_threads_it_through_unmodified() {
+    // Every other label test here uses a trivial single-word ASCII string
+    // ("backup"); this one uses spaces, punctuation, and non-ASCII
+    // characters to prove `create::run`'s plumbing does a true passthrough
+    // with no trimming/truncation/escaping anywhere between the CLI-facing
+    // `Option<String>` and `enroll_fido2_key`'s `metadata` argument (Review
+    // Finding, 6-2 review). The full create -> LUKS2 token -> info/revoke
+    // round-trip (AC #3) stays hardware-verified only: the fakes used here
+    // don't model token persistence, so a fake-backed test can only prove
+    // domain-level threading, not the adapter's on-disk encode/decode.
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let fixture = RealFixtureFile::create("with-unusual-label");
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_VOLUME_SIZE_BYTES,
+    };
+    let label = "Renée's café key #2 🔑".to_string();
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        Some(label.clone()),
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(fido2.key_label_received(), Some(label));
+}
+
+#[test]
 fn enroll_failure_closes_the_mapping_and_removes_the_backing_file() {
     let log = new_call_log();
     let luks = FakeLuksBackend::passing().with_log(log.clone());
