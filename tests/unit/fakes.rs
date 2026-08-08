@@ -463,6 +463,10 @@ pub struct FakeFilesystemBackend {
     umount_fail_times: Cell<u32>,
     // Story 4.6: every `(Pid, Signal)` passed to `signal_process`, in order.
     last_signal_calls: RefCell<Vec<(Pid, Signal)>>,
+    // Story 6.3: the `mountpoint` most recently passed to
+    // `scaffold_hook_templates` — lets a test prove `create::run` threaded
+    // `mount`'s own return value through, not a stand-in.
+    last_scaffold_hook_templates_mountpoint: RefCell<Option<PathBuf>>,
 }
 
 /// A valid, unrejectable `exec-hooks` file's metadata (AC #3's guardrail
@@ -504,6 +508,7 @@ impl FakeFilesystemBackend {
             processes_using_result: RefCell::new(Vec::new()),
             umount_fail_times: Cell::new(0),
             last_signal_calls: RefCell::new(Vec::new()),
+            last_scaffold_hook_templates_mountpoint: RefCell::new(None),
         }
     }
 
@@ -532,6 +537,7 @@ impl FakeFilesystemBackend {
             processes_using_result: RefCell::new(Vec::new()),
             umount_fail_times: Cell::new(0),
             last_signal_calls: RefCell::new(Vec::new()),
+            last_scaffold_hook_templates_mountpoint: RefCell::new(None),
         }
     }
 
@@ -694,6 +700,11 @@ impl FakeFilesystemBackend {
     /// Every `(Pid, Signal)` passed to `signal_process`, in call order.
     pub fn signal_calls(&self) -> Vec<(Pid, Signal)> {
         self.last_signal_calls.borrow().clone()
+    }
+
+    /// The `mountpoint` most recently passed to `scaffold_hook_templates`.
+    pub fn last_scaffold_hook_templates_mountpoint(&self) -> Option<PathBuf> {
+        self.last_scaffold_hook_templates_mountpoint.borrow().clone()
     }
 }
 
@@ -864,6 +875,15 @@ impl FilesystemBackend for FakeFilesystemBackend {
         self.log.borrow_mut().push("signal_process".to_string());
         self.last_signal_calls.borrow_mut().push((pid, signal));
         self.fail_if("signal_process")
+    }
+
+    fn scaffold_hook_templates(&self, mountpoint: &Path) -> Result<(), DomainError> {
+        self.log
+            .borrow_mut()
+            .push("scaffold_hook_templates".to_string());
+        *self.last_scaffold_hook_templates_mountpoint.borrow_mut() =
+            Some(mountpoint.to_path_buf());
+        self.fail_if("scaffold_hook_templates")
     }
 }
 
