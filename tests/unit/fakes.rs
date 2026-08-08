@@ -325,6 +325,7 @@ pub struct FakeFido2Backend {
     log: CallLog,
     fail_at: Option<&'static str>,
     user_verification_received: Cell<Option<bool>>,
+    key_label_received: RefCell<Option<String>>,
 }
 
 impl FakeFido2Backend {
@@ -334,6 +335,7 @@ impl FakeFido2Backend {
             log: new_call_log(),
             fail_at: None,
             user_verification_received: Cell::new(None),
+            key_label_received: RefCell::new(None),
         }
     }
 
@@ -343,6 +345,7 @@ impl FakeFido2Backend {
             log: new_call_log(),
             fail_at: None,
             user_verification_received: Cell::new(None),
+            key_label_received: RefCell::new(None),
         }
     }
 
@@ -362,6 +365,13 @@ impl FakeFido2Backend {
     pub fn user_verification_received(&self) -> Option<bool> {
         self.user_verification_received.get()
     }
+
+    /// The `metadata.key_label` most recently passed to `enroll_fido2_key` —
+    /// lets a test assert a caller-supplied (or defaulted) label actually
+    /// reached the port (Story 6.2, Task 3).
+    pub fn key_label_received(&self) -> Option<String> {
+        self.key_label_received.borrow().clone()
+    }
 }
 
 impl Fido2Backend for FakeFido2Backend {
@@ -372,12 +382,13 @@ impl Fido2Backend for FakeFido2Backend {
     fn enroll_fido2_key(
         &self,
         _mapper: &MapperHandle,
-        _metadata: KeyMetadata,
+        metadata: KeyMetadata,
         _selection: Fido2DeviceSelection,
         user_verification: bool,
     ) -> Result<(), DomainError> {
         self.log.borrow_mut().push("enroll_fido2_key".to_string());
         self.user_verification_received.set(Some(user_verification));
+        *self.key_label_received.borrow_mut() = Some(metadata.key_label.clone());
         if self.fail_at == Some("enroll_fido2_key") {
             return Err(DomainError::AdapterFailure(
                 "enroll_fido2_key failed (test)".to_string(),
