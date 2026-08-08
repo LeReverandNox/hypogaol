@@ -4,7 +4,7 @@ baseline_commit: 952c614a51ea4e645bf0e0d8a21f78254578ee81
 
 # Story 6.3: Hook-Template Scaffolding at Create
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -96,7 +96,7 @@ so that I can discover the hooks format without consulting docs first.
   - Extend `tests/hardware/main.rs` with a new scenario (guarded the same way every other hardware test already is): `create file --scaffold-hooks ...`, then `unlock` the resulting volume and assert on real disk that `bind-hooks` exists and is inert (e.g. re-read its contents and confirm `hooks::parse_bind_hooks` on it is empty, or simply assert the file exists with the expected commented content) and `exec-hooks.example` exists, is **not** executable (`std::fs::metadata(...).permissions().mode() & 0o111 == 0`), and is not named `exec-hooks`. Then — AC #4's actual round-trip proof — `close`, rename `exec-hooks.example` → `exec-hooks` and `chmod +x` it on disk, re-`unlock`, and confirm the hook actually runs (e.g. via a marker file the script writes, or checking process/exit-status side effects the existing hardware exec-hooks test already uses as a pattern — check `tests/hardware/main.rs` for an existing exec-hooks scenario to mirror rather than inventing a new verification style).
   - If no hardware is available in this session, state that explicitly (per this project's standing convention — Stories 4.3, 5.1, 5.2, 6.1, 6.2) and flag AC #4's real-disk verification as a retrospective action item for `LeReverandNox`, same pattern as those stories.
 
-- [ ] **Task 12: Full regression pass**
+- [x] **Task 12: Full regression pass**
   - `cargo build` succeeds and `make test` passes with all prior tests (baseline 209 total: 17 lib + 192 `tests/unit`, per Story 6.2's Completion Notes) plus this story's new ones green. Verify the exact new total by running the test suite, not from memory (per the Epic 5 retro watchlist item — see Dev Notes).
   - `cargo fmt --check` and `cargo clippy --all-targets` both clean. This story adds a parameter to `create::run`/`bootstrap_and_provision`/`finish_provisioning`/`run_create` (all four already near or over clippy's `too_many_arguments` default threshold per Story 6.2's Completion Notes) — if a **new** `too_many_arguments` warning appears on a function that didn't already have one, note it explicitly in Completion Notes rather than silently suppressing it; do not add `#[allow(...)]` beyond what's already there without flagging it.
   - If hardware is available: run `create file --scaffold-hooks` and `create device --scaffold-hooks` end-to-end (Task 11's scenario), confirming both the scaffolded files' presence/permissions and the rename+chmod+reopen activation path. If no hardware is available this session, state that explicitly and flag it as a retrospective action item for `LeReverandNox`, same pattern as Stories 6.1/6.2's hardware-verification items.
@@ -157,8 +157,35 @@ so that I can discover the hooks format without consulting docs first.
 
 ### Agent Model Used
 
+Claude Sonnet 5 (claude-sonnet-5)
+
 ### Debug Log References
+
+None — no failures requiring debug-log capture. One test-writing mistake (the initial `create_scaffold_hook_templates_failure_still_unmounts_before_returning_the_error` test omitted the File branch's `remove_backing_file` cleanup call from its expected `CallLog`) was caught immediately by the test itself failing and fixed in place before commit.
 
 ### Completion Notes List
 
+- All 12 tasks complete. Implementation follows AD-9's Rule exactly: `scaffold_hooks: bool` threaded as a sibling parameter (never embedded in `CreateTarget`) through `create::run` → `bootstrap_and_provision` → `finish_provisioning`; the mount → write → unmount step runs strictly after `mkfs` and strictly before `remove_marker_token`/keyslot cleanup.
+- `BIND_HOOKS_TEMPLATE` parses to zero live entries by construction (every example line is `#`-prefixed, making it 3 whitespace-separated tokens rather than the 2 `parse_bind_hooks` requires) — proved directly by `bind_hooks_template_parses_to_zero_live_entries` (Task 7), not just implied by a create-workflow-level test, per the Epic 4 retro watchlist item.
+- `EXEC_HOOKS_TEMPLATE` is written as `exec-hooks.example` (never the live `exec-hooks` name) via a plain unprivileged `std::fs::write`, so it is non-executable by construction with no explicit chmod call needed or added.
+- **Test-count baseline correction**: Story 6.2's Completion Notes claimed a baseline of 209 total (17 lib + 192 `tests/unit`). Verified by direct `#[test]` count against the story's own `baseline_commit` (952c614a51ea4e645bf0e0d8a21f78254578ee81): the real baseline was 212 (17 lib + 195 unit), not 209 — a 3-test self-reported discrepancy carried in from 6.2, consistent with the Epic 5 retro's "self-reported completion-note claims not matching actual output" watchlist item. This story's own final count is verified the same way, from real `make test` output, not memory: **223 total (17 lib + 206 `tests/unit`)** — 11 new unit tests added (1 in `hooks.rs`, 6 in `create.rs`, 2 in `progress.rs`, 2 in `cli.rs`) plus 1 new `#[ignore]`d hardware scenario (22 → 23).
+- `cargo fmt --check` and `cargo clippy --all-targets` both clean (only pre-existing `too_many_arguments` warnings remain, each up by exactly 1 as expected from the new parameter — no function crossed the threshold for the first time). Actual current arg counts (verified via `cargo clippy` output, not from memory): `create::run` 10, `bootstrap_and_provision` 11, `finish_provisioning` 10, `run_create` 8 (`resize.rs`'s `grow_open_mapping` at 9 args is unrelated/untouched by this story). Note: Story 6.2's Completion Notes claimed a pre-story baseline of "8/9/8/7 args respectively" for these same four functions — verified against the story's own `baseline_commit` that the real pre-story counts were already 9/10/9/8, one higher across the board than 6.2 reported, another instance of the same self-reported-count discrepancy pattern noted above.
+- **Hardware verification**: a real FIDO2 security key is present in this environment (`fido2-token -L` enumerates one device), consistent with 6.1/6.2's finding. However, this story's end-to-end scenario (`create_file_with_scaffold_hooks_writes_inert_templates_and_the_renamed_exec_hook_activates_on_reopen`, added to `tests/hardware/main.rs`) requires three separate interactive touch/PIN confirmations (create's bootstrap enrollment, plus two unlocks) that this non-interactive dev-agent session cannot provide — the Dev Notes' suggestion that AC #4's path might be more tractable (no device-selection prompt) doesn't remove the physical touch requirement itself. AC #1/#2/#3/#4 are otherwise fully covered by fake-backed unit tests (Tasks 6-9) proving the exact port-call sequence, mountpoint threading, and rollback behavior. Flagging real-hardware execution of `make test-hardware`'s new scaffold-hooks scenario as a retrospective action item for `LeReverandNox`, same pattern as Stories 4.3/5.1/5.2/6.1/6.2.
+
 ### File List
+
+- `src/domain/progress.rs` — `CreateStage` gains `ScaffoldingHookTemplates`
+- `src/cli/ux.rs` — `translate_create_stage` gains the new arm
+- `src/domain/hooks.rs` — gains `BIND_HOOKS_TEMPLATE`/`EXEC_HOOKS_TEMPLATE` constants
+- `src/ports/filesystem_backend.rs` — gains `scaffold_hook_templates` method
+- `src/adapters/exec/mod.rs` — implements `scaffold_hook_templates`
+- `src/domain/workflows/create.rs` — `run`/`bootstrap_and_provision`/`finish_provisioning` gain `scaffold_hooks: bool` and the mount/write/unmount step
+- `src/cli/main.rs` — `CreateMode::File`/`CreateMode::Device` gain `scaffold_hooks` field; `run_create` gains the parameter; `run()`'s dispatch threads it through
+- `tests/unit/fakes.rs` — `FakeFilesystemBackend` gains `scaffold_hook_templates` fake + `last_scaffold_hook_templates_mountpoint`
+- `tests/unit/hooks.rs` — new `bind_hooks_template_parses_to_zero_live_entries` test
+- `tests/unit/create.rs` — every existing `create::run` call site (24) updated; 6 new sequencing/rollback tests
+- `tests/unit/progress.rs` — 3 existing call sites updated; 2 new stage-ordering tests
+- `tests/unit/workflows.rs` — 1 existing call site updated
+- `tests/unit/cli.rs` — 2 new `--scaffold-hooks`-in-help tests
+- `tests/hardware/main.rs` — 22 existing `create::run` call sites updated; 1 new end-to-end scaffold/activation scenario
+- `_bmad-output/implementation-artifacts/sprint-status.yaml` — story status updated to in-progress → review
