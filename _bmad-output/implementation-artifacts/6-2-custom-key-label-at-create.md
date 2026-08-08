@@ -37,11 +37,11 @@ so that my newly created volume's key is labeled the same way I'd label any key 
   - Wire it through `run()`'s dispatch match (currently lines 762-819): destructure `label` out of both `CreateMode::File { .. }` and `CreateMode::Device { .. }` patterns and pass it to `run_create` as a new parameter.
   - `run_create` (currently lines 357-386): add a `key_label: Option<String>` parameter (placed next to `user_verification`, mirroring `create::run`'s own new parameter order from Task 1) and pass it straight through to `create::run`'s new parameter — `run_create` does no validation or transformation of its own, exactly like it already does for `user_verification`/`fido2_selection`.
 
-- [ ] **Task 3: Extend `FakeFido2Backend` to capture the received `key_label`** (AC: #1, #2)
+- [x] **Task 3: Extend `FakeFido2Backend` to capture the received `key_label`** (AC: #1, #2)
   - `tests/unit/fakes.rs`: add a `key_label_received: RefCell<Option<String>>` field to `FakeFido2Backend` (a `String` needs `RefCell`, not `Cell`, unlike the existing `Cell<Option<bool>>` used for `user_verification_received` — `bool` is `Copy`, `String` is not), initialized to `RefCell::new(None)` in both `passing()`/`failing()` constructors, and a `pub fn key_label_received(&self) -> Option<String>` accessor that clones out of the `RefCell` (mirrors `user_verification_received`'s doc comment and purpose, lines 359-364).
   - In `enroll_fido2_key`'s impl (lines 372-387), before returning, set `*self.key_label_received.borrow_mut() = Some(metadata.key_label.clone());` — capture it from the real `metadata` parameter (currently named `_metadata` and ignored; rename to `metadata` since it's now read).
 
-- [ ] **Task 4: Unit tests for the domain-level threading** (AC: #1, #2)
+- [x] **Task 4: Unit tests for the domain-level threading** (AC: #1, #2)
   - Extend `tests/unit/create.rs`: add `create_with_label_threads_it_into_the_enrolled_key_metadata` (File-backed, `Some("backup".to_string())` passed to `create::run`, asserts `fido2.key_label_received() == Some("backup".to_string())`) and `create_without_label_falls_back_to_the_default_label` (File-backed, `None` passed, asserts `fido2.key_label_received() == Some("primary".to_string())`) — mirror `create_with_user_verification_true_threads_it_to_bootstrap_enrollment`'s exact shape (lines 213-238).
   - Add the same pair for the Device-backed branch, mirroring `create_device_with_user_verification_true_threads_it_to_bootstrap_enrollment` (lines 240-266).
   - Update **every** existing `create::run(...)` call site in this file (~20 occurrences) to pass the new `key_label` argument in its new position (use `None` for every test that doesn't care about labeling, matching how these same tests already pass `false`/`Fido2DeviceSelection::Interactive` for parameters they don't care about) — a compile error from a missed call site is expected and exhaustive; fix every one, don't silence with a default.
@@ -110,7 +110,16 @@ so that my newly created volume's key is labeled the same way I'd label any key 
 - Task 1: `key_label: Option<String>` added as a sibling parameter to `create::run`/`bootstrap_and_provision`/`finish_provisioning`, inserted after `user_verification: bool` and before `fido2_selection`. `finish_provisioning`'s `KeyMetadata` construction now uses `key_label.unwrap_or_else(|| "primary".to_string())` instead of the hardcoded literal.
 - Task 2: `--label` (`Option<String>`, `value_parser = parse_label`) added to both `CreateMode::File` and `CreateMode::Device`, placed after `filesystem` and before `fido2_device`. Wired through `run()`'s dispatch match and `run_create`'s new `key_label` parameter straight into `create::run`. `cargo build` confirmed green after Tasks 1+2 landed together (the lib crate only compiles once both the domain signature and its CLI-side caller agree — `tests/unit/create.rs`'s ~20 call sites are a separate compilation target and are updated in Task 4).
 
+- Task 3: `FakeFido2Backend` gained a `key_label_received: RefCell<Option<String>>` field/accessor, mirroring `user_verification_received`'s `Cell` pattern but using `RefCell` since `String` isn't `Copy`. `enroll_fido2_key`'s `metadata` parameter is now read (renamed from `_metadata`).
+- Task 4: Added `create_with_label_threads_it_into_the_enrolled_key_metadata`, `create_without_label_falls_back_to_the_default_label`, and the Device-backed equivalents to `tests/unit/create.rs`. Updated every existing `create::run(...)` call site to pass the new `key_label` argument (`None` where the test doesn't care) — this included **three files the story didn't originally enumerate**: `tests/unit/workflows.rs` (1 site) and `tests/unit/progress.rs` (3 sites, both submodules of the `unit` test binary), plus `tests/hardware/main.rs` (22 sites, its own gated binary) — all fixed the same way (compile-error-driven, as the story anticipated for the ~20 sites it did call out). `cargo build --tests` is green across every test binary.
+- `cargo test --lib --bins` (17 passed) and `cargo test --test unit` (190 passed = 186 baseline + 4 new) both green.
+
 ### File List
 
 - `src/domain/workflows/create.rs` (modified)
 - `src/cli/main.rs` (modified)
+- `tests/unit/fakes.rs` (modified)
+- `tests/unit/create.rs` (modified)
+- `tests/unit/workflows.rs` (modified)
+- `tests/unit/progress.rs` (modified)
+- `tests/hardware/main.rs` (modified)
