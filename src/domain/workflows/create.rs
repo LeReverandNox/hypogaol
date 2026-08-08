@@ -51,7 +51,12 @@ pub fn run(
 
     match target {
         CreateTarget::File { path, size } => {
-            if fs.path_exists(&path) {
+            // A destination that already exists is only refused if it
+            // doesn't carry CAP-23's marker token — a marker-verified
+            // resume falls through exactly as if the path hadn't existed,
+            // with no confirmation prompt (AC #1). A genuine pre-existing
+            // file/volume (no marker) refuses unchanged (AC #3).
+            if fs.path_exists(&path) && !luks.has_marker_token(&path)? {
                 return Err(DomainError::DestinationExists(path));
             }
 
