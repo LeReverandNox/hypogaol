@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::process::Command;
 
 use hypogaol::adapters::exec::ExecAdapter;
+use hypogaol::domain::hooks;
 use hypogaol::domain::mapping_name;
 use hypogaol::domain::types::{CreateTarget, Filesystem};
 use hypogaol::domain::workflows::{close, create, enroll, info, resize, revoke, slam, unlock};
@@ -2397,5 +2398,124 @@ fn enroll_with_user_verification_on_a_non_uv_capable_key_fails_cleanly() {
     let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
         .expect("unlock::run with the primary key failed after a rejected UV enrollment");
     let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
+    UnlockCleanup::new(mountpoint, name).run();
+}
+
+/// End-to-end verification of Story 6.3 (hook-template scaffolding at
+/// create): `--scaffold-hooks` writes an inert `bind-hooks` file and a
+/// non-executable `exec-hooks.example` stub (AC #1); then, on real disk,
+/// renaming `exec-hooks.example` to `exec-hooks` and `chmod +x`-ing it
+/// activates it as a normal exec-hooks script that AD-14's guardrail accepts
+/// and `unlock`/`close` actually run (AC #4) — proven by a marker file the
+/// renamed script writes on both the `open` and `close` lifecycle points,
+/// distinct from the (unreachable while still named `.example`) rename-time
+/// window.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root and a real FIDO2
+/// security key present, ready to be touched and to enter its PIN when
+/// prompted (once for `create`'s enrollment, once for each of the two
+/// unlocks below).
+#[test]
+#[ignore]
+fn create_file_with_scaffold_hooks_writes_inert_templates_and_the_renamed_exec_hook_activates_on_reopen(
+) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-scaffold-hooks");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("volume.img");
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::File {
+        path: path.clone(),
+        size: 64 * 1024 * 1024,
+    };
+
+    println!("Creating a volume with --scaffold-hooks — touch the key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        None,
+        true,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
+    let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
+
+    println!("Unlocking to inspect the scaffolded templates — touch the key when prompted.");
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
+        .expect("unlock::run failed");
+    assert_actually_mounted(&device_node, &mountpoint);
+
+    // AC #1: bind-hooks parses to zero live entries.
+    let bind_hooks_contents = std::fs::read_to_string(mountpoint.join("bind-hooks"))
+        .expect("failed to read scaffolded bind-hooks");
+    assert!(
+        hooks::parse_bind_hooks(&bind_hooks_contents).is_empty(),
+        "scaffolded bind-hooks must parse to zero live entries, got:\n{bind_hooks_contents}"
+    );
+
+    // AC #1: exec-hooks.example exists, is not the live "exec-hooks" name,
+    // and is not executable.
+    let exec_hooks_example_path = mountpoint.join("exec-hooks.example");
+    let exec_hooks_example_meta = std::fs::metadata(&exec_hooks_example_path)
+        .expect("failed to stat scaffolded exec-hooks.example");
+    assert!(
+        exec_hooks_example_meta.permissions().mode() & 0o111 == 0,
+        "scaffolded exec-hooks.example must not be executable"
+    );
+    assert!(
+        !mountpoint.join("exec-hooks").exists(),
+        "scaffolding must never write the live exec-hooks filename"
+    );
+
+    // AC #4: rename + chmod +x on real disk, while still mounted (only
+    // possible while unlocked) — the marker script below writes
+    // "exec-hook-ran-<$1>.marker" into the scratch dir (outside the
+    // encrypted volume) so `open`/`close` invocations are independently
+    // distinguishable.
+    let exec_hooks_path = mountpoint.join("exec-hooks");
+    std::fs::rename(&exec_hooks_example_path, &exec_hooks_path)
+        .expect("failed to rename exec-hooks.example to exec-hooks");
+    std::fs::write(
+        &exec_hooks_path,
+        format!(
+            "#!/bin/sh\ntouch \"{}/exec-hook-ran-$1.marker\"\n",
+            dir.display()
+        ),
+    )
+    .expect("failed to write activated exec-hooks script");
+    std::fs::set_permissions(&exec_hooks_path, std::fs::Permissions::from_mode(0o755))
+        .expect("failed to chmod +x the activated exec-hooks script");
+
+    // Closing now runs the just-activated exec-hooks script with `close`
+    // arguments (AD-14's guardrail must accept it — regular file, executable,
+    // owned by the invoking user, not world-writable).
+    let result = close::run(&path, false, &|_| {}, &adapter, &adapter, &adapter);
+    assert!(result.is_ok(), "close::run failed: {result:?}");
+    assert!(
+        dir.join("exec-hook-ran-close.marker").exists(),
+        "the renamed+chmod'd exec-hooks script must have run on close"
+    );
+
+    // Re-unlocking runs it again with `open` arguments — the full round-trip
+    // proof that it now behaves as a normal, permanently-activated
+    // exec-hooks file, not a one-off.
+    println!("Re-unlocking to confirm the activated exec-hooks script runs on open too — touch the key when prompted.");
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
+        .expect("unlock::run after activation failed");
+    assert!(
+        dir.join("exec-hook-ran-open.marker").exists(),
+        "the renamed+chmod'd exec-hooks script must have run on open"
+    );
+
     UnlockCleanup::new(mountpoint, name).run();
 }

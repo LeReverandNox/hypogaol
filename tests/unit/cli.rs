@@ -220,6 +220,18 @@ fn create_device_help_lists_label_as_a_flag() {
 }
 
 #[test]
+fn create_file_help_lists_scaffold_hooks_as_a_flag() {
+    let help = help_text(&["hypogaol", "create", "file", "--help"]);
+    assert!(help.contains("--scaffold-hooks"));
+}
+
+#[test]
+fn create_device_help_lists_scaffold_hooks_as_a_flag() {
+    let help = help_text(&["hypogaol", "create", "device", "--help"]);
+    assert!(help.contains("--scaffold-hooks"));
+}
+
+#[test]
 fn create_file_rejects_an_empty_label() {
     let result = Cli::try_parse_from([
         "hypogaol",

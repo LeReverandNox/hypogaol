@@ -704,7 +704,9 @@ impl FakeFilesystemBackend {
 
     /// The `mountpoint` most recently passed to `scaffold_hook_templates`.
     pub fn last_scaffold_hook_templates_mountpoint(&self) -> Option<PathBuf> {
-        self.last_scaffold_hook_templates_mountpoint.borrow().clone()
+        self.last_scaffold_hook_templates_mountpoint
+            .borrow()
+            .clone()
     }
 }
 
@@ -881,8 +883,7 @@ impl FilesystemBackend for FakeFilesystemBackend {
         self.log
             .borrow_mut()
             .push("scaffold_hook_templates".to_string());
-        *self.last_scaffold_hook_templates_mountpoint.borrow_mut() =
-            Some(mountpoint.to_path_buf());
+        *self.last_scaffold_hook_templates_mountpoint.borrow_mut() = Some(mountpoint.to_path_buf());
         self.fail_if("scaffold_hook_templates")
     }
 }

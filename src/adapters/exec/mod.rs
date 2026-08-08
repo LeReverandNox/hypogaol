@@ -2241,9 +2241,9 @@ impl FilesystemBackend for ExecAdapter {
         // `invoking_home_dir`: this process never runs elevated as a whole,
         // and `mount` has already chowned `mountpoint` to the invoking user
         // by the time this is ever called.
-        std::fs::write(mountpoint.join("bind-hooks"), hooks::BIND_HOOKS_TEMPLATE).map_err(
-            |e| DomainError::AdapterFailure(format!("failed to write bind-hooks template: {e}")),
-        )?;
+        std::fs::write(mountpoint.join("bind-hooks"), hooks::BIND_HOOKS_TEMPLATE).map_err(|e| {
+            DomainError::AdapterFailure(format!("failed to write bind-hooks template: {e}"))
+        })?;
         std::fs::write(
             mountpoint.join("exec-hooks.example"),
             hooks::EXEC_HOOKS_TEMPLATE,
