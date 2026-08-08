@@ -148,6 +148,7 @@ pub fn translate_create_stage(stage: &CreateStage) -> &'static str {
             "Enrolling your FIDO2 key — touch it now (you may also be asked for its PIN)..."
         }
         CreateStage::CreatingFilesystem => "Creating the filesystem...",
+        CreateStage::ScaffoldingHookTemplates => "Scaffolding example hook-template files...",
     }
 }
 
