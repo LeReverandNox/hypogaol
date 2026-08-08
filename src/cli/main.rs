@@ -156,8 +156,7 @@ enum CreateMode {
         filesystem: CliFilesystem,
 
         /// Label for the bootstrap key enrolled during create, shown later
-        /// when listing enrolled keys. Falls back to a default label when
-        /// omitted.
+        /// when listing enrolled keys. Defaults to "primary" when omitted.
         #[arg(long, value_parser = parse_label)]
         label: Option<String>,
 
@@ -190,8 +189,7 @@ enum CreateMode {
         filesystem: CliFilesystem,
 
         /// Label for the bootstrap key enrolled during create, shown later
-        /// when listing enrolled keys. Falls back to a default label when
-        /// omitted.
+        /// when listing enrolled keys. Defaults to "primary" when omitted.
         #[arg(long, value_parser = parse_label)]
         label: Option<String>,
 
