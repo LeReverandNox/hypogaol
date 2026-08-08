@@ -155,6 +155,12 @@ enum CreateMode {
         #[arg(long, value_enum, default_value = "ext4")]
         filesystem: CliFilesystem,
 
+        /// Label for the bootstrap key enrolled during create, shown later
+        /// when listing enrolled keys. Falls back to a default label when
+        /// omitted.
+        #[arg(long, value_parser = parse_label)]
+        label: Option<String>,
+
         /// Hidraw path (e.g. /dev/hidraw1) of the security key to enroll —
         /// for unattended/scripted use. Omit to be prompted interactively.
         #[arg(long)]
@@ -182,6 +188,12 @@ enum CreateMode {
         /// Filesystem to create inside the volume
         #[arg(long, value_enum, default_value = "ext4")]
         filesystem: CliFilesystem,
+
+        /// Label for the bootstrap key enrolled during create, shown later
+        /// when listing enrolled keys. Falls back to a default label when
+        /// omitted.
+        #[arg(long, value_parser = parse_label)]
+        label: Option<String>,
 
         /// Hidraw path (e.g. /dev/hidraw1) of the security key to enroll —
         /// for unattended/scripted use. Omit to be prompted interactively.
@@ -358,6 +370,7 @@ fn run_create(
     target: CreateTarget,
     filesystem: Filesystem,
     user_verification: bool,
+    key_label: Option<String>,
     fido2_selection: Fido2DeviceSelection,
     display_path: &str,
     announce: bool,
@@ -372,6 +385,7 @@ fn run_create(
         target,
         filesystem,
         user_verification,
+        key_label,
         fido2_selection,
         &|stage: CreateStage| println!("{}", ux::translate_create_stage(&stage)),
         &adapter,
@@ -764,6 +778,7 @@ pub fn run() {
                 path,
                 size,
                 filesystem,
+                label,
                 fido2_device,
                 user_verification,
             } => {
@@ -774,6 +789,7 @@ pub fn run() {
                     target,
                     filesystem.into(),
                     user_verification,
+                    label,
                     selection,
                     &display_path,
                     true,
@@ -783,6 +799,7 @@ pub fn run() {
                 path,
                 size,
                 filesystem,
+                label,
                 fido2_device,
                 user_verification,
             } => {
@@ -811,6 +828,7 @@ pub fn run() {
                     target,
                     filesystem.into(),
                     user_verification,
+                    label,
                     selection,
                     &display_path,
                     announce,

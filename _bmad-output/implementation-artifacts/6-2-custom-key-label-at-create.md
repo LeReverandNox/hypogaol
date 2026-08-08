@@ -4,7 +4,7 @@ baseline_commit: 919c684d43a5917ffd4497a7360376fefc76aa0b
 
 # Story 6.2: Custom Key Label at Create
 
-Status: ready-for-dev
+Status: in-progress
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -22,16 +22,16 @@ so that my newly created volume's key is labeled the same way I'd label any key 
 
 ## Tasks / Subtasks
 
-- [ ] **Task 0: Read every file this story touches before changing anything** (AC: #1, #2, #3)
+- [x] **Task 0: Read every file this story touches before changing anything** (AC: #1, #2, #3)
   - Read in full: `src/domain/workflows/create.rs` (256 lines — `run`/`bootstrap_and_provision`/`finish_provisioning`), `src/ports/fido2_backend.rs` (`KeyMetadata`, `enroll_fido2_key`), `src/domain/workflows/enroll.rs` (existing precedent: how `enroll` already threads a caller-supplied `key_label: String` into `KeyMetadata`), `src/cli/main.rs` (the `Create`/`CreateMode` clap definitions, `parse_label`, `run_create`, `run()`'s dispatch match), `tests/unit/create.rs` (every existing `create::run(...)` call site — there are ~20), `tests/unit/fakes.rs` (`FakeFido2Backend`, its existing `user_verification_received` capture pattern at lines 323-388).
   - No spike needed — this story is a pure plumbing change (an `Option<String>` threaded through an existing call chain), not new adapter/subprocess mechanics.
 
-- [ ] **Task 1: Add `key_label: Option<String>` as a sibling parameter to `create::run`** (AC: #1, #2)
+- [x] **Task 1: Add `key_label: Option<String>` as a sibling parameter to `create::run`** (AC: #1, #2)
   - `src/domain/workflows/create.rs`: per `ARCHITECTURE-SPINE.md` AD-9, `key_label: Option<String>` is a sibling to `CreateTarget`/`filesystem`/`user_verification` in `run`'s signature — never embedded inside `CreateTarget` (which stays scoped to AD-9's own file/device branching alone). Insert it immediately after `user_verification: bool` and before `fido2_selection: Fido2DeviceSelection`, matching the order AD-9's Rule lists these siblings in (`filesystem`, `user_verification`, `key_label`).
   - Thread `key_label` unchanged through both call sites inside `run` (`bootstrap_and_provision` for the File branch, and the Device branch) down into `bootstrap_and_provision`'s own signature, then into `finish_provisioning`'s signature — mirroring exactly how `user_verification: bool` is already threaded through all three functions today.
   - In `finish_provisioning` (currently lines 219-255): replace the hardcoded `key_label: "primary".to_string()` (line 237) with `key_label: key_label.unwrap_or_else(|| "primary".to_string())` — `"primary"` is today's existing default label (already the literal used here and matched verbatim across `tests/unit/{info,revoke,keyslot_guard,fakes}.rs` and `tests/hardware/main.rs`); do not introduce a new constant or change the string itself, only make it a fallback (AC #2).
 
-- [ ] **Task 2: Add `--label` to both `create file` and `create device` CLI subcommands** (AC: #1, #2)
+- [x] **Task 2: Add `--label` to both `create file` and `create device` CLI subcommands** (AC: #1, #2)
   - `src/cli/main.rs`: add `label: Option<String>` to both `CreateMode::File` and `CreateMode::Device` variants' fields, using `#[arg(long, value_parser = parse_label)]` — reuse the existing `parse_label` function (line ~201, already used by `enroll`/`revoke`'s required `--label`) unchanged; do not write a second validator. Since this field is `Option<String>`, clap runs `parse_label` only when the flag is actually supplied (omitting `--label` yields `None` directly, never calling the validator on an absent value) — no `default_value` needed.
   - Field placement: insert `label` after `filesystem` and before `fido2_device` in both variants' struct bodies, grouping it with the other bootstrap-enrollment-related flags (`fido2_device`, `user_verification`) rather than the volume-shape flags (`path`, `size`, `filesystem`).
   - Wire it through `run()`'s dispatch match (currently lines 762-819): destructure `label` out of both `CreateMode::File { .. }` and `CreateMode::Device { .. }` patterns and pass it to `run_create` as a new parameter.
@@ -106,4 +106,11 @@ so that my newly created volume's key is labeled the same way I'd label any key 
 
 ### Completion Notes List
 
+- Task 0: Read `create.rs`, `fido2_backend.rs`, `enroll.rs`, `cli/main.rs`, `tests/unit/create.rs`, `tests/unit/fakes.rs` in full before any change, per the story's own instruction.
+- Task 1: `key_label: Option<String>` added as a sibling parameter to `create::run`/`bootstrap_and_provision`/`finish_provisioning`, inserted after `user_verification: bool` and before `fido2_selection`. `finish_provisioning`'s `KeyMetadata` construction now uses `key_label.unwrap_or_else(|| "primary".to_string())` instead of the hardcoded literal.
+- Task 2: `--label` (`Option<String>`, `value_parser = parse_label`) added to both `CreateMode::File` and `CreateMode::Device`, placed after `filesystem` and before `fido2_device`. Wired through `run()`'s dispatch match and `run_create`'s new `key_label` parameter straight into `create::run`. `cargo build` confirmed green after Tasks 1+2 landed together (the lib crate only compiles once both the domain signature and its CLI-side caller agree — `tests/unit/create.rs`'s ~20 call sites are a separate compilation target and are updated in Task 4).
+
 ### File List
+
+- `src/domain/workflows/create.rs` (modified)
+- `src/cli/main.rs` (modified)
