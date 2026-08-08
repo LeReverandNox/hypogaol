@@ -98,14 +98,24 @@ pub fn run(
         } => {
             // Order is load-bearing (AD-9): the header check must win even
             // when `confirmed` is true (AC #4), so it runs unconditionally
-            // first. Confirmation is checked second, independent of header
-            // state (AC #5). Size resolution/validation runs last, since it
+            // first. A header with CAP-23's marker token is a
+            // marker-verified resume: it skips the confirmation check
+            // entirely (AC #2), same as the File branch skips its
+            // confirmation-free refusal. A header without the marker
+            // refuses unchanged. Size resolution/validation runs last on
+            // every path that reaches it — including resume — since it
             // needs an extra adapter call and has no bearing on whether the
             // destination should be refused outright.
-            if luks.has_luks2_header(&path)? {
-                return Err(DomainError::DeviceAlreadyFormatted(path));
-            }
-            if !confirmed {
+            let marker_verified_resume = if luks.has_luks2_header(&path)? {
+                if luks.has_marker_token(&path)? {
+                    true
+                } else {
+                    return Err(DomainError::DeviceAlreadyFormatted(path));
+                }
+            } else {
+                false
+            };
+            if !marker_verified_resume && !confirmed {
                 return Err(DomainError::DeviceConfirmationRequired);
             }
 
