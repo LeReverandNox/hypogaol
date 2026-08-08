@@ -228,5 +228,13 @@ fn finish_provisioning(
     progress(CreateStage::CreatingFilesystem);
     fs.mkfs(mapper, filesystem)?;
 
+    // Marker removed first, bootstrap keyslot second — this order is
+    // load-bearing (AD-9/CAP-23 AC #4). A crash between the two leaves a
+    // harmless stray keyslot on an already-functional volume, correctly
+    // read as "genuine pre-existing volume" (no marker) by a future
+    // create's has_marker_token check. The reverse order would let a
+    // future create misread a completed volume's surviving marker as
+    // resumable and silently wipe it.
+    luks.remove_marker_token(&mapper.source_path)?;
     keyslot_guard::remove_keyslot_guarded(luks, &mapper.source_path, BOOTSTRAP_KEYSLOT)
 }
