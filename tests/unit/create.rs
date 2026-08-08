@@ -49,6 +49,7 @@ fn refuses_before_touching_anything_if_destination_already_exists() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -94,6 +95,7 @@ fn file_backed_resume_proceeds_through_the_full_happy_path_with_no_confirmation_
         target,
         Filesystem::Ext4,
         false,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -141,6 +143,7 @@ fn refuses_a_file_backed_size_below_the_minimum_before_touching_any_port() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -179,6 +182,7 @@ fn happy_path_runs_every_port_call_once_in_order() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -226,6 +230,7 @@ fn create_with_user_verification_true_threads_it_to_bootstrap_enrollment() {
         target,
         Filesystem::Ext4,
         true,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -254,6 +259,7 @@ fn create_device_with_user_verification_true_threads_it_to_bootstrap_enrollment(
         target,
         Filesystem::Ext4,
         true,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -263,6 +269,158 @@ fn create_device_with_user_verification_true_threads_it_to_bootstrap_enrollment(
 
     assert!(result.is_ok(), "expected Ok(()), got {result:?}");
     assert_eq!(fido2.user_verification_received(), Some(true));
+}
+
+#[test]
+fn create_with_label_threads_it_into_the_enrolled_key_metadata() {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let fixture = RealFixtureFile::create("with-label");
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_VOLUME_SIZE_BYTES,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        Some("backup".to_string()),
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(fido2.key_label_received(), Some("backup".to_string()));
+}
+
+#[test]
+fn create_without_label_falls_back_to_the_default_label() {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let fixture = RealFixtureFile::create("without-label");
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_VOLUME_SIZE_BYTES,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        None,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(fido2.key_label_received(), Some("primary".to_string()));
+}
+
+#[test]
+fn create_device_with_label_threads_it_into_the_enrolled_key_metadata() {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing().with_device_capacity(MIN_VOLUME_SIZE_BYTES * 2);
+
+    let fixture = RealFixtureFile::create("device-with-label");
+    let target = CreateTarget::Device {
+        path: fixture.0.clone(),
+        size: None,
+        confirmed: true,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        Some("backup".to_string()),
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(fido2.key_label_received(), Some("backup".to_string()));
+}
+
+#[test]
+fn create_device_without_label_falls_back_to_the_default_label() {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing().with_device_capacity(MIN_VOLUME_SIZE_BYTES * 2);
+
+    let fixture = RealFixtureFile::create("device-without-label");
+    let target = CreateTarget::Device {
+        path: fixture.0.clone(),
+        size: None,
+        confirmed: true,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        None,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(fido2.key_label_received(), Some("primary".to_string()));
+}
+
+#[test]
+fn create_with_an_unusual_label_threads_it_through_unmodified() {
+    // Every other label test here uses a trivial single-word ASCII string
+    // ("backup"); this one uses spaces, punctuation, and non-ASCII
+    // characters to prove `create::run`'s plumbing does a true passthrough
+    // with no trimming/truncation/escaping anywhere between the CLI-facing
+    // `Option<String>` and `enroll_fido2_key`'s `metadata` argument (Review
+    // Finding, 6-2 review). The full create -> LUKS2 token -> info/revoke
+    // round-trip (AC #3) stays hardware-verified only: the fakes used here
+    // don't model token persistence, so a fake-backed test can only prove
+    // domain-level threading, not the adapter's on-disk encode/decode.
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let fixture = RealFixtureFile::create("with-unusual-label");
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_VOLUME_SIZE_BYTES,
+    };
+    let label = "Renée's café key #2 🔑".to_string();
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        Some(label.clone()),
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(fido2.key_label_received(), Some(label));
 }
 
 #[test]
@@ -284,6 +442,7 @@ fn enroll_failure_closes_the_mapping_and_removes_the_backing_file() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -331,6 +490,7 @@ fn mkfs_failure_closes_the_mapping_and_removes_the_backing_file() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -373,6 +533,7 @@ fn bootstrap_format_and_open_failure_removes_the_backing_file_without_closing_a_
         target,
         Filesystem::Ext4,
         false,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -420,6 +581,7 @@ fn close_stale_mapping_failure_aborts_before_bootstrap_format_and_open_ever_runs
         target,
         Filesystem::Ext4,
         false,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -463,6 +625,7 @@ fn device_happy_path_with_no_size_given_uses_the_full_capacity() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -509,6 +672,7 @@ fn device_happy_path_with_a_size_smaller_than_capacity_uses_the_requested_size()
         target,
         Filesystem::Ext4,
         false,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -557,6 +721,7 @@ fn device_with_no_size_given_and_capacity_below_the_minimum_refuses_before_any_m
         target,
         Filesystem::Ext4,
         false,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -601,6 +766,7 @@ fn device_with_existing_luks2_header_refuses_even_when_confirmed() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -651,6 +817,7 @@ fn device_backed_resume_proceeds_even_when_not_confirmed() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -704,6 +871,7 @@ fn device_backed_resume_still_enforces_size_against_capacity() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -757,6 +925,7 @@ fn device_without_confirmation_refuses_even_with_no_header() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -794,6 +963,7 @@ fn device_with_requested_size_greater_than_capacity_refuses_before_any_mutating_
         target,
         Filesystem::Ext4,
         false,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,
@@ -845,6 +1015,7 @@ fn device_branch_failure_closes_the_mapping_without_removing_any_backing_file() 
         target,
         Filesystem::Ext4,
         false,
+        None,
         Fido2DeviceSelection::Interactive,
         &no_progress,
         &luks,

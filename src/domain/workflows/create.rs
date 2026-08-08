@@ -41,6 +41,7 @@ pub fn run(
     target: CreateTarget,
     filesystem: Filesystem,
     user_verification: bool,
+    key_label: Option<String>,
     fido2_selection: Fido2DeviceSelection,
     progress: &dyn Fn(CreateStage),
     luks: &dyn LuksBackend,
@@ -80,6 +81,7 @@ pub fn run(
                 size,
                 filesystem,
                 user_verification,
+                key_label,
                 fido2_selection,
                 progress,
                 luks,
@@ -153,6 +155,7 @@ pub fn run(
                 resolved_size,
                 filesystem,
                 user_verification,
+                key_label,
                 fido2_selection,
                 progress,
                 luks,
@@ -168,6 +171,7 @@ fn bootstrap_and_provision(
     size: u64,
     filesystem: Filesystem,
     user_verification: bool,
+    key_label: Option<String>,
     fido2_selection: Fido2DeviceSelection,
     progress: &dyn Fn(CreateStage),
     luks: &dyn LuksBackend,
@@ -201,6 +205,7 @@ fn bootstrap_and_provision(
         &mapper,
         filesystem,
         user_verification,
+        key_label,
         fido2_selection,
         progress,
         luks,
@@ -220,6 +225,7 @@ fn finish_provisioning(
     mapper: &MapperHandle,
     filesystem: Filesystem,
     user_verification: bool,
+    key_label: Option<String>,
     fido2_selection: Fido2DeviceSelection,
     progress: &dyn Fn(CreateStage),
     luks: &dyn LuksBackend,
@@ -234,7 +240,7 @@ fn finish_provisioning(
     // wiped as soon as enroll_fido2_key consumes it — still strictly before
     // mkfs runs, satisfying AC #3/AD-3's wipe-before-mkfs requirement.
     let metadata = KeyMetadata {
-        key_label: "primary".to_string(),
+        key_label: key_label.unwrap_or_else(|| "primary".to_string()),
         filesystem,
     };
     progress(CreateStage::EnrollingFido2Key);

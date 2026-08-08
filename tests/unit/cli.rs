@@ -208,6 +208,52 @@ fn create_device_help_lists_the_fido2_device_flag() {
 }
 
 #[test]
+fn create_file_help_lists_label_as_a_flag() {
+    let help = help_text(&["hypogaol", "create", "file", "--help"]);
+    assert!(help.contains("--label"));
+}
+
+#[test]
+fn create_device_help_lists_label_as_a_flag() {
+    let help = help_text(&["hypogaol", "create", "device", "--help"]);
+    assert!(help.contains("--label"));
+}
+
+#[test]
+fn create_file_rejects_an_empty_label() {
+    let result = Cli::try_parse_from([
+        "hypogaol",
+        "create",
+        "file",
+        "/tmp/some-volume",
+        "--size",
+        "64M",
+        "--label",
+        "",
+    ]);
+    assert!(
+        result.is_err(),
+        "--label \"\" must be a parse error, not a silently-accepted empty label"
+    );
+}
+
+#[test]
+fn create_device_rejects_a_whitespace_only_label() {
+    let result = Cli::try_parse_from([
+        "hypogaol",
+        "create",
+        "device",
+        "/tmp/some-device",
+        "--label",
+        "   ",
+    ]);
+    assert!(
+        result.is_err(),
+        "--label \"   \" must be a parse error, not a silently-accepted blank label"
+    );
+}
+
+#[test]
 fn resize_help_lists_path_as_positional_and_size_as_a_flag() {
     let help = help_text(&["hypogaol", "resize", "--help"]);
     assert!(help.contains("<PATH>"));
