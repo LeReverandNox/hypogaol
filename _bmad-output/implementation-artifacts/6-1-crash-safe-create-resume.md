@@ -4,7 +4,7 @@ baseline_commit: 6dde5fde519f191896bd568f149aa891039ffee0
 
 # Story 6.1: Crash-Safe Create Resume
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -69,7 +69,7 @@ so that I get a clean, fully-created volume instead of being stuck with an unrec
     - Cleanup ordering: assert `remove_marker_token` is logged before `remove_key`/the guarded keyslot removal in the call log on a full happy-path run (both File and Device).
   - Add `FakeLuksBackend::with_has_marker_token(bool)` per Task 1; if a test needs marker removal itself to fail (to prove ordering matters), extend `fail_at` handling for `"remove_marker_token"` the same way other methods use it.
 
-- [ ] **Task 9: Full regression pass**
+- [x] **Task 9: Full regression pass**
   - `cargo build` succeeds and `make test` passes with all prior 174 tests plus this story's new ones green.
   - Note in Completion Notes the exact new total test count (mirrors the discipline established in Story 5.4's and Epic 5's completion notes of citing exact before/after counts).
   - If hardware is available: manually crash-simulate (e.g. `kill -9` the process, or a temporary early `return`/`panic!` inserted and reverted) a file-backed and a device-backed create between `luksFormat` and final cleanup, then re-run create against the same destination and confirm it resumes to a fully working, unlockable volume — this is the one behavior unit tests with fakes cannot prove end-to-end. If no hardware is available in this session, say so explicitly (per this project's standing convention — see Dev Notes) and flag it as a retrospective action item for `LeReverandNox` to verify later, same as Story 5.2's and 5.1's hardware-verification action items.
@@ -123,8 +123,24 @@ so that I get a clean, fully-created volume instead of being stuck with an unrec
 
 ### Agent Model Used
 
+Claude Sonnet 5 (claude-sonnet-5)
+
 ### Debug Log References
+
+Task 0 spike (real `cryptsetup 2.8.6`, scratch 32 MiB LUKS2 file in `/tmp`, 2026-08-08): confirmed `cryptsetup token import` with no `--token-id` auto-assigns the next free token id rather than requiring/defaulting to a replace; confirmed `token export --token-id <id>` and `token remove --token-id <id>` both work reliably against the new marker token type. Findings recorded in the story's Dev Notes.
 
 ### Completion Notes List
 
+- Chosen marker token type string: `hypogaol-create-marker` (constant `CREATE_MARKER_TOKEN_TYPE` in `src/adapters/exec/mod.rs`).
+- No new port, no new `CreateStage` variant, no `CreateTarget`/`Filesystem`/`KeyMetadata` changes — matches the story's stated scope exactly.
+- AC #5 (FIDO2-before-mkfs) required no code change; `finish_provisioning`'s existing enroll-then-mkfs ordering already satisfied it and was verified unchanged by this story's edits (Task 7).
+- Test counts verified empirically, not self-reported from memory (per the Epic 5 retro watchlist item): baseline at this story's `baseline_commit` (6dde5fd, checked via an isolated `git worktree`) was 17 lib tests + 176 `tests/unit` tests = 193 total. After this story: 17 lib tests + 179 `tests/unit` tests = 196 total, a net +3 new tests (`file_backed_resume_proceeds_through_the_full_happy_path_with_no_confirmation_involved`, `device_backed_resume_proceeds_even_when_not_confirmed`, `device_backed_resume_still_enforces_size_against_capacity`), all passing, 0 regressions. `cargo build` and `cargo fmt --check` both clean; `cargo clippy --all-targets` clean except 4 pre-existing `too_many_arguments` warnings on functions this story didn't add (unrelated to this story's changes).
+- **Hardware verification:** a real FIDO2 hardware token was detected on this machine (`fido2-token -L`), but the crash-simulation scenario in Task 9 requires interactively touching the physical key at the right moment mid-`create` (and possibly a PIN prompt), which this non-interactive dev-agent session cannot provide. Per this project's standing convention (Stories 4.3, 5.1, 5.2's Completion Notes), this is stated explicitly rather than silently claimed: **no real-hardware crash-simulation was performed this session.** Flagged below as a retrospective action item for `LeReverandNox` to verify manually (kill -9 or a temporary early-return mid-`create`, both file- and device-backed, then re-run `create` against the same destination and confirm it resumes to a fully working, unlockable volume).
+
 ### File List
+
+- `src/ports/luks_backend.rs` — added `has_marker_token`/`remove_marker_token` trait methods.
+- `src/adapters/exec/mod.rs` — added `CREATE_MARKER_TOKEN_TYPE` constant; wrote the marker token inside `bootstrap_format_and_open` (after `luksFormat`, before `luksOpen`); implemented `has_marker_token`/`remove_marker_token`.
+- `src/domain/workflows/create.rs` — File branch: marker-verified resume check before `DestinationExists` refusal. Device branch: marker-verified resume skips the confirmation check, size resolution still runs unconditionally. `finish_provisioning`: `remove_marker_token` before the guarded bootstrap-keyslot removal.
+- `tests/unit/fakes.rs` — `FakeLuksBackend` gained `has_marker_token`/`remove_marker_token` (with `with_has_marker_token` builder, call-log entries, `fail_at` support).
+- `tests/unit/create.rs` — updated 5 existing call-log assertions for the new calls; added 3 new tests covering file/device-backed resume and size-still-enforced-on-resume.
