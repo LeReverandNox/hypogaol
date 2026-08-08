@@ -1,5 +1,5 @@
 ---
-stepsCompleted: [step-01-validate-prerequisites, step-01-refresh-2026-07-22, step-02-design-epics, step-01-refresh-2026-07-22-b, step-03-epic-1-stories, step-03-epic-2-stories, step-03-epic-3-stories, step-03-create-stories, step-01-refresh-2026-07-27-epic4, step-02-design-epics-epic4, step-03-epic-4-stories]
+stepsCompleted: [step-01-validate-prerequisites, step-01-refresh-2026-07-22, step-02-design-epics, step-01-refresh-2026-07-22-b, step-03-epic-1-stories, step-03-epic-2-stories, step-03-epic-3-stories, step-03-create-stories, step-01-refresh-2026-07-27-epic4, step-02-design-epics-epic4, step-03-epic-4-stories, step-01-refresh-2026-08-08-epic6, step-02-design-epics-epic6, step-03-epic-6-stories]
 inputDocuments:
   - _bmad-output/specs/spec-tomb-fido2/SPEC.md
   - _bmad-output/specs/spec-tomb-fido2/hooks.md
@@ -35,6 +35,14 @@ FR14: User can close every currently-open/unlocked tomb in one command. (CAP-14)
 FR15: User can run an emergency command that closes every open tomb and forcibly clears any process holding a mount busy, firing immediately with no confirmation prompt. (CAP-15)
 FR16: User can define per-tomb bind-hooks (auto bind-mount tomb-internal paths onto `$HOME`-relative paths on open) and an exec-hooks executable (run as the invoking user at open/close), with an option to skip hook processing for a given invocation. (CAP-16)
 FR17: User gets real step-by-step progress messages during create and resize, naming each real stage as it begins and completes, replacing the Story 1.5 stopgap of one message before and one after the whole operation. (CAP-17)
+FR18: User can supply a custom label for the first FIDO2 key enrolled during create's bootstrap step, mirroring enroll's existing required `--label` flag, instead of always getting the tool's default label. (CAP-18)
+FR19: User can optionally have create scaffold example bind-hooks/exec-hooks template files into a new volume, so hooks are discoverable without consulting docs first. (CAP-19)
+FR20: User can use one-letter shorthand aliases for each subcommand's primary flags, in addition to the existing long forms, across the whole CLI. (CAP-20)
+FR21: Contributors and users see repository-hygiene badges (build status, license, latest release, MSRV) in the README header at a glance, with code-coverage and security-audit badges added once their underlying instrumentation exists. (CAP-21)
+FR22: User can create/resize a volume using XFS or Btrfs as the filesystem, in addition to today's ext4-only support, with Btrfs always using `mkfs.btrfs --mixed` mode. (CAP-22)
+FR23: User can re-run create against the same destination after a crash/interruption during a prior create attempt, and have the tool detect the partial attempt and restart it clean, rather than being left with an unrecoverable partial volume or a false "destination already exists" refusal. (CAP-23)
+FR24: Tool prevents two simultaneous invocations against the same volume from racing past each other in a way that corrupts state or bypasses a safety guard, particularly the last-keyslot guard. (CAP-24)
+FR25: Tool gives plain-language guidance when the FIDO2 device involved in an operation has a device-level PIN configured, detected proactively before the touch prompt, distinct from user-verification. (CAP-25)
 
 ### NonFunctional Requirements
 
@@ -54,6 +62,11 @@ NFR13: Slam fires with zero confirmation prompt, by design — its emergency/pan
 NFR14: Hooks introduce an arbitrary-code-execution risk surface — exec-hooks must always run unprivileged as the invoking user; hook files must pass regular-file/executable-bit/ownership/not-world-writable checks (hard error if failed, aborting the operation); bind-hooks entries must pass path-containment checks (tomb-root source, `$HOME` destination), skipped with a warning if failed, never silently applied.
 NFR15: Create and resize must report distinct named-stage progress messages as each real stage occurs, not merely a single message before and after the whole operation.
 NFR16: UV enrollment is a stronger verification mode of the existing FIDO2 mechanism, not a new auth path — must not violate the no-fallback-auth-paths constraint (NFR5).
+NFR17: A device-backed create's confirmation-prompt exception for a marker-verified resume must stay consistent with the pre-existing refuse-exception for the same case (SPEC Constraints, 2026-08-08 addendum) — both carve-outs rest on the same "surviving marker is structural proof nothing of value occupies that device" reasoning.
+NFR18: `mkfs.btrfs --mixed` is unconditional for every Btrfs volume this tool creates, a deliberate choice for this tool's small-cold-storage use case, not a size-threshold branch.
+NFR19: The concurrent-invocation lock (`flock`, `LOCK_EX | LOCK_NB`) never blocks/serializes silently — on contention it returns immediately with a plain-language "another operation is already in progress" error.
+NFR20: Read-only workflows (`info`, `unlock` including its read-only variant) never acquire the invocation lock — scope stays strictly limited to mutating workflows, per CAP-24's own success criterion.
+NFR21: FIDO2 PIN-status detection is proactive — queried during device enumeration/preflight — and any resulting warning is always shown before the blocking touch/PIN subprocess call, never only after a failure.
 
 ### Additional Requirements
 
@@ -80,6 +93,14 @@ NFR16: UV enrollment is a stronger verification mode of the existing FIDO2 mecha
 - AD-18 (Epic 4): Slam's busy-mount escalation — two new mechanism-only `FilesystemBackend` methods, `processes_using(mountpoint)` (`fuser -m`) and `signal_process(pid, Signal)` (`kill -s`); the escalation *policy* (SIGTERM → pause 1s → retry umount → SIGHUP → pause 1s → retry → SIGKILL → pause 1s → retry, moving to the next mapping once umount succeeds or no holders remain) lives in `domain::workflows::slam`, not the adapter, so it stays unit-testable against AD-7's fake ports. Zero confirmation prompt, by design (NFR13). (binds CAP-15)
 - AD-19 (Epic 4): Progress reporting is a callback seam, never I/O inside `domain` — `create`/`resize` each take a `progress: &dyn Fn(Stage)` parameter, invoked synchronously at each real stage boundary; `Stage` is a typed, payload-free per-workflow enum (`CreateStage::{AllocatingBackingFile, FormattingLuks2, CreatingFilesystem, EnrollingFido2Key}`, `ResizeStage::{GrowingBackingFile, ResizingLuks2Mapping, GrowingFilesystem}`). `cli` supplies the closure and translates each stage via new `cli::ux::translate_stage`, the same translate-at-the-boundary shape as the existing `DomainError -> ux::translate` convention. (binds CAP-17)
 - New external tool dependencies (Epic 4): `psmisc` (`fuser`, AD-18) and `util-linux` `kill` (AD-18) — added to preflight's checked binaries and the Nix devShell.
+- AD-4 amended (Epic 6, CAP-22): `preflight` takes an `Option<Filesystem>` and checks only the mkfs/growfs toolchain the operation actually needs (`create`/`resize` pass the requested/existing type; other workflows pass `None`) — one shared gate, not a per-filesystem fork. AD-20's per-invocation lock is acquired immediately after this gate passes, never before it and never folded into it. (binds CAP-22, transitively CAP-24)
+- AD-8 amended (Epic 6, CAP-22): `Filesystem` gains `Xfs` and `Btrfs` arms — `mkfs`'s adapter match arm runs `mkfs.xfs` or `mkfs.btrfs --mixed` (unconditional for every Btrfs volume, dropping the minimum viable size from Btrfs's standard-mode ~109 MiB floor to mixed-mode's ~16 MiB); `growfs` runs `xfs_growfs` or `btrfs filesystem resize`; both selected the same way ext4's tools already are, read from the `filesystem` token field (AD-2), never re-asked or sniffed. (binds CAP-22)
+- AD-9 amended (Epic 6, CAP-18/19/23): `create` gains `key_label: Option<String>` (CAP-18, falls back to today's default when `None`) and `scaffold_hooks: bool` (CAP-19, default `false`) as siblings to `CreateTarget`, never embedded inside it. **File-backed:** an existing destination is no longer an automatic refusal — `LuksBackend::has_marker_token(path)` distinguishes a resumable partial attempt (proceed with no confirmation — the marker is structural proof nothing of value survived) from a genuine foreign file (refuse, unchanged). **Device-backed:** same marker check after `has_luks2_header`; on a marker-verified resume, size resolution against `device_capacity` is still mandatory (a shrunk device must still be caught) but the wipe-confirmation prompt is skipped regardless of `confirmed`'s value — a header-without-marker still refuses unconditionally. **Corrected real execution order** (fixing a documented drift): FIDO2 key enrollment happens **before** `mkfs` (the transient bootstrap passphrase is the only valid credential to authenticate `systemd-cryptenroll` with); if `scaffold_hooks` is true, the still-open mapper is mounted, `scaffold_hook_templates` writes `exec-hooks.example` (never the live `exec-hooks` name, so a scaffolded volume never fails AD-14's executable-bit guardrail) and a fully-commented `bind-hooks` file, then unmounted — this happens **after** `mkfs`, before final cleanup. Final cleanup order matters: the CAP-23 marker token is removed **first**, the transient bootstrap keyslot **second** (mirrors AD-5's own safe-ordering reasoning) — reversing this order would let a crash leave a marker on a fully-completed volume, causing a future `create` to silently wipe working data. `has_marker_token` closes AD-9's previously-documented "known gap" (a crash between bootstrap and enrollment leaving an unrecoverable volume). (binds CAP-18, CAP-19, CAP-23)
+- AD-19 amended (Epic 6, CAP-19): `CreateStage` gains one payload-free variant, `ScaffoldingHookTemplates`, firing after `CreatingFilesystem` only when `scaffold_hooks: true`. The CAP-23 marker-token write is deliberately not its own stage — folded into the existing `FormattingLuks2` window, keeping progress granularity at real user-meaningful steps. (binds CAP-19)
+- AD-20 (new, Epic 6): Concurrent-invocation guard — one new `FilesystemBackend::lock_target(path) -> Result<LockGuard, DomainError>` method, `flock(2)` (`LOCK_EX | LOCK_NB`) on an `O_CLOEXEC` fd (required so the locking fd never leaks into a spawned subprocess) opened against the target's canonicalized path (resolving the parent directory when the path itself doesn't yet exist, e.g. a genuinely fresh file-backed create — an accepted over-serialization trade-off, not a gap). Every mutating workflow (`create`, `enroll`, `revoke`, `close`, `resize`) acquires this lock as its second statement, immediately after `preflight` (AD-4) passes. `close_all`/`slam` acquire and drop a separate `LockGuard` per mapping, scoped to that single mapping's close attempt — never one lock for the whole batch, preserving AD-17's existing batch-isolation. `info` and `unlock` (including read-only) acquire no lock at all — explicitly out of scope, per CAP-24's own success criterion. On contention, returns immediately (never blocks) with a plain-language "another operation is already in progress" error; the kernel releases the lock automatically on process exit/crash, so there is no stale-lock state to detect or clean up, consistent with AD-2's no-side-channel-state posture. (binds CAP-24, transitively every mutating workflow)
+- AD-21 (new, Epic 6): FIDO2 PIN-status detection — the existing `Fido2Device` struct (already shared by `LuksBackend::open`'s presence-wait loop and `Fido2Backend::enroll_fido2_key`'s device-selection resolvers) gains a `client_pin: bool` field, populated via one additional `fido2-token -I` call per enumerated device — no new `Fido2Backend` port method. `enroll_fido2_key`'s resolvers, once a specific device is selected, warn naming that device; `LuksBackend::open`'s presence-wait loop (which never selects a device — cryptsetup itself matches the token to whichever device answers) warns with a blanket list of every currently-enumerated PIN-required device instead. Both warnings print before the blocking touch/PIN subprocess call. The reactive wrong-PIN-retry warning is translated from that same call's stderr (see AD-3 amendment below), never from stdin/stdout. (binds CAP-25)
+- AD-3 amended (Epic 6, CAP-25): stdin/stdout stay strictly inherited/passthrough for the actual secret-entry exchange, unchanged — but stderr on that same subprocess call may now be piped and parsed, for non-secret diagnostic text only (wrong-PIN retry-count warning, PIN-required hint). Nothing captured from stderr may ever contain or derive the secret itself; if a given authenticator's diagnostic text can't be cleanly distinguished from secret material, that call falls back to the original passthrough-only rule. Implementation must read stderr concurrently (separate thread, or non-blocking interleaved reads) rather than only after the child exits, to avoid a pipe-buffer deadlock on a long touch/PIN-blocking call. (binds CAP-25)
+- New external tool dependencies (Epic 6): `xfsprogs` (`mkfs.xfs`, `xfs_growfs`, CAP-22) and `btrfs-progs` (`mkfs.btrfs`, `btrfs`, CAP-22) — added to preflight's checked binaries (only when the corresponding `Filesystem` variant is requested) and the Nix devShell. `cargo-llvm-cov` (coverage instrumentation) and `cargo-audit` (RustSec advisory scan, gating CI job) plus hosted Codecov (CAP-21) — CI/badge tooling only, not part of preflight or the runtime devShell.
 - Data/error conventions: per-key label + metadata stored as JSON in the LUKS2 token slot (`key_label`, `credential_id`, `created_at`, `filesystem`); domain errors are a typed enum (`thiserror`), translated to plain-language text only at the `cli` boundary; no persistent logging/telemetry (stderr-only, ephemeral); no config file.
 - Stack: Rust 1.90.0, clap 4.6.4, serde/serde_json 1.0.229, thiserror 2.0.19, anyhow 1.0.104, zeroize 1.9.0 (AD-3/AD-9 bootstrap-passphrase wipe only); external: cryptsetup 2.8.6, systemd 261 (+FIDO2 +LIBCRYPTSETUP_PLUGINS), fido2-token/libfido2 1.17.0, e2fsprogs (`mkfs.ext4`/`resize2fs`, AD-8 v1 ext4-only), util-linux `blockdev` (AD-9 `device_capacity`); Linux only.
 - Structural seed: `src/domain/{workflows/{create,unlock,enroll,revoke,close,resize}.rs, preflight.rs, errors.rs}`, `src/ports/{luks_backend,fido2_backend,filesystem_backend}.rs`, `src/adapters/exec/`, `src/cli/{main,ux}.rs`, `tests/{unit,hardware}/`, `Makefile`, `flake.nix`/`flake.lock`, `README.md`. No starter template — greenfield project.
@@ -96,10 +117,9 @@ NFR16: UV enrollment is a stronger verification mode of the existing FIDO2 mecha
 - Remote or delegated unlock beyond cryptsetup's native FIDO2 token mode.
 - Post-quantum-readiness features.
 - Shrinking an existing tomb — resize is grow-only for v1.
-- FIDO2 PIN-required-device UX specifics (deferred — implementation detail, not architectural fork).
-- Concurrent invocations of the tool against the same device (deferred — TOCTOU risk against AD-5's live-count guard, low-likelihood for a single-user cold-storage tool).
-- Resuming a partial/crashed `create` (deferred, AD-9 — not required by SPEC).
-- Filesystem types beyond ext4 (deferred — AD-8's enum design makes this additive later).
+- Exposing the full `systemd-cryptenroll` FIDO2 flag set during enrollment — deferred (open design question), not decided; still not in Epic 6 scope.
+
+> Four items previously listed here as deferred are now in scope via Epic 6: FIDO2 PIN-required-device UX (FR25/CAP-25), the concurrent-invocation guard (FR24/CAP-24), resuming a partial/crashed `create` (FR23/CAP-23), and filesystem types beyond ext4 (FR22/CAP-22).
 
 ### UX Design Requirements
 
@@ -124,6 +144,14 @@ FR14: Epic 4 - Close every open tomb in one command (close-all)
 FR15: Epic 4 - Emergency slam: close-all + busy-mount signal escalation, no confirmation
 FR16: Epic 4 - Per-tomb bind-hooks/exec-hooks automation on open/close, skippable
 FR17: Epic 4 - Named-stage progress reporting during create and resize
+FR18: Epic 6 - Custom `--label` for create's bootstrap-enrolled key
+FR19: Epic 6 - Optional hook-template scaffolding on create
+FR20: Epic 6 - One-letter shorthand aliases across the CLI
+FR21: Epic 6 - README repository-hygiene badges
+FR22: Epic 6 - XFS/Btrfs filesystem support alongside ext4
+FR23: Epic 6 - Crash-safe create resume via marker-token detection
+FR24: Epic 6 - Concurrent-invocation guard against racing mutating workflows
+FR25: Epic 6 - Proactive FIDO2 device-PIN guidance
 
 ## Epic List
 
@@ -146,6 +174,10 @@ Users can inspect a tomb's enrolled keys without unlocking it, enroll keys with 
 ### Epic 5: Rebrand to Hypogaol
 Users and contributors see the project consistently as Hypogaol everywhere it presents itself — package, binary, repository, README, and CLI banner — while the codebase's internal vocabulary moves from the placeholder-era "tomb" to the generic, brand-independent "volume." No functional behavior changes; see `sprint-change-proposal-2026-08-02.md` for full impact analysis and rationale.
 **FRs covered:** None — non-functional rename/rebrand, orthogonal to the SPEC's FR list. Triggered by the 2026-08-02 naming brainstorm (`_bmad-output/brainstorming/brainstorm-project-naming-2026-08-02/`).
+
+### Epic 6: Volume Resilience, Filesystem Choice & Everyday Polish
+Users get a more resilient, flexible, and ergonomic tool: create survives a crash/interruption and resumes cleanly instead of leaving an unrecoverable partial volume or a false refusal, users choose XFS or Btrfs alongside ext4, label their first key at creation time, and optionally scaffold example hook files so hooks are discoverable without reading docs; two invocations against the same volume can no longer race past a safety guard; a FIDO2 device with a PIN configured warns the user before the touch prompt, not after a confusing failure; and both end users (one-letter flag shorthand across the whole CLI) and contributors/evaluators (README health badges) get quality-of-life polish. No new port or architectural layer — every capability slots onto Epics 1-4's existing `create`/`FilesystemBackend`/`Fido2Backend` surface.
+**FRs covered:** FR18, FR19, FR20, FR21, FR22, FR23, FR24, FR25
 
 ## Epic 1: Create & Open a Tomb (Foundation)
 
@@ -731,23 +763,215 @@ So that future BMAD workflow runs (sprint-status, GitHub automation) operate aga
 **When** Story 5.4 lands
 **Then** a short addendum is appended (not a rewrite) noting the rename executed on 2026-08-02, referencing `sprint-change-proposal-2026-08-02.md`
 
+## Epic 6: Volume Resilience, Filesystem Choice & Everyday Polish
+
+Users get a more resilient, flexible, and ergonomic tool: create survives a crash/interruption and resumes cleanly instead of leaving an unrecoverable partial volume or a false refusal, users choose XFS or Btrfs alongside ext4, label their first key at creation time, and optionally scaffold example hook files so hooks are discoverable without reading docs; two invocations against the same volume can no longer race past a safety guard; a FIDO2 device with a PIN configured warns the user before the touch prompt, not after a confusing failure; and both end users (one-letter flag shorthand across the whole CLI) and contributors/evaluators (README health badges) get quality-of-life polish. No new port or architectural layer — every capability slots onto Epics 1-4's existing `create`/`FilesystemBackend`/`Fido2Backend` surface.
+
+### Story 6.1: Crash-Safe Create Resume
+
+As a user,
+I want to re-run create against the same destination after a crash or interruption during a prior create attempt,
+So that I get a clean, fully-created volume instead of being stuck with an unrecoverable partial one or a false "already exists" refusal.
+
+**Acceptance Criteria:**
+
+**Given** a file-backed create that was interrupted after `luksFormat` but before final cleanup (the marker token is still present)
+**When** I re-run create against the same destination
+**Then** the tool detects the marker via `has_marker_token`, proceeds with no confirmation, and produces the same fully-created, unlockable volume as an uninterrupted run
+
+**Given** a device-backed create interrupted the same way
+**When** I re-run create against the same device
+**Then** the same marker-verified resume applies, and mandatory size resolution against `device_capacity` still runs even though the confirmation prompt is skipped — a device shrunk since the crashed attempt is still caught
+
+**Given** a destination whose LUKS2 header has no marker token (a genuine pre-existing file/volume)
+**When** I run create against it
+**Then** it refuses exactly as before CAP-23, unchanged
+
+**Given** create completes successfully (interrupted-then-resumed, or a normal uninterrupted run)
+**When** final cleanup runs
+**Then** the marker token is removed first and the transient bootstrap keyslot second, in that order, matching AD-5's safe-ordering reasoning
+
+**Given** the corrected real execution order (AD-9 amendment)
+**When** create runs, interrupted or not
+**Then** FIDO2 key enrollment happens before `mkfs`, since the transient bootstrap passphrase is the only valid credential to authenticate `systemd-cryptenroll` with at that point
+
+### Story 6.2: Custom Key Label at Create
+
+As a user,
+I want to supply a custom label for the first FIDO2 key enrolled during create's bootstrap step,
+So that my newly created volume's key is labeled the same way I'd label any key I enroll later.
+
+**Acceptance Criteria:**
+
+**Given** I run create with `--label`
+**When** the bootstrap key is enrolled
+**Then** the volume's `key_label` metadata equals the supplied value
+
+**Given** I run create without `--label`
+**When** the bootstrap key is enrolled
+**Then** the tool falls back to today's default label, unchanged
+
+**Given** `--label` is supplied
+**When** info or revoke later lists this volume's keys
+**Then** the custom label displays exactly as supplied, the same as any other enrolled key's label
+
+### Story 6.3: Hook-Template Scaffolding at Create
+
+As a user,
+I want create to optionally scaffold example bind-hooks/exec-hooks files into a new volume,
+So that I can discover the hooks format without consulting docs first.
+
+**Acceptance Criteria:**
+
+**Given** I run create with the scaffold-hooks flag
+**When** creation completes
+**Then** the volume contains a commented-out example `bind-hooks` file (parses to zero live entries) and a non-executable `exec-hooks.example` stub — not the live `exec-hooks` filename
+
+**Given** I run create without the flag (default)
+**When** creation completes
+**Then** no template files are written
+
+**Given** scaffold-hooks is requested
+**When** create runs
+**Then** scaffolding happens after `mkfs` (so a filesystem exists to hold the files) and before final marker/keyslot cleanup, via a mount → write → unmount sequence on the still-open mapper — no separate FIDO2 selection needed
+
+**Given** a scaffolded volume
+**When** I later rename `exec-hooks.example` to `exec-hooks` and `chmod +x` it
+**Then** it activates as a normal exec-hooks file, passing AD-14's existing guardrail checks
+
+### Story 6.4: XFS and Btrfs Filesystem Support
+
+As a user,
+I want to create or resize a volume using XFS or Btrfs, not just ext4,
+So that I can pick the filesystem that best fits my use case.
+
+**Acceptance Criteria:**
+
+**Given** I run create with `--filesystem xfs` or `--filesystem btrfs`
+**When** creation completes
+**Then** the volume is formatted with `mkfs.xfs` or `mkfs.btrfs --mixed` respectively, and the chosen type is recorded in the `filesystem` token field
+
+**Given** a Btrfs volume as small as ~20 MiB
+**When** it's created
+**Then** it succeeds, since `--mixed` mode is used unconditionally for every Btrfs volume this tool creates, not just small ones
+
+**Given** an existing XFS or Btrfs volume
+**When** I run resize
+**Then** `growfs` uses `xfs_growfs` or `btrfs filesystem resize` respectively, selected from the same `filesystem` token field, never re-asked or sniffed
+
+**Given** preflight for a create/resize targeting XFS or Btrfs
+**When** it runs
+**Then** it checks presence of that filesystem's toolchain (`xfsprogs` or `btrfs-progs`) — only the toolchain the requested operation actually needs, not always both
+
+**Given** an ext4 volume (today's default)
+**When** create or resize runs
+**Then** behavior is unchanged from before this story
+
+### Story 6.5: Concurrent-Invocation Guard
+
+As a user,
+I want the tool to prevent two simultaneous invocations from racing against the same volume,
+So that I can never accidentally corrupt state or bypass a safety guard like the last-keyslot protection.
+
+**Acceptance Criteria:**
+
+**Given** a volume with exactly two valid keyslots
+**When** I run two revoke invocations concurrently, each targeting a different key
+**Then** only one succeeds — the second either fails fast with a clear "another operation is already in progress" error, or serializes cleanly behind the first, never both succeeding
+
+**Given** any mutating workflow (create, enroll, revoke, close, resize)
+**When** it runs
+**Then** it acquires a non-blocking flock-based lock on the target as its second step, immediately after preflight passes
+
+**Given** close-all or slam processing several open volumes
+**When** each mapping is processed
+**Then** a separate lock is acquired and released per mapping, never one lock held for the whole batch — one mapping's contention is only that mapping's own failure
+
+**Given** info or unlock (including read-only unlock)
+**When** they run
+**Then** they acquire no lock at all — these are excluded from the guard by design
+
+**Given** the tool crashes or exits mid-operation while holding the lock
+**When** a later invocation runs against the same target
+**Then** it proceeds normally — the kernel releases the lock automatically on process exit, with no stale-lock state to detect or clean up
+
+### Story 6.6: Proactive FIDO2 PIN-Status Guidance
+
+As a user,
+I want the tool to warn me upfront when a FIDO2 device has a PIN configured, and give me plain-language guidance if I enter it wrong,
+So that a PIN-required device never surprises me mid-touch-prompt or leaves me confused by a generic failure.
+
+**Acceptance Criteria:**
+
+**Given** a FIDO2 device with a PIN configured is involved in enroll (a specific device already selected)
+**When** enroll runs
+**Then** a warning naming that device and stating PIN entry will be required is shown before the touch/PIN prompt
+
+**Given** an unlock where cryptsetup will match the stored token to whichever device answers (no device pre-selected)
+**When** any currently-enumerated device has a PIN configured
+**Then** a blanket warning listing every such device is shown before the blocking prompt
+
+**Given** a wrong PIN is entered during a retry
+**When** the authenticator reports it
+**Then** the tool shows a plain-language warning naming that retries are limited and what happens if they run out — never a generic "authentication failed"
+
+**Given** the subprocess call handling secret PIN entry
+**When** stderr is captured for this diagnostic text
+**Then** stdin/stdout stay strictly passthrough for the actual PIN entry, and stderr is read concurrently (not only after the child exits) to avoid a pipe-buffer deadlock on a long touch/PIN-blocking call
+
+### Story 6.7: One-Letter CLI Flag Shorthand
+
+As a user,
+I want a one-letter shorthand for each subcommand's primary flags,
+So that I can type common commands faster without giving up the long forms.
+
+**Acceptance Criteria:**
+
+**Given** any subcommand's `--help` output
+**When** I view it
+**Then** every documented flag shows a short alias alongside its long form
+
+**Given** a short alias
+**When** I use it instead of the long form
+**Then** it behaves identically to the long form, for every flag across every subcommand
+
+**Given** a same-subcommand collision on a flag's first letter
+**When** aliases are assigned
+**Then** the colliding flag falls back to the next-most-mnemonic distinguishing letter instead
+
+**Given** `-h` and `-V`
+**When** aliases are assigned across the CLI
+**Then** neither is ever reassigned to a different flag
+
+### Story 6.8: Repository Hygiene Badges
+
+As a contributor or evaluator landing on the README,
+I want to see build status, license, latest release, and MSRV badges at a glance,
+So that I can judge the project's health without digging through CI or config files.
+
+**Acceptance Criteria:**
+
+**Given** the README header
+**When** I view it
+**Then** it displays build-status, license (GPL-3.0-or-later), latest-release, and MSRV badges, each linking to the resource it reflects (Actions run, LICENSE file, GitHub Releases)
+
+**Given** CI does not yet run coverage instrumentation
+**When** this story lands
+**Then** `cargo-llvm-cov` is added to CI, reporting to Codecov, and a coverage badge is added linking to it
+
+**Given** CI does not yet run a security audit
+**When** this story lands
+**Then** `cargo-audit` is added as a gating CI job (a known RustSec advisory fails the build, not just the badge), and a security-audit badge is added
+
+**Given** all six badges
+**When** they're added
+**Then** each is a live, working link — not a placeholder image
+
 ## Backlog — Unscoped Candidate Ideas (Not Yet an Epic)
 
 > Captured 2026-08-02 alongside the Hypogaol rename (Epic 5) but deliberately **not** part of it — unrelated in scope, and none of these have been through requirements elicitation yet (no FR numbers, no architecture decisions, no acceptance criteria). Listed here so they aren't lost, pending a future planning session to properly scope them into an epic.
+>
+> **Promoted to Epic 6 (2026-08-08), removed from this list:** custom key label at create (→ CAP-18/FR18), hook-template scaffolding (→ CAP-19/FR19), one-letter shorthand flags (→ CAP-20/FR20), repository hygiene badges (→ CAP-21/FR21), XFS/Btrfs support (→ CAP-22/FR22), crash-safe create resume (→ CAP-23/FR23), concurrent-invocation guard (→ CAP-24/FR24), FIDO2 PIN-required-device UX (→ CAP-25/FR25).
 
-- **Custom label for the first enrolled key at volume creation** — today's bootstrap enrollment (CAP-8) presumably assigns a default `key_label`; let the user supply one at `create` time, same as a standalone `enroll` presumably already allows.
-- **Scaffold hooks template files on volume creation** — when `create` runs, optionally drop example/template `bind-hooks`/`exec-hooks` files into the new volume so users discover the hooks (CAP-16) format without consulting docs first.
-- **One-letter shorthand flags for subcommand flags** — general CLI ergonomics pass across all subcommands.
 - **Expose all `systemd-cryptenroll` FIDO2 flags during enrollment** (`--fido2-credential-algorithm`, `--fido2-salt-file`, `--fido2-parameters-in-header`, `--fido2-with-client-pin`, `--fido2-with-user-presence`) — **open question, not yet decided:** is the added surface area worth it for advanced users, given the project's existing zero-fallback/zero-cognitive-overhead design posture (NFR3/NFR5)? Needs a deliberate design decision before this can become a real story — flagged here rather than assumed in scope.
-- **Repository hygiene badges in README** — captured 2026-08-06 alongside a badges discussion:
-  - **Build status badge** — cheap, CI (`ci.yml`) already exists; just needs a shields.io/GitHub Actions badge URL in the README.
-  - **Code coverage badge** — needs coverage instrumentation added to CI first (e.g. `cargo-llvm-cov` or `tarpaulin`), plus a hosting service (Codecov/Coveralls) to back the badge. No instrumentation exists yet.
-  - **License badge** (GPL-3.0-or-later) — static, zero setup.
-  - **Latest release / version badge** — pulls from GitHub Releases, already populated by `release-please` + `cargo-dist`.
-  - **Security audit badge** (`cargo-audit` or `cargo-deny` run in CI) — flagged as more relevant than coverage for a crypto/security tool like this one; needs a new CI job.
-  - **MSRV badge** (pinned Rust version) — static, cheap.
-- **XFS and Btrfs support, in regular and mixed mode (like `dyne/tomb`)** — captured 2026-08-07. Today's `FilesystemBackend` port (`AD-8`) implements only `Filesystem::Ext4` by design, specifically so a second filesystem is additive (new enum arm + adapter match arm, no port-signature change) — this was deferred as a non-goal ("Filesystem types beyond ext4"), not rejected. "Mixed mode" (per `dyne/tomb`'s model) would need its own scoping: whether that means letting a single volume run different filesystems, or something else entirely, isn't decided here — flagged for elicitation when this is scoped into a real epic.
-- **Resuming a partial/crashed `create`** — captured 2026-08-07. SPEC non-goal / `AD-9` known gap: a crash between LUKS2 bootstrap and FIDO2 enrollment/cleanup currently leaves an unrecoverable tomb — v1 does not support resuming. Deferred deliberately, not required by the SPEC, but worth a story eventually.
-- **Concurrent-invocation guard** — captured 2026-08-07. SPEC non-goal: concurrent invocations of the tool against the same device are a TOCTOU risk against `AD-5`'s live-count last-keyslot guard, deferred as low-likelihood for a single-user cold-storage tool. Worth a hardening story if that usage assumption ever changes (e.g. shared/multi-user storage).
-- **FIDO2 PIN-required-device UX specifics** — captured 2026-08-07. SPEC non-goal, deferred as "implementation detail, not architectural fork" when UV enrollment (Epic 4/`AD-16`) landed. Distinct from user-verification (a credential property cryptsetup's `systemd-fido2` plugin already reads automatically at unlock, no code change needed): this is about authenticators that have a **device-level PIN configured** (e.g. via `fido2-token -S -i`), which today's zero-FIDO2-knowledge UX (`FR5`/`NFR3`) has no copy for. Concrete gaps: (1) no upfront warning that a given device wants a typed PIN before enrollment, so it can look like the tool hung; (2) wrong-PIN retries need plain-language translation, since authenticators have a limited retry count before locking/wiping — a generic "authentication failed" here is actively misleading; (3) undecided whether `enroll`/`create` should detect a PIN-required device proactively (preflight/enumeration) versus translating the subprocess failure after the fact. No new port method or workflow needed — this is `cli::ux` translation work at the same boundary as the existing touch-prompt copy.
 - **Publish to crates.io — considered and declined (2026-08-06).** Would add ecosystem discoverability, a version badge, and a `cargo install hypogaol` path. Declined because: (1) it doesn't address the tool's actual dependency problem — hypogaol shells out to system binaries (`cryptsetup`, `systemd-cryptenroll`, `fido2-token`, `mkfs.ext4`/`resize2fs`) that `cargo install` can't provide, so a crates.io user still needs the same manual/Nix setup as building from source; (2) it would be a second release surface to keep in sync with the existing `cargo-dist` + `release-please` GitHub Releases pipeline, for no functional gain; (3) `AR-Dev4`'s scope fence already defers distro/packaging channels beyond GitHub Releases + `cargo build --release` for v1, and crates.io publishing falls inside that fence. Revisit only if there's an actual demand signal (someone asking for `cargo install`).
