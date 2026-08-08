@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use hypogaol::domain::hooks::{
     exec_hook_rejection, parse_bind_hooks, resolve_bind_hook_entry, BindHookEntry,
-    BindHookSkipReason, HookRejectionReason,
+    BindHookSkipReason, HookRejectionReason, BIND_HOOKS_TEMPLATE,
 };
 use hypogaol::domain::types::HookFileMeta;
 
@@ -56,6 +56,15 @@ fn parse_bind_hooks_skips_blank_and_malformed_lines() {
             },
         ]
     );
+}
+
+#[test]
+fn bind_hooks_template_parses_to_zero_live_entries() {
+    // The actual proof behind AC #1's "parses to zero live entries" claim
+    // (CAP-19) — every example line in the template is `#`-prefixed, which
+    // makes it 3 whitespace-separated tokens rather than the 2
+    // `parse_bind_hooks` requires for a live entry.
+    assert!(parse_bind_hooks(BIND_HOOKS_TEMPLATE).is_empty());
 }
 
 #[test]
