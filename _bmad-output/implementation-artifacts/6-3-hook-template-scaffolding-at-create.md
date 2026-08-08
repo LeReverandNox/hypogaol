@@ -88,7 +88,7 @@ so that I can discover the hooks format without consulting docs first.
   - Extend `tests/unit/progress.rs`: add `create_file_backed_with_scaffold_hooks_fires_scaffolding_stage_after_creating_filesystem` and a Device-backed equivalent, asserting the recorded stage sequence ends `..., CreateStage::CreatingFilesystem, CreateStage::ScaffoldingHookTemplates` when `scaffold_hooks: true`. Also confirm (via a `false`-flag assertion, or simply noting the existing two happy-path tests already prove it since they don't pass `true`) that the stage never fires when the flag is off.
   - Update the file's 3 existing `create::run(...)` call sites to pass `false` at the new parameter position, same mechanical update as Task 8.
 
-- [ ] **Task 10: Update the remaining call sites** (compile correctness only, no new assertions required)
+- [x] **Task 10: Update the remaining call sites** (compile correctness only, no new assertions required)
   - `tests/unit/workflows.rs` (1 call site) and `tests/hardware/main.rs` (~22 call sites, its own gated binary): pass `false` at the new parameter position, mirroring Story 6.2's Task 4 note that these files aren't always obviously in scope but the compiler will catch every one — fix every resulting compile error, don't silence with a default.
 
 - [ ] **Task 11: CLI-level tests for the new flag, plus a real hardware end-to-end scenario** (AC: #1, #2, #4)
