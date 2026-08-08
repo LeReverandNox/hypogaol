@@ -59,7 +59,7 @@ so that I get a clean, fully-created volume instead of being stuck with an unrec
 - [x] **Task 7: Confirm AC #5 (FIDO2-before-mkfs ordering) needs no code change, only a regression guard** (AC: #5)
   - `finish_provisioning` (`src/domain/workflows/create.rs:189-217`) already enrolls FIDO2 (`fido2.enroll_fido2_key`, progress `EnrollingFido2Key`) before `fs.mkfs` (progress `CreatingFilesystem`) — this ordering already matches AD-9's amendment and predates this story. No production change needed here; this task is a checklist reminder not to accidentally reorder these two calls while touching this function for Task 6, and to keep or extend `happy_path_runs_every_port_call_once_in_order` (`tests/unit/create.rs:109`) as the regression guard proving the order.
 
-- [ ] **Task 8: Unit tests** (AC: #1, #2, #3, #4)
+- [x] **Task 8: Unit tests** (AC: #1, #2, #3, #4)
   - Extend `tests/unit/create.rs` (uses `FakeLuksBackend`/`RealFixtureFile` from `tests/unit/fakes.rs`), following the file's existing naming/structure convention (`refuses_...`, `happy_path_...`, `..._failure_...`):
     - File-backed resume: destination exists + `has_marker_token` true → proceeds through the full happy path with no confirmation-related call, same port-call sequence as `happy_path_runs_every_port_call_once_in_order`.
     - File-backed non-resume unchanged: destination exists + `has_marker_token` false → still returns `DestinationExists`, `has_marker_token` is still called (proves the check runs, not just the old short-circuit).

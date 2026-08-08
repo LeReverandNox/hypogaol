@@ -842,9 +842,9 @@ impl LuksBackend for ExecAdapter {
         let Ok(tokens) = tokens_object(&metadata) else {
             return Ok(false);
         };
-        Ok(tokens
-            .values()
-            .any(|token| token.get("type").and_then(Value::as_str) == Some(CREATE_MARKER_TOKEN_TYPE)))
+        Ok(tokens.values().any(|token| {
+            token.get("type").and_then(Value::as_str) == Some(CREATE_MARKER_TOKEN_TYPE)
+        }))
     }
 
     fn remove_marker_token(&self, path: &Path) -> Result<(), DomainError> {
@@ -911,7 +911,9 @@ impl LuksBackend for ExecAdapter {
         // own (CAP-23). No --token-id: a brand-new token, never replacing
         // one (confirmed empirically, Task 0 spike).
         run_piping_stdin(
-            Command::new("cryptsetup").args(["token", "import"]).arg(path),
+            Command::new("cryptsetup")
+                .args(["token", "import"])
+                .arg(path),
             format!(r#"{{"type":"{CREATE_MARKER_TOKEN_TYPE}","keyslots":[]}}"#).as_bytes(),
         )
         .map_err(DomainError::AdapterFailure)?;
