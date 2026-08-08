@@ -849,33 +849,44 @@ impl LuksBackend for ExecAdapter {
 
     fn remove_marker_token(&self, path: &Path) -> Result<(), DomainError> {
         let metadata = dump_json_metadata(path)?;
-        let token_id = tokens_object(&metadata)?
+        // All matching tokens, not just the first: a corrupted/tampered
+        // header could in principle carry more than one marker-typed token,
+        // and leaving a stray one behind would reintroduce the exact
+        // "surviving marker read as resumable" hazard AD-9's ordering rule
+        // exists to prevent (review finding, 2026-08-08).
+        let token_ids: Vec<String> = tokens_object(&metadata)?
             .iter()
-            .find(|(_, token)| {
+            .filter(|(_, token)| {
                 token.get("type").and_then(Value::as_str) == Some(CREATE_MARKER_TOKEN_TYPE)
             })
-            .map(|(id, _)| id.clone());
+            .map(|(id, _)| id.clone())
+            .collect();
 
-        let Some(token_id) = token_id else {
-            return Ok(());
-        };
+        for token_id in token_ids {
+            let output = Command::new("cryptsetup")
+                .args(["token", "remove", "--token-id", &token_id])
+                .arg(path)
+                .output()
+                .map_err(|e| {
+                    DomainError::AdapterFailure(format!("create-marker-remove failed: {e}"))
+                })?;
 
-        let output = Command::new("cryptsetup")
-            .args(["token", "remove", "--token-id", &token_id])
-            .arg(path)
-            .output()
-            .map_err(|e| {
-                DomainError::AdapterFailure(format!("failed to run cryptsetup token remove: {e}"))
-            })?;
-
-        if output.status.success() {
-            Ok(())
-        } else {
-            Err(DomainError::AdapterFailure(format!(
-                "cryptsetup token remove failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            )))
+            if !output.status.success() {
+                // `create-marker-remove` prefix distinct from `remove_key`'s
+                // own token-removal error text: both call `cryptsetup token
+                // remove` and previously shared identical message shapes,
+                // which `ux.rs`'s revoke-specific bucket matched on —
+                // misreporting this cleanup-step failure (end of a
+                // successful `create`) as a failed `revoke` (review finding,
+                // 2026-08-08).
+                return Err(DomainError::AdapterFailure(format!(
+                    "create-marker-remove failed: {}",
+                    String::from_utf8_lossy(&output.stderr).trim()
+                )));
+            }
         }
+
+        Ok(())
     }
 
     fn bootstrap_format_and_open(
@@ -910,13 +921,22 @@ impl LuksBackend for ExecAdapter {
         // same FormattingLuks2 progress window rather than a stage of its
         // own (CAP-23). No --token-id: a brand-new token, never replacing
         // one (confirmed empirically, Task 0 spike).
+        //
+        // Prefixed with a `create-marker-write` marker distinct from
+        // `write_fido2_token_metadata`'s own `token import` calls: both
+        // embed the command's `{cmd:?}` Debug dump, which contains the
+        // literal substring `"token" "import"` that `ux.rs`'s
+        // `ENROLLMENT_MARKERS` matches on. Without this prefix, a failure
+        // here — before FIDO2 enrollment even begins — would misreport as
+        // "Enrolling your security key didn't complete" (review finding,
+        // 2026-08-08).
         run_piping_stdin(
             Command::new("cryptsetup")
                 .args(["token", "import"])
                 .arg(path),
             format!(r#"{{"type":"{CREATE_MARKER_TOKEN_TYPE}","keyslots":[]}}"#).as_bytes(),
         )
-        .map_err(DomainError::AdapterFailure)?;
+        .map_err(|e| DomainError::AdapterFailure(format!("create-marker-write failed: {e}")))?;
 
         run_piping_stdin(
             privileged("cryptsetup")

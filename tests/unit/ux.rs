@@ -176,6 +176,40 @@ fn translates_adapter_failure_token_import_debug_dump_as_enrollment() {
 }
 
 #[test]
+fn translates_adapter_failure_create_marker_write_not_as_enrollment() {
+    // The CAP-23 resume-marker write's underlying `cryptsetup token import`
+    // call embeds the same `{cmd:?}` Debug-quoted `"token" "import"`
+    // substring as `write_fido2_token_metadata`'s own token-import call
+    // (tested above), which would otherwise misclassify a marker-write
+    // failure — happening right after `luksFormat`, before FIDO2 enrollment
+    // even begins — as a failed enrollment. Regression guard for the review
+    // finding (2026-08-08).
+    let err = DomainError::AdapterFailure(
+        r#"create-marker-write failed: "cryptsetup" "token" "import" "/tmp/foo" failed: some stderr"#
+            .to_string(),
+    );
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("Enrolling"));
+    assert!(message.contains("crash-recovery"));
+}
+
+#[test]
+fn translates_adapter_failure_create_marker_remove_not_as_revoke() {
+    // The CAP-23 resume-marker removal's underlying `cryptsetup token
+    // remove` call produces the exact same message shape as `remove_key`'s
+    // own token removal (tested below in the revoke-specific test), which
+    // would otherwise misclassify a `create` cleanup failure — happening
+    // after a fully successful create — as a failed `revoke`. Regression
+    // guard for the review finding (2026-08-08).
+    let err = DomainError::AdapterFailure("create-marker-remove failed: some stderr".to_string());
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(!message.contains("Revoking"));
+    assert!(message.contains("created successfully"));
+}
+
+#[test]
 fn translates_adapter_failure_temp_key_file_creation_as_enrollment() {
     // `TempKeyFile::create`'s failure happens inside `enroll_fido2_key`'s own
     // body — it must not be misdiagnosed as a device/file sizing problem just
