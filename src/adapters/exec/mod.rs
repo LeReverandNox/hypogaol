@@ -830,6 +830,54 @@ impl LuksBackend for ExecAdapter {
         }
     }
 
+    fn has_marker_token(&self, path: &Path) -> Result<bool, DomainError> {
+        // Looser contract than has_luks2_header: no header, an unreadable
+        // header, or a valid header simply lacking the marker are all
+        // `Ok(false)` here — only a genuine read failure of an otherwise
+        // marker-carrying header would be a real problem, and none of these
+        // states can distinguish that from "no marker" anyway.
+        let Ok(metadata) = dump_json_metadata(path) else {
+            return Ok(false);
+        };
+        let Ok(tokens) = tokens_object(&metadata) else {
+            return Ok(false);
+        };
+        Ok(tokens
+            .values()
+            .any(|token| token.get("type").and_then(Value::as_str) == Some(CREATE_MARKER_TOKEN_TYPE)))
+    }
+
+    fn remove_marker_token(&self, path: &Path) -> Result<(), DomainError> {
+        let metadata = dump_json_metadata(path)?;
+        let token_id = tokens_object(&metadata)?
+            .iter()
+            .find(|(_, token)| {
+                token.get("type").and_then(Value::as_str) == Some(CREATE_MARKER_TOKEN_TYPE)
+            })
+            .map(|(id, _)| id.clone());
+
+        let Some(token_id) = token_id else {
+            return Ok(());
+        };
+
+        let output = Command::new("cryptsetup")
+            .args(["token", "remove", "--token-id", &token_id])
+            .arg(path)
+            .output()
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!("failed to run cryptsetup token remove: {e}"))
+            })?;
+
+        if output.status.success() {
+            Ok(())
+        } else {
+            Err(DomainError::AdapterFailure(format!(
+                "cryptsetup token remove failed: {}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            )))
+        }
+    }
+
     fn bootstrap_format_and_open(
         &self,
         path: &Path,
