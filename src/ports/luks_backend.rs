@@ -24,6 +24,24 @@ pub trait LuksBackend {
     /// keyslot is removed (AD-9's safe-ordering requirement, CAP-23 AC #4).
     fn remove_marker_token(&self, path: &Path) -> Result<(), DomainError>;
 
+    /// Closes any dm-crypt mapping already active under `name`, tolerating
+    /// "no such mapping" as `Ok(())` — the expected common case for a fresh
+    /// create (never touched before) or a prior attempt that already closed
+    /// cleanly. Exists for CAP-23: a real process-death crash between a
+    /// successful `luksOpen` and `bootstrap_and_provision`'s own cleanup
+    /// leaves exactly this kind of orphaned mapping under the deterministic
+    /// name a resume attempt recomputes (`mapping_name` is a pure hash of
+    /// the canonicalized path), blocking `bootstrap_format_and_open`'s
+    /// `luksFormat` call before the marker-verified resume logic ever gets a
+    /// chance to run. Any failure other than "doesn't exist" (e.g. the
+    /// mapping exists but is still busy/mounted) propagates — this must
+    /// never force through a mapping that's still legitimately in active
+    /// use. Called unconditionally at the start of `bootstrap_and_provision`
+    /// for both fresh and marker-verified-resume creates — safe either way,
+    /// since a stale mapping under this exact name can only exist if this
+    /// tool itself already got as far as `luksOpen` on this same path.
+    fn close_stale_mapping(&self, name: &str) -> Result<(), DomainError>;
+
     /// Formats a brand-new LUKS2 header at `path` seeded with a transient random
     /// passphrase, then opens it as `name`, returning the resulting mapping
     /// (AD-9). `size` constrains the LUKS2 payload to exactly that many bytes

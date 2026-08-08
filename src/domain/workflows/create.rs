@@ -175,6 +175,21 @@ fn bootstrap_and_provision(
     fs: &dyn FilesystemBackend,
 ) -> Result<(), DomainError> {
     let name = mapping_name::mapping_name(path)?;
+
+    // A real process-death crash between a prior attempt's successful
+    // luksOpen and this function's own close-on-completion below skips that
+    // cleanup entirely — dm-crypt mappings are kernel objects, independent
+    // of the process that opened them. Left unhandled, a marker-verified
+    // resume attempt would compute this exact deterministic name and its
+    // luksFormat call below would fail (device/name busy) before ever
+    // reaching that logic. Safe to run unconditionally on a fresh create
+    // too: a mapping can only exist under this exact name if this tool
+    // already reached luksOpen on this same path, and any failure other
+    // than "no such mapping" (e.g. still busy/mounted for an unrelated
+    // reason) correctly aborts here rather than forcing through a mapping
+    // still in legitimate use.
+    luks.close_stale_mapping(&name)?;
+
     progress(CreateStage::FormattingLuks2);
     let mapper = luks.bootstrap_format_and_open(path, &name, size, filesystem)?;
 

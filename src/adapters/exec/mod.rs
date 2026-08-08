@@ -331,6 +331,26 @@ fn run_piping_stdin(cmd: &mut Command, input: &[u8]) -> Result<(), String> {
     }
 }
 
+/// Shared by `close` (an already-open mapper the caller knows exists) and
+/// `close_stale_mapping` (a name that may or may not currently be mapped —
+/// the caller checks presence first).
+fn run_cryptsetup_close(name: &str) -> Result<(), DomainError> {
+    let output = privileged("cryptsetup")
+        .arg("close")
+        .arg(name)
+        .output()
+        .map_err(|e| DomainError::AdapterFailure(format!("failed to run cryptsetup close: {e}")))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(DomainError::AdapterFailure(format!(
+            "cryptsetup close failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )))
+    }
+}
+
 fn dump_json_metadata(path: &Path) -> Result<Value, DomainError> {
     let output = Command::new("cryptsetup")
         .arg("luksDump")
@@ -1134,22 +1154,18 @@ impl LuksBackend for ExecAdapter {
     }
 
     fn close(&self, mapper: &MapperHandle) -> Result<(), DomainError> {
-        let output = privileged("cryptsetup")
-            .arg("close")
-            .arg(&mapper.name)
-            .output()
-            .map_err(|e| {
-                DomainError::AdapterFailure(format!("failed to run cryptsetup close: {e}"))
-            })?;
+        run_cryptsetup_close(&mapper.name)
+    }
 
-        if output.status.success() {
-            Ok(())
-        } else {
-            Err(DomainError::AdapterFailure(format!(
-                "cryptsetup close failed: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            )))
+    fn close_stale_mapping(&self, name: &str) -> Result<(), DomainError> {
+        // Same presence check `umount` already uses to distinguish "no
+        // mapping at all" from a real failure (src/adapters/exec/mod.rs's
+        // `umount`): `/dev/mapper/<name>` only exists while device-mapper
+        // has an active mapping under that name.
+        if !PathBuf::from(format!("/dev/mapper/{name}")).exists() {
+            return Ok(());
         }
+        run_cryptsetup_close(name)
     }
 
     fn open(&self, path: &Path, name: &str, read_only: bool) -> Result<MapperHandle, DomainError> {

@@ -232,6 +232,13 @@ impl LuksBackend for FakeLuksBackend {
         self.fail_if("remove_marker_token")
     }
 
+    fn close_stale_mapping(&self, _name: &str) -> Result<(), DomainError> {
+        self.log
+            .borrow_mut()
+            .push("close_stale_mapping".to_string());
+        self.fail_if("close_stale_mapping")
+    }
+
     fn bootstrap_format_and_open(
         &self,
         path: &Path,
