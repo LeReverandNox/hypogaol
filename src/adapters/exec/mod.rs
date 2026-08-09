@@ -1592,6 +1592,13 @@ impl Fido2Backend for ExecAdapter {
     }
 }
 
+/// Prefixes every error this function produces — checked by
+/// `cli::ux::translate`'s marker-bleed guard *before* any bucket that does a
+/// bare "mount"/"umount" substring match, since the real `mount`/`umount`
+/// stderr interpolated into these messages routinely contains those literal
+/// words (review finding, 2026-08-09).
+const TRANSIENT_MOUNT_ERROR_MARKER: &str = "hypogaol-transient-mount";
+
 /// Mounts `mapper`'s device node at a private, transient mount point (never
 /// `/run/media/<user>` — that's `mount()`'s job for a volume the user is
 /// actively using; this one exists only for the duration of a single fs-tool
@@ -1600,19 +1607,53 @@ impl Fido2Backend for ExecAdapter {
 /// `xfs_info` and Btrfs's `btrfs filesystem resize`/`usage` all require a
 /// live mountpoint argument — confirmed via their upstream docs, 2026-08-09 —
 /// unlike ext4's `resize2fs`/`dumpe2fs`, which operate on the raw device node
-/// unmounted. Error messages deliberately avoid the bare substrings "mount"/
-/// "umount" standing alone — see `cli::ux::translate`'s marker-bleed guard.
+/// unmounted.
+///
+/// Unlike `mount()`'s `/run/media/<user>` base, this scratch directory lives
+/// directly under `/run` itself, which is root-owned — so, unlike
+/// `create_mount_point`'s plain `std::fs::create_dir`/`remove_dir` (safe only
+/// because `mount()`'s base was already `chown`-ed to the invoking user),
+/// every directory operation here goes through `privileged()` (review
+/// finding, 2026-08-09: the unprivileged version silently failed every
+/// XFS/Btrfs `growfs`/`filesystem_size` call with a permission error on any
+/// real, non-root-running install). The mountpoint name also carries a fresh
+/// random suffix per call, not just `mapper.name`, so a stale directory (or
+/// mount) orphaned by a prior crashed/failed-umount invocation is never
+/// silently reused or mounted-over by a later one (review finding,
+/// 2026-08-09) — mirroring `create_mount_point`'s own collision-avoidance
+/// discipline.
 fn with_transient_mount<T>(
     mapper: &MapperHandle,
     f: impl FnOnce(&Path) -> Result<T, DomainError>,
 ) -> Result<T, DomainError> {
-    let mountpoint = PathBuf::from(format!("/run/hypogaol-fsop-{}", mapper.name));
-    if let Err(e) = std::fs::create_dir_all(&mountpoint) {
-        return Err(DomainError::AdapterFailure(format!(
-            "failed to prepare {} for a filesystem operation: {e}",
-            mapper.device_node().display()
-        )));
+    let suffix = random_hex_suffix().map_err(DomainError::AdapterFailure)?;
+    let mountpoint = PathBuf::from(format!(
+        "/run/hypogaol-fsop-{}-{}",
+        mapper.name,
+        &suffix[..8]
+    ));
+
+    let mkdir_output = privileged("mkdir")
+        .args(["-p", "-m", "0700"])
+        .arg(&mountpoint)
+        .output();
+    match mkdir_output {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => {
+            return Err(DomainError::AdapterFailure(format!(
+                "{TRANSIENT_MOUNT_ERROR_MARKER}: failed to prepare {} for use: {}",
+                mapper.device_node().display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        Err(e) => {
+            return Err(DomainError::AdapterFailure(format!(
+                "{TRANSIENT_MOUNT_ERROR_MARKER}: failed to prepare {} for use: {e}",
+                mapper.device_node().display()
+            )));
+        }
     }
+
     let mount_output = privileged("mount")
         .arg(mapper.device_node())
         .arg(&mountpoint)
@@ -1620,17 +1661,17 @@ fn with_transient_mount<T>(
     match mount_output {
         Ok(output) if output.status.success() => {}
         Ok(output) => {
-            let _ = std::fs::remove_dir(&mountpoint);
+            let _ = privileged("rmdir").arg(&mountpoint).output();
             return Err(DomainError::AdapterFailure(format!(
-                "failed to prepare {} for a filesystem operation: {}",
+                "{TRANSIENT_MOUNT_ERROR_MARKER}: failed to prepare {} for use: {}",
                 mapper.device_node().display(),
                 String::from_utf8_lossy(&output.stderr).trim()
             )));
         }
         Err(e) => {
-            let _ = std::fs::remove_dir(&mountpoint);
+            let _ = privileged("rmdir").arg(&mountpoint).output();
             return Err(DomainError::AdapterFailure(format!(
-                "failed to prepare {} for a filesystem operation: {e}",
+                "{TRANSIENT_MOUNT_ERROR_MARKER}: failed to prepare {} for use: {e}",
                 mapper.device_node().display()
             )));
         }
@@ -1639,12 +1680,12 @@ fn with_transient_mount<T>(
     let result = f(&mountpoint);
 
     let umount_output = privileged("umount").arg(&mountpoint).output();
-    let _ = std::fs::remove_dir(&mountpoint);
+    let _ = privileged("rmdir").arg(&mountpoint).output();
     match umount_output {
         Ok(output) if output.status.success() => result,
         Ok(output) => {
             let umount_err = DomainError::AdapterFailure(format!(
-                "failed to conclude a filesystem operation on {}: {}",
+                "{TRANSIENT_MOUNT_ERROR_MARKER}: failed to conclude use of {}: {}",
                 mapper.device_node().display(),
                 String::from_utf8_lossy(&output.stderr).trim()
             ));
@@ -1652,7 +1693,7 @@ fn with_transient_mount<T>(
         }
         Err(e) => {
             let umount_err = DomainError::AdapterFailure(format!(
-                "failed to conclude a filesystem operation on {}: {e}",
+                "{TRANSIENT_MOUNT_ERROR_MARKER}: failed to conclude use of {}: {e}",
                 mapper.device_node().display()
             ));
             result.and(Err(umount_err))
