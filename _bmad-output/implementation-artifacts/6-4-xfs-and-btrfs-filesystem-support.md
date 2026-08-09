@@ -4,7 +4,7 @@ baseline_commit: 25c655d823c4fcd790c70fc82b659a1ff6e50d5a
 
 # Story 6.4: XFS and Btrfs Filesystem Support
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -24,23 +24,23 @@ so that I can pick the filesystem that best fits my use case.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 0: Read every file this story touches before changing anything** (AC: all)
+- [x] **Task 0: Read every file this story touches before changing anything** (AC: all)
   - Read in full: `src/domain/types.rs` (`Filesystem` enum, currently `Ext4`-only), `src/domain/preflight.rs` (`check`, the AD-4 shared gate), `src/ports/filesystem_backend.rs` (full trait — `check_prerequisites`/`mkfs`/`growfs`/`filesystem_size` doc comments), `src/adapters/exec/mod.rs` — specifically `mkfs`, `growfs`, `filesystem_size`, `check_prerequisites` (the `FilesystemBackend` impl, ~line 1591), `read_filesystem` (the `LuksBackend` impl, ~line 1291), `enroll_fido2_key`'s `filesystem_name` match (~line 787), and `mount`/`umount`/`create_mount_point`/`invoking_identity` (the precedent for any mount-point handling), `src/domain/workflows/create.rs` (`run`'s single `preflight::check` call), `src/domain/workflows/resize.rs` (full file — tier-1/tier-2 grow-only check, `read_filesystem` call site, `preflight::check` call site), `src/domain/workflows/unlock.rs`/`close.rs`/`close_all.rs`/`revoke.rs`/`enroll.rs`/`slam.rs`/`info.rs` (each one's single `preflight::check` call site — mechanical, but every one must be found and updated), `src/cli/main.rs` (`CliFilesystem` enum + `From` impl, `CreateMode::File`/`Device`'s `filesystem` field, and all 8 direct `preflight::check` call sites in `run_unlock`/`run_enroll`/`run_revoke`/`run_close`/`run_close_all`/`run_slam`/`run_resize`/`run_info`), `src/cli/ux.rs` (`translate`'s substring-bucket chain — read the whole function, not just the top, to understand the marker-bleed guard pattern already in place for `resize2fs`/`e2fsck`/`umount`), `tests/unit/fakes.rs` (`FakeFilesystemBackend`'s `check_prerequisites` impl and `FakeLuksBackend`'s `read_filesystem`/`with_read_filesystem`), `tests/unit/preflight.rs` (all 3 existing tests), `tests/unit/workflows.rs` (the preflight-first regression tests, especially `resize_run_stops_at_preflight_before_touching_any_port`), `tests/unit/cli.rs` (the `--label`/`--scaffold-hooks`-in-help test pattern to mirror), `tests/hardware/main.rs` (the existing `resize_grows_a_file_backed_volume_preserving_data_and_keys`/`resize_grows_a_device_backed_volume_into_its_own_headroom` scenarios, as the pattern to mirror for XFS/Btrfs).
   - No spike needed for the core `Filesystem` enum extension — AD-8 already anticipated it and ARCHITECTURE-SPINE.md's AD-8 "Realized (Epic 6, CAP-22)" text already specifies the exact adapter commands. **One genuine design gap this story must close that the architecture spine does not fully resolve** — see "Load-Bearing Design Decision: XFS/Btrfs growfs and filesystem_size need a live mount" in Dev Notes below. Read that section before starting Task 4.
 
-- [ ] **Task 1: Extend the `Filesystem` enum** (AC: #1, #3)
+- [x] **Task 1: Extend the `Filesystem` enum** (AC: #1, #3)
   - `src/domain/types.rs`: add `Xfs` and `Btrfs` variants to `Filesystem`, alongside `Ext4`. Keep the existing `#[derive(Debug, Clone, Copy, PartialEq, Eq)]` — no new derives needed. Update the enum's doc comment (currently says "v1 supports only ext4 (AD-8); additional variants are additive later") to reflect that this story is the "additive later."
 
-- [ ] **Task 2: Add `--filesystem xfs`/`btrfs` to the CLI** (AC: #1)
+- [x] **Task 2: Add `--filesystem xfs`/`btrfs` to the CLI** (AC: #1)
   - `src/cli/main.rs`: add `Xfs` and `Btrfs` variants to `CliFilesystem` (line ~296) and matching arms to `impl From<CliFilesystem> for Filesystem` (line ~300). Clap's `ValueEnum` derive auto-lowercases variant names to kebab-case, so `Xfs`/`Btrfs` become `--filesystem xfs`/`--filesystem btrfs` with no `#[value(name = ...)]` override needed — exactly matching AC #1's flag spelling. No other CLI change needed: `filesystem: CliFilesystem` is already a field on both `CreateMode::File`/`Device` and already threaded into `run_create`/`create::run` (Story 6.1/6.2/6.3 didn't touch this path). `resize` gets no new flag — AC #3 is explicit that the filesystem is read from the token, never re-asked (see Task 8).
 
-- [ ] **Task 3: `mkfs` — add Xfs/Btrfs adapter match arms** (AC: #1, #2)
+- [x] **Task 3: `mkfs` — add Xfs/Btrfs adapter match arms** (AC: #1, #2)
   - `src/adapters/exec/mod.rs`, `mkfs` (~line 1740): add arms mirroring `Ext4`'s shape (`privileged(...)`, `.output()`, map to `DomainError::AdapterFailure` on spawn failure or non-success exit, same message format `"{tool} failed: {stderr}"`):
     - `Filesystem::Xfs => privileged("mkfs.xfs").arg("-f").arg(mapper.device_node())` — `-f` forces creation without an interactive "are you sure" prompt on any ambiguous existing-signature detection (same reasoning `mkfs.ext4` already uses `-F` for).
     - `Filesystem::Btrfs => privileged("mkfs.btrfs").args(["-f", "--mixed"]).arg(mapper.device_node())` — `--mixed` is **unconditional for every Btrfs volume this tool creates**, not size-gated (AC #2; ARCHITECTURE-SPINE.md AD-8's "Realized" text already made this exact call: mixed mode drops the viable minimum from standard mode's ~109 MiB floor to ~16 MiB, deliberately not adding a size-threshold branch nobody needs for this tool's small-cold-storage use case).
   - Real command syntax confirmed via current `mkfs.btrfs`/`xfs_growfs` documentation (2026-08-09): `--mixed` cannot be combined with other profile options and is creation-time-only (irrelevant here — this is the only mkfs call any volume ever gets), consistent with the architecture note.
 
-- [ ] **Task 4: `growfs`/`filesystem_size` — add Xfs/Btrfs adapter match arms via a shared transient-mount helper** (AC: #3)
+- [x] **Task 4: `growfs`/`filesystem_size` — add Xfs/Btrfs adapter match arms via a shared transient-mount helper** (AC: #3)
   - **Read "Load-Bearing Design Decision" in Dev Notes first** — unlike ext4, XFS and Btrfs tools require a live mountpoint argument; there is no offline/unmounted equivalent for either.
   - Add a new private helper in `src/adapters/exec/mod.rs` (module-level function, not a trait method — never exposed to `domain`/`ports`):
     ```rust
@@ -119,11 +119,11 @@ so that I can pick the filesystem that best fits my use case.
     - `Filesystem::Btrfs => with_transient_mount(mapper, |mp| { run "btrfs filesystem usage --raw" on mp, parse the "Device size:" line's trailing byte count })` — `btrfs filesystem usage --raw <mountpoint>` prints a `Device size:  <bytes>` line with no unit suffix (confirmed via `btrfs-filesystem(8)`, 2026-08-09); find the line starting with `Device size:` and parse the remaining trimmed text as `u64`.
   - Every new arm maps subprocess-spawn failure and non-success exit to `DomainError::AdapterFailure`, same shape as every existing arm in these two functions.
 
-- [ ] **Task 5: `read_filesystem` and `enroll_fido2_key`'s token-write — round-trip Xfs/Btrfs through the LUKS2 token** (AC: #1, #3)
+- [x] **Task 5: `read_filesystem` and `enroll_fido2_key`'s token-write — round-trip Xfs/Btrfs through the LUKS2 token** (AC: #1, #3)
   - `src/adapters/exec/mod.rs`, `read_filesystem` (~line 1291): the `filesystem_str` match currently only accepts `"ext4"`. Add `"xfs" => Ok(Filesystem::Xfs)` and `"btrfs" => Ok(Filesystem::Btrfs)` arms, keeping the existing `other => Err(...)` catch-all for genuinely unrecognized values.
   - Same file, the `enroll_fido2_key` implementation's `filesystem_name` match (~line 787, currently `Filesystem::Ext4 => "ext4"`): add `Filesystem::Xfs => "xfs"` and `Filesystem::Btrfs => "btrfs"`. This is the single write side of the same round-trip `read_filesystem` reads back later (AD-2: written once by `create`, read by `resize`, never re-asked or sniffed — AC #3's literal requirement).
 
-- [ ] **Task 6: `check_prerequisites` becomes filesystem-aware** (AC: #4, #5)
+- [x] **Task 6: `check_prerequisites` becomes filesystem-aware** (AC: #4, #5)
   - `src/ports/filesystem_backend.rs`: change the trait signature to `fn check_prerequisites(&self, filesystem: Option<Filesystem>) -> Result<(), Vec<String>>;`. Update its doc comment to explain the parameter: `None` means "no mkfs/growfs toolchain needed for this operation" (every non-create/resize workflow); `Some(fs)` means "check exactly `fs`'s toolchain, not the others" (create passes the requested type, resize the existing one).
   - `src/adapters/exec/mod.rs`, `FilesystemBackend::check_prerequisites` (~line 1592): split the current flat binary list. Keep `["mount", "umount", "blockdev", "findmnt", "id", "fuser", "kill"]` unconditional (these are needed regardless of filesystem type — mount/umount/hooks/slam machinery). Move `"mkfs.ext4"`, `"resize2fs"`, `"e2fsck"`, `"dumpe2fs"` out of the unconditional list and gate them behind `filesystem`:
     ```rust
@@ -136,7 +136,7 @@ so that I can pick the filesystem that best fits my use case.
     ```
     This is why AC #5 ("an ext4 volume — behavior unchanged") holds: `create`/`resize` targeting ext4 pass `Some(Filesystem::Ext4)`, producing the exact same missing-binary list as today. AC #4's "not always both" is satisfied structurally — `Some(Xfs)` can never mention `btrfs-progs` binaries and vice versa, and neither ever mentions `mkfs.ext4` unless ext4 is what's actually requested.
 
-- [ ] **Task 7: Thread `Option<Filesystem>` through `domain::preflight::check` and every workflow** (AC: #4, #5)
+- [x] **Task 7: Thread `Option<Filesystem>` through `domain::preflight::check` and every workflow** (AC: #4, #5)
   - `src/domain/preflight.rs`: `check` gains a fourth parameter, `filesystem: Option<Filesystem>`, forwarded as `fs.check_prerequisites(filesystem)`. Update its doc comment.
   - `src/domain/workflows/create.rs` (~line 52): `filesystem: Filesystem` is already a required parameter of `create::run` — change the call to `preflight::check(luks, fido2, fs, Some(filesystem))?`. No ordering change; still the literal first statement.
   - `src/domain/workflows/resize.rs`: **two calls, not one — read "Load-Bearing Design Decision" in Dev Notes for why.**
@@ -145,16 +145,16 @@ so that I can pick the filesystem that best fits my use case.
   - `src/domain/workflows/unlock.rs`, `close.rs`, `close_all.rs`, `revoke.rs`, `enroll.rs`, `slam.rs`, `info.rs`: each has exactly one `preflight::check(luks, fido2, fs)` call — change every one to `preflight::check(luks, fido2, fs, None)`. Mechanical; the compiler will flag every site that's missed.
   - `src/cli/main.rs`: all 8 direct `preflight::check(&adapter, &adapter, &adapter)` calls (in `run_unlock`, `run_enroll`, `run_revoke`, `run_close`, `run_close_all`, `run_slam`, `run_resize`, `run_info`) become `preflight::check(&adapter, &adapter, &adapter, None)` — including `run_resize`'s, which cannot know the volume's filesystem type at that point (it hasn't read the token yet) and deliberately relies on `resize::run`'s own second, authoritative call to catch a missing xfs/btrfs toolchain. `run_create` has no direct `preflight::check` call today and needs none added — `create::run`'s own internal call already covers it.
 
-- [ ] **Task 8: Update fakes and preflight unit tests for the new signature** (AC: #4, #5)
+- [x] **Task 8: Update fakes and preflight unit tests for the new signature** (AC: #4, #5)
   - `tests/unit/fakes.rs`, `FakeFilesystemBackend::check_prerequisites` (~line 714): change to `fn check_prerequisites(&self, filesystem: Option<Filesystem>) -> Result<(), Vec<String>>`. Log `"check_prerequisites"` to the existing `CallLog` (it currently logs nothing) and push `filesystem` onto a new field so a test can inspect every call's argument in order — add `check_prerequisites_filesystem_calls: RefCell<Vec<Option<Filesystem>>>` (initialized empty in both `passing()`/`failing()`) and `pub fn check_prerequisites_filesystem_calls(&self) -> Vec<Option<Filesystem>>` accessor, following this file's existing `last_scaffold_hook_templates_mountpoint`/`signal_calls` convention. Keep the existing canned `self.prerequisites.clone()` return behavior unchanged — the fake still doesn't need to vary its *result* by filesystem type, only record what it was asked.
   - `tests/unit/preflight.rs`: update all 3 existing calls to `preflight::check(&luks, &fido2, &fs)` → add a 4th argument (use `None` — the exact value doesn't matter to these 3 tests, which only exercise missing-binary aggregation). Add one new test proving the argument actually reaches the port: `preflight_forwards_the_filesystem_argument_to_check_prerequisites_unchanged`, e.g. `preflight::check(&luks, &fido2, &fs, Some(Filesystem::Xfs))`, then `assert_eq!(fs.check_prerequisites_filesystem_calls(), vec![Some(Filesystem::Xfs)])`.
 
-- [ ] **Task 9: Workflow-level tests proving resize's two-call preflight ordering** (AC: #3, #4)
+- [x] **Task 9: Workflow-level tests proving resize's two-call preflight ordering** (AC: #3, #4)
   - `tests/unit/workflows.rs`: extend `resize_run_stops_at_preflight_before_touching_any_port` only by adding the new `None` argument if it constructs the call directly (it calls `resize::run(...)`, whose own public signature is unchanged — verify no edit is actually needed there beyond confirming it still passes).
   - Add a new test (in `tests/unit/resize.rs` if that file exists as its own module, otherwise alongside resize's other tests — check via Task 0's read which file currently hosts `resize::`-prefixed tests) proving both preflight calls happen with the right arguments in the right order: configure `FakeLuksBackend::passing().with_read_filesystem(Filesystem::Xfs)`, `FakeFilesystemBackend::passing()`, run `resize::run(...)` to completion (or far enough that both preflight calls have fired), then assert `fs.check_prerequisites_filesystem_calls() == vec![None, Some(Filesystem::Xfs)]` — proving both the unconditional first call and the type-specific second call, in that exact order, with the value `read_filesystem` actually reported (not a stand-in), the same "prove the real value flows through" discipline `key_label_received`/`last_scaffold_hook_templates_mountpoint` established in Stories 6.2/6.3.
   - Add a second test: `FakeFilesystemBackend::failing(&["mkfs.xfs"])` with `FakeLuksBackend::passing().with_read_filesystem(Filesystem::Xfs)` — assert `resize::run(...)` returns `Err(DomainError::PreflightFailed(_))` (proving the second, type-specific call is actually load-bearing, not just logged) and that `luks`'s `open`/`resize` never appear in its own `CallLog` (proving the failure aborts before the FIDO2 touch — check `FakeLuksBackend`'s `CallLog` accessor name via Task 0's read).
 
-- [ ] **Task 10: `ux::translate` — close the marker-bleed gap for the new transient-mount error paths** (AC: none directly — regression prevention, per this project's own recurring-pattern watchlist)
+- [x] **Task 10: `ux::translate` — close the marker-bleed gap for the new transient-mount error paths** (AC: none directly — regression prevention, per this project's own recurring-pattern watchlist)
   - `src/cli/ux.rs`: the `with_transient_mount` helper's own error messages ("failed to prepare ... for a filesystem operation" / "failed to conclude a filesystem operation on ...") deliberately avoid the bare "mount"/"umount" substrings so they don't fall into the existing unlock-flavored `"mount"/"mkfs"` bucket ("Your volume unlocked, but Hypogaol couldn't mount its filesystem.") or the `"umount"/"findmnt"` bucket — both would be wrong here since these failures only ever originate from `resize`'s growfs/filesystem_size step, never from unlock. Add one new branch, checked **before** the generic `"mount"/"mkfs"` bucket (same reasoning as the existing `resize2fs`/`e2fsck`/`umount` branches immediately above it):
     ```rust
     if inner.contains("for a filesystem operation") {
@@ -163,21 +163,21 @@ so that I can pick the filesystem that best fits my use case.
     ```
   - Add a test mirroring `translates_adapter_failure_umount_failure_is_not_swallowed_by_the_unlock_mount_message`: `translates_adapter_failure_transient_mount_failure_is_not_swallowed_by_the_unlock_mount_message`, asserting a `DomainError::AdapterFailure("failed to prepare /dev/mapper/foo for a filesystem operation: some stderr".to_string())` produces the new message, not the unlock-flavored one.
 
-- [ ] **Task 11: Unit tests for the pure/mechanical additions** (AC: #1, #2)
+- [x] **Task 11: Unit tests for the pure/mechanical additions** (AC: #1, #2)
   - `tests/unit/main_helpers.rs` or wherever `CliFilesystem`'s `From` impl would naturally be tested (check Task 0's read for the right file — likely alongside `parse_size`/`parse_label` tests in `tests/unit/cli.rs`, since `CliFilesystem`/`From<CliFilesystem>` live in `src/cli/main.rs`): if `CliFilesystem`/its `From` impl are `pub`/`pub(crate)` and reachable from the test binary, add a direct test; otherwise prove it indirectly via CLI parsing (see next bullet) — don't make anything more visible than it needs to be just to unit-test it directly.
   - `tests/unit/cli.rs`: add `create_file_help_lists_xfs_and_btrfs_as_filesystem_values` and a Device-backed equivalent, mirroring `create_file_help_lists_label_as_a_flag`: assert `help.contains("xfs")` and `help.contains("btrfs")` for `["hypogaol", "create", "file"/"device", "--help"]` (clap's `value_enum` help text lists all possible values, e.g. `[possible values: ext4, xfs, btrfs]`).
 
-- [ ] **Task 12: Update the remaining call sites** (compile correctness only, no new assertions required)
+- [x] **Task 12: Update the remaining call sites** (compile correctness only, no new assertions required)
   - Any other test file constructing `preflight::check(...)` directly, or the real `ExecAdapter`'s `check_prerequisites()` with no argument, will fail to compile — fix every one the compiler flags, mirroring Story 6.2/6.3's Task 10 precedent. `mkfs`/`growfs`/`filesystem_size`'s own signatures (`fs: Filesystem`, not `Option`) are unchanged, so no call site passing a concrete `Filesystem` value needs updating for those three.
 
-- [ ] **Task 13: Hardware end-to-end tests for XFS and Btrfs** (AC: #1, #2, #3)
+- [x] **Task 13: Hardware end-to-end tests for XFS and Btrfs** (AC: #1, #2, #3)
   - Extend `tests/hardware/main.rs` with new `#[ignore]`d scenarios, mirroring the existing `resize_grows_a_file_backed_volume_preserving_data_and_keys` shape:
     - `create_file_with_xfs_filesystem_succeeds_and_is_readable` / `create_file_with_btrfs_filesystem_succeeds_and_is_readable`: `create file --filesystem xfs`/`--filesystem btrfs`, then `unlock`, write a file, `close`, `unlock` again, confirm the file survived.
     - `create_file_with_btrfs_filesystem_at_a_small_size_succeeds` (AC #2 directly): create at ~20 MiB (near `MIN_VOLUME_SIZE_BYTES`'s ~16 MiB post-header payload) with `--filesystem btrfs`, confirm it succeeds — this is the case standard-mode Btrfs (~109 MiB floor) would fail, proving `--mixed` is actually taking effect, not just accepted as a no-op flag.
     - `resize_grows_a_file_backed_xfs_volume` / `resize_grows_a_file_backed_btrfs_volume`: create small, `resize` larger, confirm the grow succeeds and prior data survives — mirrors `resize_grows_a_file_backed_volume_preserving_data_and_keys`'s existing structure exactly, just with `--filesystem xfs`/`btrfs` at create time.
   - If no hardware is available in this session, state that explicitly (this project's standing convention — Stories 4.3, 5.1, 5.2, 6.1, 6.2, 6.3) and flag it as a retrospective action item for `LeReverandNox`, same pattern as those stories. This story's hardware verification is unusually load-bearing: the mount-requirement design decision in Task 4 has never been exercised against a real kernel XFS/Btrfs implementation until this runs.
 
-- [ ] **Task 14: Full regression pass**
+- [x] **Task 14: Full regression pass**
   - `cargo build` succeeds and `make test` passes with all prior tests (baseline **224 total: 17 lib + 207 `tests/unit`**, verified by direct `make test` output at this story's `baseline_commit` — not from memory; Story 6.3's Completion Notes claimed 223 (17+206), one short of what this story's own verification found, consistent with the recurring self-reported-count-discrepancy pattern flagged below) plus this story's new tests green. Verify the exact new total from real command output.
   - `cargo fmt --check` and `cargo clippy --all-targets` both clean. `preflight::check` gains a parameter (4 call sites in `domain/workflows/*` become 5-arg-adjacent calls internally, no signature growth on the workflow functions themselves — their own public signatures are untouched, only their internal `preflight::check` call sites change) and `resize::run`/`create::run`'s own argument counts are **unchanged** by this story (no new parameters added to either) — if a new `too_many_arguments` warning appears anywhere, note it explicitly in Completion Notes rather than silently suppressing it.
   - If hardware is available: run Task 13's scenarios end-to-end. If not, flag per Task 13's note.
@@ -250,8 +250,55 @@ so that I can pick the filesystem that best fits my use case.
 
 ### Agent Model Used
 
+Claude Sonnet 5 (claude-sonnet-5), via Amelia (bmad-dev-story workflow).
+
 ### Debug Log References
+
+None — no HALT conditions encountered; all tasks completed straight through.
 
 ### Completion Notes List
 
+- Tasks 1–7 (production code) are compiler-forced into a single build-green unit: extending `Filesystem` with `Xfs`/`Btrfs` makes every existing exhaustive `match` on it (adapter `mkfs`/`growfs`/`filesystem_size`/`read_filesystem`/`enroll_fido2_key`'s filesystem-name match, `CliFilesystem`'s `From` impl) fail to compile until every arm is added — there is no intermediate state where only e.g. Task 1 lands and `cargo build` still passes. Implemented and verified as one unit rather than as 7 separately-buildable commits.
+- Task 8's literal instruction ("log `check_prerequisites` to the existing CallLog") had a wider ripple than its own task description implies: `preflight::check` calls `fs.check_prerequisites` as the *first* thing every workflow does, and many existing tests share one `CallLog` across all three fake ports via `.with_log(log.clone())` — so this one logging change broke 54 pre-existing test assertions across 9 test files (`close.rs`, `close_all.rs`, `create.rs`, `enroll.rs`, `info.rs`, `resize.rs`, `revoke.rs`, `slam.rs`, `unlock.rs`) that asserted exact call-log sequences or `log.borrow().is_empty()`. All 54 were fixed by prepending/inserting `"check_prerequisites"` at the correct position(s) in each expected sequence (resize gets two insertions — one per preflight call). Re-verified every fix against real `cargo test` output, not by inspection.
+- Task 9's second test (`resize_aborts_before_opening_when_preflight_finds_a_missing_toolchain`) is named to describe its actual observable behavior rather than the task's own "proves the second call is load-bearing" framing: `FakeFilesystemBackend`'s `check_prerequisites` returns the same canned `Result` regardless of the `filesystem` argument it's given, so with `.failing(&["mkfs.xfs"])` the *first* (unconditional, `None`) preflight call already fails — the test still correctly proves a missing toolchain aborts resize before `luks.open`, just not specifically via the second call in isolation (the fakes have no mechanism to make only the second call fail while the first passes).
+- Task 14 baseline re-verified directly against this story's own `baseline_commit` (25c655d) via `make test`: **224 total (17 lib + 207 tests/unit)** — confirmed, not from memory. Final count after this story: **230 total (17 lib + 213 tests/unit)**, +6 new tests (`preflight.rs` +1, `ux.rs` +1, `resize.rs` +2, `cli.rs` +2).
+- `cargo fmt --check` and `cargo clippy --all-targets` both clean. `cargo clippy --all-targets` reports 5 `too_many_arguments` warnings (8/7, 10/7, 11/7, 10/7, 9/7 in `run_create`/`create::run`/`bootstrap_and_provision`/`finish_provisioning`/`grow_open_mapping`) — confirmed via `git stash`/re-run against the unmodified `baseline_commit` tree that all 5 are pre-existing and unchanged by this story (`create::run`/`resize::run`'s own public argument counts are untouched, per Task 14's own note; `preflight::check`'s new 4th argument only affects its own internal call sites, not any workflow function's signature).
+- Hardware verification: real hardware **is** present in this environment — `fido2-token -L` enumerates a real key (TOKEN2 FIDO2 Security Key), and `xfsprogs`/`btrfs-progs` (`mkfs.xfs`, `mkfs.btrfs`, `xfs_growfs`, `xfs_info`, `btrfs`) are all installed. However, this session is non-interactive: `sudo` requires an interactive password prompt (`sudo -n true` fails) and every `create`/`resize`/`unlock` call needs a physical FIDO2 touch, neither of which this session can supply. Task 13's 5 new `#[ignore]`d hardware scenarios (`create_file_with_xfs_filesystem_succeeds_and_is_readable`, `create_file_with_btrfs_filesystem_succeeds_and_is_readable`, `create_file_with_btrfs_filesystem_at_a_small_size_succeeds`, `resize_grows_a_file_backed_xfs_volume`, `resize_grows_a_file_backed_btrfs_volume`) compile cleanly and are registered (confirmed via `cargo test --test hardware -- --list`) but were **not executed** — flagging this as a retrospective action item for `LeReverandNox` to run `make test-hardware` interactively, same convention as Stories 4.3, 5.1, 5.2, 6.1, 6.2, 6.3. This story's Task 4 mount-based design (`with_transient_mount`) is unusually load-bearing on real hardware, since it has never been exercised against a real kernel XFS/Btrfs implementation until that run happens.
+
 ### File List
+
+**Production:**
+- `src/domain/types.rs`
+- `src/domain/preflight.rs`
+- `src/ports/filesystem_backend.rs`
+- `src/adapters/exec/mod.rs`
+- `src/domain/workflows/create.rs`
+- `src/domain/workflows/resize.rs`
+- `src/domain/workflows/unlock.rs`
+- `src/domain/workflows/close.rs`
+- `src/domain/workflows/close_all.rs`
+- `src/domain/workflows/revoke.rs`
+- `src/domain/workflows/enroll.rs`
+- `src/domain/workflows/slam.rs`
+- `src/domain/workflows/info.rs`
+- `src/cli/main.rs`
+- `src/cli/ux.rs`
+
+**Tests:**
+- `tests/unit/fakes.rs`
+- `tests/unit/preflight.rs`
+- `tests/unit/resize.rs`
+- `tests/unit/cli.rs`
+- `tests/unit/ux.rs`
+- `tests/unit/close.rs`
+- `tests/unit/close_all.rs`
+- `tests/unit/create.rs`
+- `tests/unit/enroll.rs`
+- `tests/unit/info.rs`
+- `tests/unit/revoke.rs`
+- `tests/unit/slam.rs`
+- `tests/unit/unlock.rs`
+- `tests/hardware/main.rs`
+
+**Sprint tracking:**
+- `_bmad-output/implementation-artifacts/sprint-status.yaml`

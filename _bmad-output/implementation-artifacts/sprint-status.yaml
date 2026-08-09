@@ -91,7 +91,7 @@ development_status:
   6-1-crash-safe-create-resume: done
   6-2-custom-key-label-at-create: done
   6-3-hook-template-scaffolding-at-create: done
-  6-4-xfs-and-btrfs-filesystem-support: ready-for-dev
+  6-4-xfs-and-btrfs-filesystem-support: review
   6-5-concurrent-invocation-guard: backlog
   6-6-proactive-fido2-pin-status-guidance: backlog
   6-7-one-letter-cli-flag-shorthand: backlog
