@@ -117,7 +117,9 @@ pub fn run(
             .map_err(|err| grow_succeeded_close_failed(new_size, err)),
         Err(err) => Err(match luks.close(&mapper) {
             Ok(()) => err,
-            Err(close_err) => err.with_rollback_cleanup_failure(close_err),
+            Err(close_err) => {
+                err.with_rollback_cleanup_failure("re-lock the LUKS2 mapping", close_err)
+            }
         }),
     }
 }

@@ -54,6 +54,7 @@ fn create_file_backed_fires_all_four_stages_in_real_order() {
         Filesystem::Ext4,
         false,
         None,
+        false,
         Fido2DeviceSelection::Interactive,
         &|stage| recorder.borrow_mut().push(stage),
         &luks,
@@ -94,6 +95,7 @@ fn create_device_backed_never_fires_allocating_backing_file() {
         Filesystem::Ext4,
         false,
         None,
+        false,
         Fido2DeviceSelection::Interactive,
         &|stage| recorder.borrow_mut().push(stage),
         &luks,
@@ -108,6 +110,88 @@ fn create_device_backed_never_fires_allocating_backing_file() {
             CreateStage::FormattingLuks2,
             CreateStage::EnrollingFido2Key,
             CreateStage::CreatingFilesystem,
+        ]
+    );
+}
+
+#[test]
+fn create_file_backed_with_scaffold_hooks_fires_scaffolding_stage_after_creating_filesystem() {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let fixture = RealFixtureFile::create("progress-create-file-backed-scaffold-hooks");
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_VOLUME_SIZE_BYTES,
+    };
+
+    let stages: Rc<RefCell<Vec<CreateStage>>> = Rc::new(RefCell::new(Vec::new()));
+    let recorder = stages.clone();
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        None,
+        true,
+        Fido2DeviceSelection::Interactive,
+        &|stage| recorder.borrow_mut().push(stage),
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(
+        *stages.borrow(),
+        vec![
+            CreateStage::AllocatingBackingFile,
+            CreateStage::FormattingLuks2,
+            CreateStage::EnrollingFido2Key,
+            CreateStage::CreatingFilesystem,
+            CreateStage::ScaffoldingHookTemplates,
+        ]
+    );
+}
+
+#[test]
+fn create_device_backed_with_scaffold_hooks_fires_scaffolding_stage_after_creating_filesystem() {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing().with_device_capacity(MIN_VOLUME_SIZE_BYTES * 2);
+
+    let fixture = RealFixtureFile::create("progress-create-device-backed-scaffold-hooks");
+    let target = CreateTarget::Device {
+        path: fixture.0.clone(),
+        size: None,
+        confirmed: true,
+    };
+
+    let stages: Rc<RefCell<Vec<CreateStage>>> = Rc::new(RefCell::new(Vec::new()));
+    let recorder = stages.clone();
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        None,
+        true,
+        Fido2DeviceSelection::Interactive,
+        &|stage| recorder.borrow_mut().push(stage),
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(
+        *stages.borrow(),
+        vec![
+            CreateStage::FormattingLuks2,
+            CreateStage::EnrollingFido2Key,
+            CreateStage::CreatingFilesystem,
+            CreateStage::ScaffoldingHookTemplates,
         ]
     );
 }
@@ -205,6 +289,7 @@ fn create_does_not_fire_creating_filesystem_when_enroll_fails() {
         Filesystem::Ext4,
         false,
         None,
+        false,
         Fido2DeviceSelection::Interactive,
         &|stage| recorder.borrow_mut().push(stage),
         &luks,

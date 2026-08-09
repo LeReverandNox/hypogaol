@@ -35,7 +35,9 @@ pub fn run(
         Err(err) => {
             let err = match luks.close(&mapper) {
                 Ok(()) => err,
-                Err(close_err) => err.with_rollback_cleanup_failure(close_err),
+                Err(close_err) => {
+                    err.with_rollback_cleanup_failure("re-lock the LUKS2 mapping", close_err)
+                }
             };
             return Err(err);
         }
@@ -80,7 +82,9 @@ fn run_hooks_step(
         luks.close(mapper).err()
     };
     let with_rollback = |err: DomainError, applied: &[PathBuf]| match rollback(applied) {
-        Some(close_err) => err.with_rollback_cleanup_failure(close_err),
+        Some(close_err) => {
+            err.with_rollback_cleanup_failure("re-lock the LUKS2 mapping", close_err)
+        }
         None => err,
     };
 

@@ -89,10 +89,11 @@ pub fn translate(err: &DomainError) -> String {
         }
         DomainError::RollbackCleanupAlsoFailed {
             original,
+            operation,
             close_detail,
         } => format!(
-            "{} (On top of that, Hypogaol couldn't re-lock the LUKS2 mapping while cleaning \
-             up: {close_detail} — it may have been left open; run `close` to check.)",
+            "{} (On top of that, Hypogaol couldn't {operation} while cleaning up: \
+             {close_detail} — it may not have been fully cleaned up; run `close` to check.)",
             translate(original)
         ),
     }
@@ -148,6 +149,7 @@ pub fn translate_create_stage(stage: &CreateStage) -> &'static str {
             "Enrolling your FIDO2 key — touch it now (you may also be asked for its PIN)..."
         }
         CreateStage::CreatingFilesystem => "Creating the filesystem...",
+        CreateStage::ScaffoldingHookTemplates => "Scaffolding example hook-template files...",
     }
 }
 

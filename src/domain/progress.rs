@@ -9,6 +9,7 @@ pub enum CreateStage {
     FormattingLuks2,
     EnrollingFido2Key,
     CreatingFilesystem,
+    ScaffoldingHookTemplates,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

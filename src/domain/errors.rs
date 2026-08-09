@@ -62,21 +62,30 @@ pub enum DomainError {
     #[error("{original}")]
     RollbackCleanupAlsoFailed {
         original: Box<DomainError>,
+        operation: &'static str,
         close_detail: String,
     },
 }
 
 impl DomainError {
-    /// Wraps `self` to note that a best-effort rollback `luks.close` also
-    /// failed while unwinding from `self`, instead of the previous discipline
-    /// of `let _ = luks.close(...)` silently dropping that detail — the
-    /// mapping may now be left open. `self` stays the primary, correctly
-    /// translated cause; `ux::translate` unwraps `original` first and appends
-    /// a note, so no existing translation (including this one) loses
-    /// fidelity by being flattened into a generic string.
-    pub fn with_rollback_cleanup_failure(self, close_err: DomainError) -> DomainError {
+    /// Wraps `self` to note that a best-effort cleanup step also failed
+    /// while unwinding from `self`, instead of the previous discipline of
+    /// `let _ = ...` silently dropping that detail. `operation` names the
+    /// specific step that failed (e.g. "re-lock the LUKS2 mapping",
+    /// "unmount the filesystem") so `ux::translate`'s note stays accurate
+    /// regardless of which cleanup call this wraps. `self` stays the
+    /// primary, correctly translated cause; `ux::translate` unwraps
+    /// `original` first and appends the note, so no existing translation
+    /// (including this one) loses fidelity by being flattened into a
+    /// generic string.
+    pub fn with_rollback_cleanup_failure(
+        self,
+        operation: &'static str,
+        close_err: DomainError,
+    ) -> DomainError {
         DomainError::RollbackCleanupAlsoFailed {
             original: Box::new(self),
+            operation,
             close_detail: close_err.to_string(),
         }
     }
