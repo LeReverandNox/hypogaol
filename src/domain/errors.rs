@@ -54,6 +54,9 @@ pub enum DomainError {
     #[error("{0}")]
     AdapterFailure(String),
 
+    #[error("another operation is already in progress on {}", .0.display())]
+    LockContention(PathBuf),
+
     #[error("no FIDO2 key labeled {0:?} is enrolled on this volume")]
     KeyNotFound(String),
 
