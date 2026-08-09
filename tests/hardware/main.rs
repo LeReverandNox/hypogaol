@@ -2539,7 +2539,12 @@ fn create_file_with_xfs_filesystem_succeeds_and_is_readable() {
     let adapter = ExecAdapter::default();
     let target = CreateTarget::File {
         path: path.clone(),
-        size: 64 * 1024 * 1024,
+        // mkfs.xfs refuses any filesystem at or below 300MB ("Filesystem
+        // must be larger than 300MB", confirmed against real mkfs.xfs
+        // output) — unlike Btrfs's --mixed floor, this is a hard XFS
+        // minimum with no size-gated workaround. 400 MiB leaves a
+        // comfortable ~384 MiB post-LUKS2-header payload.
+        size: 400 * 1024 * 1024,
     };
 
     println!("Creating an XFS volume — touch the key when prompted.");
@@ -2723,8 +2728,12 @@ fn resize_grows_a_file_backed_xfs_volume() {
     let path = dir.join("volume.img");
 
     let adapter = ExecAdapter::default();
-    let initial_size: u64 = 64 * 1024 * 1024;
-    let grown_size: u64 = 128 * 1024 * 1024;
+    // mkfs.xfs refuses any filesystem at or below 300MB ("Filesystem must be
+    // larger than 300MB", confirmed against real mkfs.xfs output) — 400 MiB
+    // leaves a comfortable ~384 MiB post-LUKS2-header payload at create
+    // time, and 700 MiB leaves ~684 MiB after the grow.
+    let initial_size: u64 = 400 * 1024 * 1024;
+    let grown_size: u64 = 700 * 1024 * 1024;
 
     let target = CreateTarget::File {
         path: path.clone(),
@@ -2783,10 +2792,10 @@ fn resize_grows_a_file_backed_xfs_volume() {
         "pre-resize data must survive the grow untouched"
     );
 
-    // A write comfortably larger than the ORIGINAL 64M capacity, but well
-    // within the grown 128M one, must now succeed — proves xfs_growfs
-    // actually grew the filesystem, not just the LUKS mapping.
-    let after_contents = vec![0xCDu8; 96 * 1024 * 1024];
+    // A write comfortably larger than the ORIGINAL ~384 MiB payload, but
+    // well within the grown ~684 MiB one, must now succeed — proves
+    // xfs_growfs actually grew the filesystem, not just the LUKS mapping.
+    let after_contents = vec![0xCDu8; 500 * 1024 * 1024];
     std::fs::write(mountpoint.join("after-resize.bin"), &after_contents).expect(
         "writing a file larger than the pre-resize capacity failed — filesystem growth didn't take effect",
     );
