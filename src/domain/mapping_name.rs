@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::domain::errors::DomainError;
 
@@ -40,4 +40,30 @@ pub fn mapping_name(path: &Path) -> Result<String, DomainError> {
     })?;
     let hash = fnv1a_hash(canonical.to_string_lossy().as_bytes());
     Ok(format!("{MAPPING_NAME_PREFIX}-{hash:016x}"))
+}
+
+/// Resolves `path` to an absolute, canonical form for `lock_target`'s
+/// locking target — `path` itself if it exists, otherwise its parent
+/// directory (AD-20). Unlike `mapping_name`, which requires `path` to
+/// already exist (every one of its callers acts on an already-created
+/// volume), `lock_target` is also called by `create` *before* a
+/// fresh file-backed target exists on disk, so a bare
+/// `std::fs::canonicalize(path)` would always fail there. The
+/// parent-directory fallback over-serializes a genuinely fresh
+/// file-backed create (it blocks unrelated concurrent creates in the
+/// same directory) rather than under-serializing — a deliberate,
+/// acceptable trade-off (AD-20), not a gap: every other workflow's
+/// target already exists by construction, so only that one case ever
+/// takes this fallback branch.
+pub fn lock_target_path(path: &Path) -> Result<PathBuf, DomainError> {
+    if let Ok(canonical) = std::fs::canonicalize(path) {
+        return Ok(canonical);
+    }
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    std::fs::canonicalize(parent).map_err(|e| {
+        DomainError::AdapterFailure(format!(
+            "failed to canonicalize {} or its parent directory: {e}",
+            path.display()
+        ))
+    })
 }
