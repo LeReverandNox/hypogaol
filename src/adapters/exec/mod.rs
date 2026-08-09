@@ -786,6 +786,8 @@ impl ExecAdapter {
 
         let filesystem_name = match metadata.filesystem {
             Filesystem::Ext4 => "ext4",
+            Filesystem::Xfs => "xfs",
+            Filesystem::Btrfs => "btrfs",
         };
 
         let object = token.as_object_mut().ok_or_else(|| {
@@ -1306,6 +1308,8 @@ impl LuksBackend for ExecAdapter {
 
         match filesystem_str {
             "ext4" => Ok(Filesystem::Ext4),
+            "xfs" => Ok(Filesystem::Xfs),
+            "btrfs" => Ok(Filesystem::Btrfs),
             other => Err(DomainError::AdapterFailure(format!(
                 "unrecognized filesystem {other:?} recorded on {}'s systemd-fido2 token",
                 path.display()
@@ -1588,23 +1592,93 @@ impl Fido2Backend for ExecAdapter {
     }
 }
 
+/// Mounts `mapper`'s device node at a private, transient mount point (never
+/// `/run/media/<user>` — that's `mount()`'s job for a volume the user is
+/// actively using; this one exists only for the duration of a single fs-tool
+/// invocation), runs `f` against the mountpoint, then always unmounts and
+/// removes the scratch directory before returning. XFS's `xfs_growfs`/
+/// `xfs_info` and Btrfs's `btrfs filesystem resize`/`usage` all require a
+/// live mountpoint argument — confirmed via their upstream docs, 2026-08-09 —
+/// unlike ext4's `resize2fs`/`dumpe2fs`, which operate on the raw device node
+/// unmounted. Error messages deliberately avoid the bare substrings "mount"/
+/// "umount" standing alone — see `cli::ux::translate`'s marker-bleed guard.
+fn with_transient_mount<T>(
+    mapper: &MapperHandle,
+    f: impl FnOnce(&Path) -> Result<T, DomainError>,
+) -> Result<T, DomainError> {
+    let mountpoint = PathBuf::from(format!("/run/hypogaol-fsop-{}", mapper.name));
+    if let Err(e) = std::fs::create_dir_all(&mountpoint) {
+        return Err(DomainError::AdapterFailure(format!(
+            "failed to prepare {} for a filesystem operation: {e}",
+            mapper.device_node().display()
+        )));
+    }
+    let mount_output = privileged("mount")
+        .arg(mapper.device_node())
+        .arg(&mountpoint)
+        .output();
+    match mount_output {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => {
+            let _ = std::fs::remove_dir(&mountpoint);
+            return Err(DomainError::AdapterFailure(format!(
+                "failed to prepare {} for a filesystem operation: {}",
+                mapper.device_node().display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            )));
+        }
+        Err(e) => {
+            let _ = std::fs::remove_dir(&mountpoint);
+            return Err(DomainError::AdapterFailure(format!(
+                "failed to prepare {} for a filesystem operation: {e}",
+                mapper.device_node().display()
+            )));
+        }
+    }
+
+    let result = f(&mountpoint);
+
+    let umount_output = privileged("umount").arg(&mountpoint).output();
+    let _ = std::fs::remove_dir(&mountpoint);
+    match umount_output {
+        Ok(output) if output.status.success() => result,
+        Ok(output) => {
+            let umount_err = DomainError::AdapterFailure(format!(
+                "failed to conclude a filesystem operation on {}: {}",
+                mapper.device_node().display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            ));
+            result.and(Err(umount_err))
+        }
+        Err(e) => {
+            let umount_err = DomainError::AdapterFailure(format!(
+                "failed to conclude a filesystem operation on {}: {e}",
+                mapper.device_node().display()
+            ));
+            result.and(Err(umount_err))
+        }
+    }
+}
+
 impl FilesystemBackend for ExecAdapter {
-    fn check_prerequisites(&self) -> Result<(), Vec<String>> {
+    fn check_prerequisites(&self, filesystem: Option<Filesystem>) -> Result<(), Vec<String>> {
         let mut missing = Vec::new();
 
         for binary in [
-            "mkfs.ext4",
-            "resize2fs",
-            "e2fsck",
-            "dumpe2fs",
-            "blockdev",
-            "mount",
-            "umount",
-            "findmnt",
-            "id",
-            "fuser",
-            "kill",
+            "blockdev", "mount", "umount", "findmnt", "id", "fuser", "kill",
         ] {
+            if !binary_on_path(binary) {
+                missing.push(format!("{binary} binary not found on PATH"));
+            }
+        }
+
+        let fs_binaries: &[&str] = match filesystem {
+            None => &[],
+            Some(Filesystem::Ext4) => &["mkfs.ext4", "resize2fs", "e2fsck", "dumpe2fs"],
+            Some(Filesystem::Xfs) => &["mkfs.xfs", "xfs_growfs", "xfs_info"],
+            Some(Filesystem::Btrfs) => &["mkfs.btrfs", "btrfs"],
+        };
+        for binary in fs_binaries {
             if !binary_on_path(binary) {
                 missing.push(format!("{binary} binary not found on PATH"));
             }
@@ -1757,6 +1831,46 @@ impl FilesystemBackend for ExecAdapter {
                     )))
                 }
             }
+            Filesystem::Xfs => {
+                let output = privileged("mkfs.xfs")
+                    .arg("-f")
+                    .arg(mapper.device_node())
+                    .output()
+                    .map_err(|e| {
+                        DomainError::AdapterFailure(format!("failed to run mkfs.xfs: {e}"))
+                    })?;
+
+                if output.status.success() {
+                    Ok(())
+                } else {
+                    Err(DomainError::AdapterFailure(format!(
+                        "mkfs.xfs failed: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )))
+                }
+            }
+            Filesystem::Btrfs => {
+                // `--mixed` is unconditional for every Btrfs volume this tool
+                // creates (AC #2, AD-8's Realized text) — it drops the viable
+                // minimum from standard mode's ~109 MiB floor to ~16 MiB,
+                // deliberately not size-gated.
+                let output = privileged("mkfs.btrfs")
+                    .args(["-f", "--mixed"])
+                    .arg(mapper.device_node())
+                    .output()
+                    .map_err(|e| {
+                        DomainError::AdapterFailure(format!("failed to run mkfs.btrfs: {e}"))
+                    })?;
+
+                if output.status.success() {
+                    Ok(())
+                } else {
+                    Err(DomainError::AdapterFailure(format!(
+                        "mkfs.btrfs failed: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )))
+                }
+            }
         }
     }
 
@@ -1810,6 +1924,49 @@ impl FilesystemBackend for ExecAdapter {
                     )))
                 }
             }
+            Filesystem::Xfs => with_transient_mount(mapper, |mountpoint| {
+                // No explicit size argument: `xfs_growfs` defaults to growing
+                // the data section to fill the full underlying block device,
+                // matching `resize2fs`'s own no-arg "grow to fill" convention.
+                let output = privileged("xfs_growfs")
+                    .arg(mountpoint)
+                    .output()
+                    .map_err(|e| {
+                        DomainError::AdapterFailure(format!("failed to run xfs_growfs: {e}"))
+                    })?;
+
+                if output.status.success() {
+                    Ok(())
+                } else {
+                    Err(DomainError::AdapterFailure(format!(
+                        "xfs_growfs failed: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )))
+                }
+            }),
+            Filesystem::Btrfs => with_transient_mount(mapper, |mountpoint| {
+                // `max` grows to fill all remaining free space on the
+                // device — the Btrfs equivalent of resize2fs's/xfs_growfs's
+                // no-arg "grow to fill" behavior.
+                let output = privileged("btrfs")
+                    .args(["filesystem", "resize", "max"])
+                    .arg(mountpoint)
+                    .output()
+                    .map_err(|e| {
+                        DomainError::AdapterFailure(format!(
+                            "failed to run btrfs filesystem resize: {e}"
+                        ))
+                    })?;
+
+                if output.status.success() {
+                    Ok(())
+                } else {
+                    Err(DomainError::AdapterFailure(format!(
+                        "btrfs filesystem resize failed: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )))
+                }
+            }),
         }
     }
 
@@ -1853,6 +2010,89 @@ impl FilesystemBackend for ExecAdapter {
 
                 Ok(block_count * block_size)
             }
+            Filesystem::Xfs => with_transient_mount(mapper, |mountpoint| {
+                let output = privileged("xfs_info")
+                    .arg(mountpoint)
+                    .output()
+                    .map_err(|e| {
+                        DomainError::AdapterFailure(format!("failed to run xfs_info: {e}"))
+                    })?;
+
+                if !output.status.success() {
+                    return Err(DomainError::AdapterFailure(format!(
+                        "xfs_info failed: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )));
+                }
+
+                let text = String::from_utf8_lossy(&output.stdout);
+                // `xfs_info` prints a line like:
+                //   data     =    bsize=4096   blocks=131072, imaxpct=25
+                // Find the line whose first whitespace-separated token is
+                // "data", then parse the "bsize="/"blocks=" tokens within it
+                // (stripping a trailing comma from "blocks=" before parsing).
+                let data_line = text
+                    .lines()
+                    .find(|line| line.split_whitespace().next() == Some("data"))
+                    .ok_or_else(|| {
+                        DomainError::AdapterFailure(
+                            "xfs_info output missing a parsable data line".to_string(),
+                        )
+                    })?;
+
+                let bsize: u64 = data_line
+                    .split_whitespace()
+                    .find_map(|token| token.strip_prefix("bsize="))
+                    .and_then(|value| value.trim_end_matches(',').parse().ok())
+                    .ok_or_else(|| {
+                        DomainError::AdapterFailure(
+                            "xfs_info data line missing a parsable bsize".to_string(),
+                        )
+                    })?;
+                let blocks: u64 = data_line
+                    .split_whitespace()
+                    .find_map(|token| token.strip_prefix("blocks="))
+                    .and_then(|value| value.trim_end_matches(',').parse().ok())
+                    .ok_or_else(|| {
+                        DomainError::AdapterFailure(
+                            "xfs_info data line missing a parsable blocks count".to_string(),
+                        )
+                    })?;
+
+                Ok(bsize * blocks)
+            }),
+            Filesystem::Btrfs => with_transient_mount(mapper, |mountpoint| {
+                let output = privileged("btrfs")
+                    .args(["filesystem", "usage", "--raw"])
+                    .arg(mountpoint)
+                    .output()
+                    .map_err(|e| {
+                        DomainError::AdapterFailure(format!(
+                            "failed to run btrfs filesystem usage: {e}"
+                        ))
+                    })?;
+
+                if !output.status.success() {
+                    return Err(DomainError::AdapterFailure(format!(
+                        "btrfs filesystem usage failed: {}",
+                        String::from_utf8_lossy(&output.stderr).trim()
+                    )));
+                }
+
+                let text = String::from_utf8_lossy(&output.stdout);
+                // `btrfs filesystem usage --raw` prints a line like:
+                //   Device size:                 33554432
+                // with no unit suffix (--raw).
+                text.lines()
+                    .find_map(|line| line.trim().strip_prefix("Device size:"))
+                    .and_then(|value| value.trim().parse().ok())
+                    .ok_or_else(|| {
+                        DomainError::AdapterFailure(
+                            "btrfs filesystem usage output missing a parsable Device size"
+                                .to_string(),
+                        )
+                    })
+            }),
         }
     }
 

@@ -40,7 +40,7 @@ pub fn run(
     fido2: &dyn Fido2Backend,
     fs: &dyn FilesystemBackend,
 ) -> Result<(), DomainError> {
-    preflight::check(luks, fido2, fs)?;
+    preflight::check(luks, fido2, fs, None)?;
 
     let name = mapping_name::mapping_name(path)?;
     let device_backed = fs.is_block_device(path)?;
@@ -93,6 +93,12 @@ pub fn run(
     // mapping); placed here so a read failure aborts before the mapping is
     // opened at all.
     let filesystem = luks.read_filesystem(path)?;
+
+    // A second, narrower preflight call: fails fast on a missing xfs/btrfs
+    // toolchain before `luks.open` spends a real FIDO2 touch. Non-mutating
+    // and cheap — "a re-check, not a bypass" (AD-4's Epic-6 amendment; see
+    // Dev Notes "Why resize calls preflight::check twice").
+    preflight::check(luks, fido2, fs, Some(filesystem))?;
 
     let mapper = luks.open(path, &name, false)?;
 

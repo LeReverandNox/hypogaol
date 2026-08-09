@@ -7,7 +7,12 @@ use crate::domain::types::{Filesystem, HookFileMeta, MapperHandle, Pid, Signal};
 pub trait FilesystemBackend {
     /// `Err` carries one human-readable string per missing/unsupported dependency
     /// this port's real adapter needs; `Ok(())` means all are satisfied.
-    fn check_prerequisites(&self) -> Result<(), Vec<String>>;
+    /// `filesystem` narrows which mkfs/growfs toolchain to check: `None`
+    /// means no such toolchain is needed for this operation (every
+    /// non-create/resize workflow); `Some(fs)` means check exactly `fs`'s
+    /// toolchain, not the others (`create` passes the requested type,
+    /// `resize` the existing one).
+    fn check_prerequisites(&self, filesystem: Option<Filesystem>) -> Result<(), Vec<String>>;
 
     /// True if `path` already exists (AD-9's create-mode refusal check).
     fn path_exists(&self, path: &Path) -> bool;

@@ -33,7 +33,7 @@ pub fn run(
     fido2: &dyn Fido2Backend,
     fs: &dyn FilesystemBackend,
 ) -> Result<(), DomainError> {
-    preflight::check(luks, fido2, fs)?;
+    preflight::check(luks, fido2, fs, None)?;
 
     let name = mapping_name::mapping_name(path)?;
     let mapper = MapperHandle {

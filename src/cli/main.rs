@@ -295,12 +295,16 @@ fn fido2_selection_for_enroll(
 #[derive(Clone, Copy, ValueEnum)]
 enum CliFilesystem {
     Ext4,
+    Xfs,
+    Btrfs,
 }
 
 impl From<CliFilesystem> for Filesystem {
     fn from(value: CliFilesystem) -> Self {
         match value {
             CliFilesystem::Ext4 => Filesystem::Ext4,
+            CliFilesystem::Xfs => Filesystem::Xfs,
+            CliFilesystem::Btrfs => Filesystem::Btrfs,
         }
     }
 }
@@ -457,7 +461,7 @@ fn print_hook_warning(w: HookWarning) {
 fn run_unlock(path: PathBuf, read_only: bool, skip_hooks: bool) {
     let adapter = ExecAdapter::default();
 
-    if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
+    if let Err(err) = preflight::check(&adapter, &adapter, &adapter, None) {
         eprintln!("{}", ux::translate(&err));
         std::process::exit(1);
     }
@@ -499,7 +503,7 @@ fn run_enroll(
 ) {
     let adapter = ExecAdapter::default();
 
-    if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
+    if let Err(err) = preflight::check(&adapter, &adapter, &adapter, None) {
         eprintln!("{}", ux::translate(&err));
         std::process::exit(1);
     }
@@ -563,7 +567,7 @@ fn run_revoke(path: PathBuf, label: String) {
 
     let adapter = ExecAdapter::default();
 
-    if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
+    if let Err(err) = preflight::check(&adapter, &adapter, &adapter, None) {
         eprintln!("{}", ux::translate(&err));
         std::process::exit(1);
     }
@@ -588,7 +592,7 @@ fn run_revoke(path: PathBuf, label: String) {
 fn run_close(path: PathBuf, skip_hooks: bool) {
     let adapter = ExecAdapter::default();
 
-    if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
+    if let Err(err) = preflight::check(&adapter, &adapter, &adapter, None) {
         eprintln!("{}", ux::translate(&err));
         std::process::exit(1);
     }
@@ -621,7 +625,7 @@ fn run_close(path: PathBuf, skip_hooks: bool) {
 fn run_close_all(skip_hooks: bool) {
     let adapter = ExecAdapter::default();
 
-    if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
+    if let Err(err) = preflight::check(&adapter, &adapter, &adapter, None) {
         eprintln!("{}", ux::translate(&err));
         std::process::exit(1);
     }
@@ -677,7 +681,7 @@ fn run_close_all(skip_hooks: bool) {
 fn run_slam() {
     let adapter = ExecAdapter::default();
 
-    if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
+    if let Err(err) = preflight::check(&adapter, &adapter, &adapter, None) {
         eprintln!("{}", ux::translate(&err));
         std::process::exit(1);
     }
@@ -728,7 +732,7 @@ fn run_slam() {
 fn run_resize(path: PathBuf, new_size: u64) {
     let adapter = ExecAdapter::default();
 
-    if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
+    if let Err(err) = preflight::check(&adapter, &adapter, &adapter, None) {
         eprintln!("{}", ux::translate(&err));
         std::process::exit(1);
     }
@@ -762,7 +766,7 @@ fn run_resize(path: PathBuf, new_size: u64) {
 fn run_info(path: PathBuf) {
     let adapter = ExecAdapter::default();
 
-    if let Err(err) = preflight::check(&adapter, &adapter, &adapter) {
+    if let Err(err) = preflight::check(&adapter, &adapter, &adapter, None) {
         eprintln!("{}", ux::translate(&err));
         std::process::exit(1);
     }

@@ -1,9 +1,12 @@
 use std::path::PathBuf;
 
-/// v1 supports only ext4 (AD-8); additional variants are additive later.
+/// v1 shipped ext4-only (AD-8); Story 6.4 is that additive later, adding
+/// `Xfs`/`Btrfs` alongside it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Filesystem {
     Ext4,
+    Xfs,
+    Btrfs,
 }
 
 /// AD-9: the two `create` target modes, kept as one enum with no shared/

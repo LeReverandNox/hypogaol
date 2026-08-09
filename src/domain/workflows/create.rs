@@ -49,7 +49,7 @@ pub fn run(
     fido2: &dyn Fido2Backend,
     fs: &dyn FilesystemBackend,
 ) -> Result<(), DomainError> {
-    preflight::check(luks, fido2, fs)?;
+    preflight::check(luks, fido2, fs, Some(filesystem))?;
 
     match target {
         CreateTarget::File { path, size } => {
