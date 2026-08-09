@@ -2274,7 +2274,8 @@ impl FilesystemBackend for ExecAdapter {
         // `invoking_home_dir`: this process never runs elevated as a whole,
         // and `mount` has already chowned `mountpoint` to the invoking user
         // by the time this is ever called.
-        std::fs::write(mountpoint.join("bind-hooks"), hooks::BIND_HOOKS_TEMPLATE).map_err(|e| {
+        let bind_hooks_path = mountpoint.join("bind-hooks");
+        std::fs::write(&bind_hooks_path, hooks::BIND_HOOKS_TEMPLATE).map_err(|e| {
             DomainError::AdapterFailure(format!("failed to write bind-hooks template: {e}"))
         })?;
         std::fs::write(
@@ -2282,6 +2283,13 @@ impl FilesystemBackend for ExecAdapter {
             hooks::EXEC_HOOKS_TEMPLATE,
         )
         .map_err(|e| {
+            // Best-effort: don't leave a half-scaffolded volume with only
+            // `bind-hooks` present if this second write fails (review
+            // finding, 2026-08-09) — the errors these two writes can hit
+            // (ENOSPC/EIO on a filesystem just created by this same call
+            // chain) are rare enough that reporting only the real failure
+            // here, not a further cleanup error, is the right trade-off.
+            let _ = std::fs::remove_file(&bind_hooks_path);
             DomainError::AdapterFailure(format!("failed to write exec-hooks.example template: {e}"))
         })
     }
