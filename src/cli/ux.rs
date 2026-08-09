@@ -75,6 +75,10 @@ pub fn translate(err: &DomainError) -> String {
             "No enrolled key is labeled {label:?}. Check the label (case-sensitive) and try again."
         ),
         DomainError::AdapterFailure(inner) => translate_adapter_failure(inner),
+        DomainError::LockContention(path) => format!(
+            "Another Hypogaol operation is already in progress on {}. Wait for it to finish, then try again.",
+            path.display()
+        ),
         DomainError::HookRejected { path, reason } => {
             let clause = match reason {
                 HookRejectionReason::NotARegularFile => {
