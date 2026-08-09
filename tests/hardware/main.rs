@@ -2821,8 +2821,15 @@ fn resize_grows_a_file_backed_btrfs_volume() {
     let path = dir.join("volume.img");
 
     let adapter = ExecAdapter::default();
+    // Btrfs's own resize ioctl refuses any resize whose resulting size is
+    // under 256 MiB (confirmed against real hardware, 2026-08-09) — a real,
+    // separate floor from mkfs.btrfs --mixed's much smaller creation-time
+    // minimum, so `initial_size` can stay small (this tool's own
+    // MIN_VOLUME_SIZE_BYTES floor is enough at create time) but `grown_size`
+    // must clear 256 MiB post-header. 320 MiB leaves a ~304 MiB payload,
+    // comfortably above it.
     let initial_size: u64 = 64 * 1024 * 1024;
-    let grown_size: u64 = 128 * 1024 * 1024;
+    let grown_size: u64 = 320 * 1024 * 1024;
 
     let target = CreateTarget::File {
         path: path.clone(),
@@ -2881,10 +2888,11 @@ fn resize_grows_a_file_backed_btrfs_volume() {
         "pre-resize data must survive the grow untouched"
     );
 
-    // A write comfortably larger than the ORIGINAL 64M capacity, but well
-    // within the grown 128M one, must now succeed — proves btrfs filesystem
-    // resize actually grew the filesystem, not just the LUKS mapping.
-    let after_contents = vec![0xCDu8; 96 * 1024 * 1024];
+    // A write comfortably larger than the ORIGINAL ~48 MiB payload, but
+    // well within the grown ~304 MiB one, must now succeed — proves btrfs
+    // filesystem resize actually grew the filesystem, not just the LUKS
+    // mapping.
+    let after_contents = vec![0xCDu8; 200 * 1024 * 1024];
     std::fs::write(mountpoint.join("after-resize.bin"), &after_contents).expect(
         "writing a file larger than the pre-resize capacity failed — filesystem growth didn't take effect",
     );

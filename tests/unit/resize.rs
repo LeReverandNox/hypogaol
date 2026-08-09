@@ -574,3 +574,78 @@ fn resize_aborts_before_opening_when_preflight_finds_a_missing_toolchain() {
         "the second preflight call must abort before luks.open is ever reached"
     );
 }
+
+// Btrfs's own resize ioctl refuses any resize whose resulting size is under
+// 256 MiB (confirmed empirically on real hardware, 2026-08-09) — a genuine
+// grow request (well above the live current size) that's still too small
+// for Btrfs's own kernel floor must be refused before any mutating call,
+// not left to fail deep inside `fs.growfs`.
+#[test]
+fn resize_to_btrfs_below_its_own_kernel_floor_is_refused_before_any_mutating_call() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing()
+        .with_log(log.clone())
+        .with_read_filesystem(Filesystem::Btrfs);
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_device_capacity(4096)
+        .with_filesystem_size(4096);
+
+    let fixture = RealFixtureFile::create("resize-btrfs-below-kernel-floor", &[0u8; 4096]);
+
+    // A real grow (200 MiB is comfortably above the live 4096-byte current
+    // size), but well under Btrfs's own 256 MiB resize floor.
+    let target_size = 200 * 1024 * 1024;
+    let result = resize::run(&fixture.0, target_size, &no_progress, &luks, &fido2, &fs);
+
+    match result {
+        Err(DomainError::DeviceTooSmall { path, size }) => {
+            assert_eq!(path, fixture.0);
+            assert_eq!(size, target_size);
+        }
+        other => panic!("expected DomainError::DeviceTooSmall, got {other:?}"),
+    }
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "check_prerequisites".to_string(),
+            "is_block_device".to_string(),
+            "read_filesystem".to_string(),
+            "check_prerequisites".to_string(),
+            "open".to_string(),
+            "device_capacity".to_string(),
+            "filesystem_size".to_string(),
+            "close".to_string(),
+        ],
+        "must be refused before set_backing_file_size/resize/growfs, but still close the mapping it opened"
+    );
+}
+
+// Proves the Btrfs-specific floor doesn't leak onto other filesystems: the
+// exact same target size that Btrfs's own kernel floor refuses must still
+// succeed for ext4, which has no equivalent resize-time minimum.
+#[test]
+fn resize_to_the_same_small_target_still_succeeds_for_ext4() {
+    let luks = FakeLuksBackend::passing().with_read_filesystem(Filesystem::Ext4);
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing()
+        .with_device_capacity(4096)
+        .with_filesystem_size(4096);
+
+    let fixture = RealFixtureFile::create("resize-ext4-below-btrfs-floor", &[0u8; 4096]);
+
+    let result = resize::run(
+        &fixture.0,
+        200 * 1024 * 1024,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(
+        result.is_ok(),
+        "ext4 must not be rejected by Btrfs's own, much higher resize floor: {result:?}"
+    );
+}

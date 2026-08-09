@@ -1945,16 +1945,11 @@ impl FilesystemBackend for ExecAdapter {
                 }
             }),
             Filesystem::Btrfs => with_transient_mount(mapper, |mountpoint| {
-                // `1:max` grows devid 1 to fill all remaining free space on
-                // the device — the Btrfs equivalent of resize2fs's/
-                // xfs_growfs's no-arg "grow to fill" behavior. Every volume
-                // this tool creates is single-device, so devid 1 always
-                // exists; the bare `max` keyword (no explicit devid) hit a
-                // real "Invalid argument" failure on hardware confirmed
-                // 2026-08-09 — the explicit devid avoids whatever ambiguity
-                // bare `max` runs into resolving which device to target.
+                // `max` grows to fill all remaining free space on the
+                // device — the Btrfs equivalent of resize2fs's/xfs_growfs's
+                // no-arg "grow to fill" behavior.
                 let output = privileged("btrfs")
-                    .args(["filesystem", "resize", "1:max"])
+                    .args(["filesystem", "resize", "max"])
                     .arg(mountpoint)
                     .output()
                     .map_err(|e| {
