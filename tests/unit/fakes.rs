@@ -5,7 +5,8 @@ use std::rc::Rc;
 
 use hypogaol::domain::errors::DomainError;
 use hypogaol::domain::types::{
-    Filesystem, HookFileMeta, KeyMetadata, KeyslotInfo, KeyslotRef, MapperHandle, Pid, Signal,
+    Filesystem, HookFileMeta, KeyMetadata, KeyslotInfo, KeyslotRef, LockGuard, MapperHandle, Pid,
+    Signal,
 };
 use hypogaol::ports::fido2_backend::{Fido2Backend, Fido2DeviceSelection};
 use hypogaol::ports::filesystem_backend::FilesystemBackend;
@@ -479,6 +480,12 @@ pub struct FakeFilesystemBackend {
     // independently load-bearing — `.failing(&[...])` fails *every* call,
     // so a regression that silently no-ops the second call went undetected.
     fail_for_filesystem: RefCell<Option<(Option<Filesystem>, Vec<String>)>>,
+    // Story 6.5 (concurrent-invocation guard): every `path` passed to
+    // `lock_target`, in call order.
+    lock_target_calls: RefCell<Vec<PathBuf>>,
+    // Story 6.5: makes every `lock_target` call return
+    // `DomainError::LockContention` instead of succeeding.
+    lock_contention: bool,
 }
 
 /// A valid, unrejectable `exec-hooks` file's metadata (AC #3's guardrail
@@ -523,6 +530,8 @@ impl FakeFilesystemBackend {
             last_scaffold_hook_templates_mountpoint: RefCell::new(None),
             check_prerequisites_filesystem_calls: RefCell::new(Vec::new()),
             fail_for_filesystem: RefCell::new(None),
+            lock_target_calls: RefCell::new(Vec::new()),
+            lock_contention: false,
         }
     }
 
@@ -554,6 +563,8 @@ impl FakeFilesystemBackend {
             last_scaffold_hook_templates_mountpoint: RefCell::new(None),
             check_prerequisites_filesystem_calls: RefCell::new(Vec::new()),
             fail_for_filesystem: RefCell::new(None),
+            lock_target_calls: RefCell::new(Vec::new()),
+            lock_contention: false,
         }
     }
 
@@ -745,6 +756,24 @@ impl FakeFilesystemBackend {
         *self.fail_for_filesystem.borrow_mut() = Some((filesystem, missing(missing_deps)));
         self
     }
+
+    /// Every `path` passed to `lock_target`, in call order — lets a test
+    /// prove which target each workflow locked, and (for close_all/slam)
+    /// that a lock was acquired once per mapping, interleaved with each
+    /// mapping's own close/slam calls in the shared `CallLog`, not all
+    /// acquired up front.
+    pub fn lock_target_calls(&self) -> Vec<PathBuf> {
+        self.lock_target_calls.borrow().clone()
+    }
+
+    /// Makes every `lock_target` call return `DomainError::LockContention`
+    /// — distinct from `with_failure_at("lock_target")`'s generic
+    /// `AdapterFailure`, since a test needs to assert the *specific*
+    /// variant `ux::translate` and callers pattern-match on.
+    pub fn with_lock_contention(mut self) -> Self {
+        self.lock_contention = true;
+        self
+    }
 }
 
 impl FilesystemBackend for FakeFilesystemBackend {
@@ -933,6 +962,16 @@ impl FilesystemBackend for FakeFilesystemBackend {
             .push("scaffold_hook_templates".to_string());
         *self.last_scaffold_hook_templates_mountpoint.borrow_mut() = Some(mountpoint.to_path_buf());
         self.fail_if("scaffold_hook_templates")
+    }
+
+    fn lock_target(&self, path: &Path) -> Result<LockGuard, DomainError> {
+        self.log.borrow_mut().push("lock_target".to_string());
+        self.lock_target_calls.borrow_mut().push(path.to_path_buf());
+        if self.lock_contention {
+            return Err(DomainError::LockContention(path.to_path_buf()));
+        }
+        self.fail_if("lock_target")?;
+        Ok(LockGuard(None))
     }
 }
 
