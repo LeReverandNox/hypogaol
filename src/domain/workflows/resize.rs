@@ -263,9 +263,15 @@ fn grow_open_mapping(
     // genuine shrink/no-op is still reported as `ResizeMustGrow`, not this
     // — but still before any mutating call below.
     if filesystem == Filesystem::Btrfs && new_size_as_payload < MIN_BTRFS_RESIZE_PAYLOAD_BYTES {
+        // `size`/`minimum` are both reported on the same basis (post-header
+        // payload bytes) as the comparison just above, not `new_size`'s raw
+        // whole-file/whole-device bytes — otherwise the number shown here
+        // wouldn't match the number the rejection was actually computed
+        // from (review finding, 2026-08-09).
         return Err(DomainError::DeviceTooSmall {
             path: path.to_path_buf(),
-            size: new_size,
+            size: new_size_as_payload,
+            minimum: MIN_BTRFS_RESIZE_PAYLOAD_BYTES,
         });
     }
 

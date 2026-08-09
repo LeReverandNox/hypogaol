@@ -575,6 +575,45 @@ fn resize_aborts_before_opening_when_preflight_finds_a_missing_toolchain() {
     );
 }
 
+// Distinct from the test above: there, `FakeFilesystemBackend::failing`
+// makes *every* `check_prerequisites` call fail, so it can't tell "the
+// second, type-specific call is what caught this" apart from "the first,
+// unconditional call already caught it" — a regression that silently turned
+// the second call into a no-op (e.g. `let _ =` instead of `?`) would go
+// undetected. This test makes the first (`None`) call pass and only the
+// second (`Some(Filesystem::Xfs)`) call fail, proving the second call is
+// independently load-bearing (review finding, 2026-08-09 — Task 9's own
+// Completion Notes admitted this gap).
+#[test]
+fn resize_aborts_when_only_the_second_type_specific_preflight_call_finds_a_missing_toolchain() {
+    let luks = FakeLuksBackend::passing().with_read_filesystem(Filesystem::Xfs);
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing()
+        .with_failure_for_filesystem(Some(Filesystem::Xfs), &["mkfs.xfs"]);
+
+    let fixture = RealFixtureFile::create(
+        "resize-second-preflight-call-alone-is-load-bearing",
+        &[0u8; 4096],
+    );
+
+    let result = resize::run(&fixture.0, 8192, &no_progress, &luks, &fido2, &fs);
+
+    assert!(
+        matches!(result, Err(DomainError::PreflightFailed(_))),
+        "expected PreflightFailed, got {result:?}"
+    );
+    assert_eq!(
+        fs.check_prerequisites_filesystem_calls(),
+        vec![None, Some(Filesystem::Xfs)],
+        "both preflight calls must have fired, in order, before the second one's failure aborted resize"
+    );
+    assert_eq!(
+        luks.last_open(),
+        None,
+        "the second preflight call must abort before luks.open is ever reached"
+    );
+}
+
 // Btrfs's own resize ioctl refuses any resize whose resulting size is under
 // 256 MiB (confirmed empirically on real hardware, 2026-08-09) — a genuine
 // grow request (well above the live current size) that's still too small
@@ -600,9 +639,20 @@ fn resize_to_btrfs_below_its_own_kernel_floor_is_refused_before_any_mutating_cal
     let result = resize::run(&fixture.0, target_size, &no_progress, &luks, &fido2, &fs);
 
     match result {
-        Err(DomainError::DeviceTooSmall { path, size }) => {
+        Err(DomainError::DeviceTooSmall {
+            path,
+            size,
+            minimum,
+        }) => {
             assert_eq!(path, fixture.0);
+            // Header size is 0 in this fixture (device_capacity == the raw
+            // fixture size, mapper_capacity defaults to the same), so
+            // payload bytes == raw bytes here and `size` still equals
+            // `target_size` — but `size`/`minimum` are always reported on
+            // the same (post-header payload) basis the comparison itself
+            // used, not `new_size`'s raw basis (review finding, 2026-08-09).
             assert_eq!(size, target_size);
+            assert_eq!(minimum, 260 * 1024 * 1024);
         }
         other => panic!("expected DomainError::DeviceTooSmall, got {other:?}"),
     }

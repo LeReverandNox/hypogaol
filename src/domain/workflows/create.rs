@@ -93,7 +93,11 @@ pub fn run(
             // floor, since it's the first point both `size` and
             // `filesystem` are known together.
             if size < size_floor_for(filesystem) {
-                return Err(DomainError::DeviceTooSmall { path, size });
+                return Err(DomainError::DeviceTooSmall {
+                    path,
+                    size,
+                    minimum: size_floor_for(filesystem),
+                });
             }
 
             progress(CreateStage::AllocatingBackingFile);
@@ -175,6 +179,7 @@ pub fn run(
                 return Err(DomainError::DeviceTooSmall {
                     path,
                     size: resolved_size,
+                    minimum: size_floor_for(filesystem),
                 });
             }
 

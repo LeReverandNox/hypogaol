@@ -161,9 +161,14 @@ fn refuses_a_file_backed_size_below_the_minimum_before_touching_any_port() {
     );
 
     match result {
-        Err(DomainError::DeviceTooSmall { path, size }) => {
+        Err(DomainError::DeviceTooSmall {
+            path,
+            size,
+            minimum,
+        }) => {
             assert_eq!(path, PathBuf::from("/tmp/way-too-small"));
             assert_eq!(size, MIN_VOLUME_SIZE_BYTES - 1);
+            assert_eq!(minimum, MIN_VOLUME_SIZE_BYTES);
         }
         other => panic!("expected DomainError::DeviceTooSmall, got {other:?}"),
     }
@@ -207,9 +212,14 @@ fn refuses_a_file_backed_xfs_volume_below_the_xfs_specific_minimum_before_touchi
     );
 
     match result {
-        Err(DomainError::DeviceTooSmall { path, size }) => {
+        Err(DomainError::DeviceTooSmall {
+            path,
+            size,
+            minimum,
+        }) => {
             assert_eq!(path, PathBuf::from("/tmp/xfs-way-too-small"));
             assert_eq!(size, MIN_XFS_VOLUME_SIZE_BYTES - 1);
+            assert_eq!(minimum, MIN_XFS_VOLUME_SIZE_BYTES);
         }
         other => panic!("expected DomainError::DeviceTooSmall, got {other:?}"),
     }
@@ -255,9 +265,14 @@ fn device_with_xfs_filesystem_and_capacity_below_the_xfs_specific_minimum_refuse
     );
 
     match result {
-        Err(DomainError::DeviceTooSmall { path, size }) => {
+        Err(DomainError::DeviceTooSmall {
+            path,
+            size,
+            minimum,
+        }) => {
             assert_eq!(path, fixture.0);
             assert_eq!(size, MIN_XFS_VOLUME_SIZE_BYTES - 1);
+            assert_eq!(minimum, MIN_XFS_VOLUME_SIZE_BYTES);
         }
         other => panic!("expected DomainError::DeviceTooSmall, got {other:?}"),
     }
@@ -893,9 +908,14 @@ fn device_with_no_size_given_and_capacity_below_the_minimum_refuses_before_any_m
     );
 
     match result {
-        Err(DomainError::DeviceTooSmall { path, size }) => {
+        Err(DomainError::DeviceTooSmall {
+            path,
+            size,
+            minimum,
+        }) => {
             assert_eq!(path, fixture.0);
             assert_eq!(size, MIN_VOLUME_SIZE_BYTES - 1);
+            assert_eq!(minimum, MIN_VOLUME_SIZE_BYTES);
         }
         other => panic!("expected DomainError::DeviceTooSmall, got {other:?}"),
     }
