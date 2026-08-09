@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use hypogaol::domain::errors::DomainError;
 use hypogaol::domain::mapping_name;
 use hypogaol::domain::types::{CreateTarget, Filesystem};
-use hypogaol::domain::workflows::create::{self, MIN_VOLUME_SIZE_BYTES};
+use hypogaol::domain::workflows::create::{self, MIN_VOLUME_SIZE_BYTES, MIN_XFS_VOLUME_SIZE_BYTES};
 use hypogaol::ports::fido2_backend::Fido2DeviceSelection;
 
 use crate::fakes::{
@@ -174,6 +174,135 @@ fn refuses_a_file_backed_size_below_the_minimum_before_touching_any_port() {
     assert_eq!(
         *log.borrow(),
         vec!["check_prerequisites".to_string(), "path_exists".to_string()]
+    );
+}
+
+// mkfs.xfs's own real minimum (confirmed empirically, 2026-08-09) is far
+// above MIN_VOLUME_SIZE_BYTES's generic floor — a size that passes the
+// generic check but not XFS's own must still be refused before any
+// mutating call, same discipline as the generic-floor test above.
+#[test]
+fn refuses_a_file_backed_xfs_volume_below_the_xfs_specific_minimum_before_touching_any_port() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing().with_log(log.clone());
+
+    let target = CreateTarget::File {
+        path: PathBuf::from("/tmp/xfs-way-too-small"),
+        size: MIN_XFS_VOLUME_SIZE_BYTES - 1,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Xfs,
+        false,
+        None,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    match result {
+        Err(DomainError::DeviceTooSmall { path, size }) => {
+            assert_eq!(path, PathBuf::from("/tmp/xfs-way-too-small"));
+            assert_eq!(size, MIN_XFS_VOLUME_SIZE_BYTES - 1);
+        }
+        other => panic!("expected DomainError::DeviceTooSmall, got {other:?}"),
+    }
+
+    assert_eq!(
+        *log.borrow(),
+        vec!["check_prerequisites".to_string(), "path_exists".to_string()],
+        "a size above the generic floor but below XFS's own must still be refused before any adapter call"
+    );
+}
+
+// Device-backed analog of the test above — same filesystem-specific floor,
+// applied to a capacity defaulted from `device_capacity` rather than an
+// explicit `--size` (mirrors the existing generic-floor Device test).
+#[test]
+fn device_with_xfs_filesystem_and_capacity_below_the_xfs_specific_minimum_refuses_before_any_mutating_call(
+) {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_device_capacity(MIN_XFS_VOLUME_SIZE_BYTES - 1);
+
+    let fixture = RealFixtureFile::create("device-xfs-capacity-below-minimum");
+    let target = CreateTarget::Device {
+        path: fixture.0.clone(),
+        size: None,
+        confirmed: true,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Xfs,
+        false,
+        None,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    match result {
+        Err(DomainError::DeviceTooSmall { path, size }) => {
+            assert_eq!(path, fixture.0);
+            assert_eq!(size, MIN_XFS_VOLUME_SIZE_BYTES - 1);
+        }
+        other => panic!("expected DomainError::DeviceTooSmall, got {other:?}"),
+    }
+
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "check_prerequisites".to_string(),
+            "has_luks2_header".to_string(),
+            "device_capacity".to_string()
+        ]
+    );
+}
+
+// Proves the XFS-specific floor doesn't leak onto other filesystems: a size
+// comfortably above the generic floor but far below XFS's own must still
+// succeed for Btrfs (AC #2's small-volume case is exactly this shape).
+#[test]
+fn create_with_btrfs_filesystem_below_the_xfs_specific_minimum_still_succeeds() {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let fixture = RealFixtureFile::create("btrfs-below-xfs-minimum");
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_VOLUME_SIZE_BYTES,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Btrfs,
+        false,
+        None,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Btrfs at the generic floor must not be rejected by XFS's own, much higher floor: {result:?}"
     );
 }
 
