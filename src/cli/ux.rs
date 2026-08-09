@@ -38,8 +38,13 @@ pub fn translate(err: &DomainError) -> String {
             "You asked for {requested} bytes, but {} only has {capacity} bytes available.",
             path.display()
         ),
-        DomainError::DeviceTooSmall { path, size } => format!(
-            "{} would only have {size} bytes for a volume — that's too small to be usable.",
+        DomainError::DeviceTooSmall {
+            path,
+            size,
+            minimum,
+        } => format!(
+            "{} would only have {size} bytes for a volume — that's too small to be usable. \
+             It needs at least {minimum} bytes.",
             path.display()
         ),
         DomainError::ResizeMustGrow {
@@ -297,6 +302,24 @@ fn translate_adapter_failure(inner: &str) -> String {
     if inner.contains("cryptsetup resize") {
         return "Hypogaol couldn't resize this volume's LUKS2 mapping — your security key or its \
                 PIN may not have been accepted in time."
+            .to_string();
+    }
+
+    // `resize`'s own `with_transient_mount` failures (Xfs/Btrfs's
+    // `growfs`/`filesystem_size`, which need a live mount to run
+    // `xfs_growfs`/`xfs_info`/`btrfs filesystem resize`/`usage`) — checked
+    // here, ahead of every bucket below that does a bare "mount"/"umount"/
+    // "findmnt" substring match, because these messages interpolate the
+    // real `mount`/`umount` subprocess's own stderr, which routinely
+    // contains those literal words (e.g. "umount: target is busy"). Checking
+    // this dedicated, unambiguous marker first is the only way to keep that
+    // embedded text from being reclassified as a `close`/`unlock` failure —
+    // these failures only ever originate from `resize`, never `close` or
+    // `unlock` (marker-bleed guard; review finding, 2026-08-09 — an earlier
+    // version of this branch was positioned after the `umount`/`findmnt`
+    // bucket below and was never reachable for a real umount failure).
+    if inner.contains("hypogaol-transient-mount") {
+        return "Hypogaol couldn't access this volume's filesystem to check or grow it."
             .to_string();
     }
 

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use hypogaol::domain::errors::DomainError;
 use hypogaol::domain::mapping_name;
 use hypogaol::domain::types::{CreateTarget, Filesystem};
-use hypogaol::domain::workflows::create::{self, MIN_VOLUME_SIZE_BYTES};
+use hypogaol::domain::workflows::create::{self, MIN_VOLUME_SIZE_BYTES, MIN_XFS_VOLUME_SIZE_BYTES};
 use hypogaol::ports::fido2_backend::Fido2DeviceSelection;
 
 use crate::fakes::{
@@ -72,7 +72,11 @@ fn refuses_before_touching_anything_if_destination_already_exists() {
     // attempted (AC #2/#3).
     assert_eq!(
         *log.borrow(),
-        vec!["path_exists".to_string(), "has_marker_token".to_string()]
+        vec![
+            "check_prerequisites".to_string(),
+            "path_exists".to_string(),
+            "has_marker_token".to_string()
+        ]
     );
 }
 
@@ -115,6 +119,7 @@ fn file_backed_resume_proceeds_through_the_full_happy_path_with_no_confirmation_
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "path_exists".to_string(),
             "has_marker_token".to_string(),
             "set_backing_file_size".to_string(),
@@ -156,9 +161,14 @@ fn refuses_a_file_backed_size_below_the_minimum_before_touching_any_port() {
     );
 
     match result {
-        Err(DomainError::DeviceTooSmall { path, size }) => {
+        Err(DomainError::DeviceTooSmall {
+            path,
+            size,
+            minimum,
+        }) => {
             assert_eq!(path, PathBuf::from("/tmp/way-too-small"));
             assert_eq!(size, MIN_VOLUME_SIZE_BYTES - 1);
+            assert_eq!(minimum, MIN_VOLUME_SIZE_BYTES);
         }
         other => panic!("expected DomainError::DeviceTooSmall, got {other:?}"),
     }
@@ -166,7 +176,149 @@ fn refuses_a_file_backed_size_below_the_minimum_before_touching_any_port() {
     // The CLI's own `parse_size` already floor-checks this, but domain must
     // not rely on it as the only gate (mirroring the Device branch) — no
     // backing file allocated, no adapter touched.
-    assert_eq!(*log.borrow(), vec!["path_exists".to_string()]);
+    assert_eq!(
+        *log.borrow(),
+        vec!["check_prerequisites".to_string(), "path_exists".to_string()]
+    );
+}
+
+// mkfs.xfs's own real minimum (confirmed empirically, 2026-08-09) is far
+// above MIN_VOLUME_SIZE_BYTES's generic floor — a size that passes the
+// generic check but not XFS's own must still be refused before any
+// mutating call, same discipline as the generic-floor test above.
+#[test]
+fn refuses_a_file_backed_xfs_volume_below_the_xfs_specific_minimum_before_touching_any_port() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing().with_log(log.clone());
+
+    let target = CreateTarget::File {
+        path: PathBuf::from("/tmp/xfs-way-too-small"),
+        size: MIN_XFS_VOLUME_SIZE_BYTES - 1,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Xfs,
+        false,
+        None,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    match result {
+        Err(DomainError::DeviceTooSmall {
+            path,
+            size,
+            minimum,
+        }) => {
+            assert_eq!(path, PathBuf::from("/tmp/xfs-way-too-small"));
+            assert_eq!(size, MIN_XFS_VOLUME_SIZE_BYTES - 1);
+            assert_eq!(minimum, MIN_XFS_VOLUME_SIZE_BYTES);
+        }
+        other => panic!("expected DomainError::DeviceTooSmall, got {other:?}"),
+    }
+
+    assert_eq!(
+        *log.borrow(),
+        vec!["check_prerequisites".to_string(), "path_exists".to_string()],
+        "a size above the generic floor but below XFS's own must still be refused before any adapter call"
+    );
+}
+
+// Device-backed analog of the test above — same filesystem-specific floor,
+// applied to a capacity defaulted from `device_capacity` rather than an
+// explicit `--size` (mirrors the existing generic-floor Device test).
+#[test]
+fn device_with_xfs_filesystem_and_capacity_below_the_xfs_specific_minimum_refuses_before_any_mutating_call(
+) {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_device_capacity(MIN_XFS_VOLUME_SIZE_BYTES - 1);
+
+    let fixture = RealFixtureFile::create("device-xfs-capacity-below-minimum");
+    let target = CreateTarget::Device {
+        path: fixture.0.clone(),
+        size: None,
+        confirmed: true,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Xfs,
+        false,
+        None,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    match result {
+        Err(DomainError::DeviceTooSmall {
+            path,
+            size,
+            minimum,
+        }) => {
+            assert_eq!(path, fixture.0);
+            assert_eq!(size, MIN_XFS_VOLUME_SIZE_BYTES - 1);
+            assert_eq!(minimum, MIN_XFS_VOLUME_SIZE_BYTES);
+        }
+        other => panic!("expected DomainError::DeviceTooSmall, got {other:?}"),
+    }
+
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "check_prerequisites".to_string(),
+            "has_luks2_header".to_string(),
+            "device_capacity".to_string()
+        ]
+    );
+}
+
+// Proves the XFS-specific floor doesn't leak onto other filesystems: a size
+// comfortably above the generic floor but far below XFS's own must still
+// succeed for Btrfs (AC #2's small-volume case is exactly this shape).
+#[test]
+fn create_with_btrfs_filesystem_below_the_xfs_specific_minimum_still_succeeds() {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let fixture = RealFixtureFile::create("btrfs-below-xfs-minimum");
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_VOLUME_SIZE_BYTES,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Btrfs,
+        false,
+        None,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(
+        result.is_ok(),
+        "Btrfs at the generic floor must not be rejected by XFS's own, much higher floor: {result:?}"
+    );
 }
 
 #[test]
@@ -205,6 +357,7 @@ fn happy_path_runs_every_port_call_once_in_order() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -473,6 +626,7 @@ fn enroll_failure_closes_the_mapping_and_removes_the_backing_file() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -516,6 +670,7 @@ fn mkfs_failure_closes_the_mapping_and_removes_the_backing_file() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -564,6 +719,7 @@ fn bootstrap_format_and_open_failure_removes_the_backing_file_without_closing_a_
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -613,6 +769,7 @@ fn close_stale_mapping_failure_aborts_before_bootstrap_format_and_open_ever_runs
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -655,6 +812,7 @@ fn device_happy_path_with_no_size_given_uses_the_full_capacity() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string(),
             "close_stale_mapping".to_string(),
@@ -705,6 +863,7 @@ fn device_happy_path_with_a_size_smaller_than_capacity_uses_the_requested_size()
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string(),
             "close_stale_mapping".to_string(),
@@ -749,9 +908,14 @@ fn device_with_no_size_given_and_capacity_below_the_minimum_refuses_before_any_m
     );
 
     match result {
-        Err(DomainError::DeviceTooSmall { path, size }) => {
+        Err(DomainError::DeviceTooSmall {
+            path,
+            size,
+            minimum,
+        }) => {
             assert_eq!(path, fixture.0);
             assert_eq!(size, MIN_VOLUME_SIZE_BYTES - 1);
+            assert_eq!(minimum, MIN_VOLUME_SIZE_BYTES);
         }
         other => panic!("expected DomainError::DeviceTooSmall, got {other:?}"),
     }
@@ -759,6 +923,7 @@ fn device_with_no_size_given_and_capacity_below_the_minimum_refuses_before_any_m
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string()
         ]
@@ -808,6 +973,7 @@ fn device_with_existing_luks2_header_refuses_even_when_confirmed() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "has_marker_token".to_string()
         ]
@@ -854,6 +1020,7 @@ fn device_backed_resume_proceeds_even_when_not_confirmed() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "has_marker_token".to_string(),
             "device_capacity".to_string(),
@@ -920,6 +1087,7 @@ fn device_backed_resume_still_enforces_size_against_capacity() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "has_marker_token".to_string(),
             "device_capacity".to_string()
@@ -963,7 +1131,13 @@ fn device_without_confirmation_refuses_even_with_no_header() {
 
     // has_luks2_header still ran (AC #4's check always runs first), but
     // confirmation is checked before any sizing/mutating call (AC #5).
-    assert_eq!(*log.borrow(), vec!["has_luks2_header".to_string()]);
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "check_prerequisites".to_string(),
+            "has_luks2_header".to_string()
+        ]
+    );
 }
 
 #[test]
@@ -1011,6 +1185,7 @@ fn device_with_requested_size_greater_than_capacity_refuses_before_any_mutating_
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string()
         ]
@@ -1056,6 +1231,7 @@ fn device_branch_failure_closes_the_mapping_without_removing_any_backing_file() 
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string(),
             "close_stale_mapping".to_string(),
@@ -1099,6 +1275,7 @@ fn create_with_scaffold_hooks_true_mounts_writes_templates_and_unmounts_after_mk
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -1154,6 +1331,7 @@ fn create_with_scaffold_hooks_false_never_mounts_for_scaffolding() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -1203,6 +1381,7 @@ fn create_device_with_scaffold_hooks_true_mounts_writes_templates_and_unmounts_a
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string(),
             "close_stale_mapping".to_string(),
@@ -1259,6 +1438,7 @@ fn create_device_with_scaffold_hooks_false_never_mounts_for_scaffolding() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string(),
             "close_stale_mapping".to_string(),
@@ -1307,6 +1487,7 @@ fn create_scaffold_hook_templates_failure_still_unmounts_before_returning_the_er
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),

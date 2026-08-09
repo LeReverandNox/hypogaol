@@ -55,9 +55,10 @@ fn preflight_failure_short_circuits_before_any_mutating_call() {
         other => panic!("expected DomainError::PreflightFailed, got {other:?}"),
     }
 
-    assert!(
-        log.borrow().is_empty(),
-        "no port call should run before preflight fails"
+    assert_eq!(
+        *log.borrow(),
+        vec!["check_prerequisites".to_string()],
+        "no port call beyond preflight's own check_prerequisites should run before preflight fails"
     );
 }
 
@@ -81,7 +82,13 @@ fn happy_path_calls_enroll_fido2_key_exactly_once_with_the_given_key_label() {
     );
 
     assert!(result.is_ok(), "expected Ok(()), got {result:?}");
-    assert_eq!(*log.borrow(), vec!["enroll_fido2_key".to_string()]);
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "check_prerequisites".to_string(),
+            "enroll_fido2_key".to_string()
+        ]
+    );
 }
 
 #[test]

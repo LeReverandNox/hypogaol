@@ -74,6 +74,7 @@ fn happy_path_unmounts_then_closes_using_the_shared_mapping_name() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "mount_point_of".to_string(),
             "path_exists".to_string(),
             "path_exists".to_string(),
@@ -107,6 +108,7 @@ fn umount_failure_stops_before_calling_luks_close() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "mount_point_of".to_string(),
             "path_exists".to_string(),
             "path_exists".to_string(),
@@ -137,6 +139,7 @@ fn umount_reporting_not_currently_mounted_still_proceeds_to_luks_close() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "mount_point_of".to_string(),
             "path_exists".to_string(),
             "path_exists".to_string(),
@@ -163,6 +166,7 @@ fn luks_close_failure_after_a_successful_umount_still_propagates_as_an_error() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "mount_point_of".to_string(),
             "path_exists".to_string(),
             "path_exists".to_string(),
@@ -311,6 +315,10 @@ fn close_skips_all_hooks_when_skip_hooks_true() {
     assert!(result.is_ok(), "expected Ok, got {result:?}");
     assert_eq!(
         *log.borrow(),
-        vec!["umount".to_string(), "close".to_string()]
+        vec![
+            "check_prerequisites".to_string(),
+            "umount".to_string(),
+            "close".to_string()
+        ]
     );
 }

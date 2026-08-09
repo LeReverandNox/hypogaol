@@ -1,5 +1,11 @@
 # Deferred Work
 
+## Deferred from: code review of 6-4-xfs-and-btrfs-filesystem-support (2026-08-09)
+
+- `with_transient_mount` performs two independent, unguarded mount/unmount cycles per resize (`filesystem_size` then `growfs`) with no protection against filesystem state changing between them — Story 6.5 "concurrent-invocation-guard" is the planned fix for this exact class of issue. [src/adapters/exec/mod.rs]
+- No real-hardware XFS resize scenario was exercised near the new 300MB create-time floor boundary — both hardware XFS scenarios use volumes hundreds of MiB above it. [tests/hardware/main.rs]
+- `MIN_BTRFS_RESIZE_PAYLOAD_BYTES`'s margin above the real kernel floor (260 MiB vs. 256 MiB, ~1.5%) is thin and mostly earmarked for block-flooring elsewhere, not independently verified right at the boundary on real hardware. [src/domain/workflows/resize.rs:33]
+
 ## Deferred from: code review of 5-4-update-live-planning-automation-pointers (2026-08-03)
 
 - Epic 5 completion (this is its last story) has no tracked action item for a retrospective or an `epic-5` status flip in sprint-status.yaml — out of this story's scope; a sprint-status/retro housekeeping step. [_bmad-output/implementation-artifacts/sprint-status.yaml]

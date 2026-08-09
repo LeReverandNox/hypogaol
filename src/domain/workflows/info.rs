@@ -18,7 +18,7 @@ pub fn run(
     fido2: &dyn Fido2Backend,
     fs: &dyn FilesystemBackend,
 ) -> Result<Vec<KeyslotInfo>, DomainError> {
-    preflight::check(luks, fido2, fs)?;
+    preflight::check(luks, fido2, fs, None)?;
 
     luks.list_fido2_keyslots(path)
 }

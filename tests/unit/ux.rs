@@ -65,11 +65,17 @@ fn translates_device_too_small() {
     let err = DomainError::DeviceTooSmall {
         path: PathBuf::from("/dev/sdb1"),
         size: 1024,
+        minimum: 33_554_432,
     };
     let message = translate(&err);
     assert_no_jargon(&message);
     assert!(message.contains("1024"));
     assert!(message.contains("/dev/sdb1"));
+    // The actual minimum must be stated, not just "too small" — review
+    // finding, 2026-08-09: with three different filesystem-specific floors
+    // now in play (generic/XFS/Btrfs), a numberless message gives no way to
+    // tell which one applies or what value would work.
+    assert!(message.contains("33554432"));
     // `size` is the device's own capacity (not necessarily a user-typed
     // value) whenever `--size` was omitted on a device target — the wording
     // must not imply the user requested this exact number.
@@ -274,6 +280,54 @@ fn translates_adapter_failure_umount_failure_is_not_swallowed_by_the_unlock_moun
     assert!(
         !message.contains("Your volume unlocked"),
         "close's own umount failure was misclassified as unlock's mount-failure message: {message:?}"
+    );
+}
+
+// `with_transient_mount`'s own error messages carry a dedicated
+// "hypogaol-transient-mount" marker, checked ahead of every bucket below
+// that does a bare "mount"/"umount"/"mkfs" substring match — without that
+// ordering, this would fall through to the generic mount/mkfs bucket's
+// unlock-flavored framing, which is wrong: this failure only ever
+// originates from resize's growfs/filesystem_size, never unlock.
+#[test]
+fn translates_adapter_failure_transient_mount_prepare_failure_is_not_swallowed_by_the_unlock_mount_message(
+) {
+    let err = DomainError::AdapterFailure(
+        "hypogaol-transient-mount: failed to prepare /dev/mapper/foo for use: some stderr"
+            .to_string(),
+    );
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(
+        !message.contains("Your volume unlocked"),
+        "resize's own transient-mount failure was misclassified as unlock's mount-failure message: {message:?}"
+    );
+}
+
+// The "conclude" (umount-step) failure path is the one a wording-only fix
+// would miss: real `umount(8)` stderr conventionally contains the literal
+// word "umount" (e.g. "umount: target is busy"), which the close-flavored
+// bucket above matches on. Only checking the dedicated marker *before* that
+// bucket (not just giving this message its own text) keeps it from being
+// misclassified as a close failure (review finding, 2026-08-09 — the
+// original branch was positioned after the umount/findmnt bucket and this
+// exact path was never reachable).
+#[test]
+fn translates_adapter_failure_transient_mount_conclude_failure_is_not_swallowed_by_the_close_umount_message(
+) {
+    let err = DomainError::AdapterFailure(
+        "hypogaol-transient-mount: failed to conclude use of /dev/mapper/foo: umount: target is busy."
+            .to_string(),
+    );
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(
+        !message.contains("couldn't unmount this volume's filesystem"),
+        "resize's own transient-mount cleanup failure was misclassified as close's umount-failure message: {message:?}"
+    );
+    assert!(
+        !message.contains("Your volume unlocked"),
+        "resize's own transient-mount cleanup failure was misclassified as unlock's mount-failure message: {message:?}"
     );
 }
 

@@ -31,6 +31,27 @@ const BOOTSTRAP_KEYSLOT: KeyslotRef = KeyslotRef(0);
 /// empirically).
 pub const MIN_VOLUME_SIZE_BYTES: u64 = 32 * 1024 * 1024;
 
+/// `mkfs.xfs`'s own real minimum, confirmed empirically against real
+/// hardware (2026-08-09): it refuses outright with "Filesystem must be
+/// larger than 300MB" below that floor — no exact byte boundary was
+/// reverse-engineered beyond that message, so 350 MiB total (leaving a
+/// ~334 MiB post-LUKS2-header payload) gives comfortable margin above 300MB
+/// under either a decimal-MB or binary-MiB reading of `mkfs.xfs`'s own
+/// wording. Only `Xfs` needs a filesystem-specific floor above
+/// `MIN_VOLUME_SIZE_BYTES`: Btrfs's `--mixed` mode viable minimum (~16 MiB
+/// payload) is already below the generic floor, and ext4's is lower still.
+pub const MIN_XFS_VOLUME_SIZE_BYTES: u64 = 350 * 1024 * 1024;
+
+/// The smallest total (pre-LUKS2-header) size `filesystem` can actually be
+/// formatted at — `MIN_VOLUME_SIZE_BYTES` for every filesystem except `Xfs`,
+/// which needs its own, much larger floor.
+fn size_floor_for(filesystem: Filesystem) -> u64 {
+    match filesystem {
+        Filesystem::Xfs => MIN_XFS_VOLUME_SIZE_BYTES,
+        Filesystem::Ext4 | Filesystem::Btrfs => MIN_VOLUME_SIZE_BYTES,
+    }
+}
+
 /// `progress` fires at each real stage boundary, in the real execution order
 /// (AD-19): `AllocatingBackingFile` (File targets only — a Device target
 /// never allocates a backing file, so this stage never fires for it) →
@@ -49,7 +70,7 @@ pub fn run(
     fido2: &dyn Fido2Backend,
     fs: &dyn FilesystemBackend,
 ) -> Result<(), DomainError> {
-    preflight::check(luks, fido2, fs)?;
+    preflight::check(luks, fido2, fs, Some(filesystem))?;
 
     match target {
         CreateTarget::File { path, size } => {
@@ -62,12 +83,21 @@ pub fn run(
                 return Err(DomainError::DestinationExists(path));
             }
 
-            // The CLI's `parse_size` already floor-checks `--size`, but this
-            // is domain's own independent guarantee (mirroring the Device
+            // The CLI's `parse_size` already floor-checks `--size` against
+            // the generic minimum (it has no way to know which filesystem
+            // was requested at the time it parses `--size`), but this is
+            // domain's own independent guarantee (mirroring the Device
             // branch below) rather than a trust that the CLI is the only
-            // caller that will ever construct a `CreateTarget::File`.
-            if size < MIN_VOLUME_SIZE_BYTES {
-                return Err(DomainError::DeviceTooSmall { path, size });
+            // caller that will ever construct a `CreateTarget::File` —
+            // and the only place that can apply a filesystem-specific
+            // floor, since it's the first point both `size` and
+            // `filesystem` are known together.
+            if size < size_floor_for(filesystem) {
+                return Err(DomainError::DeviceTooSmall {
+                    path,
+                    size,
+                    minimum: size_floor_for(filesystem),
+                });
             }
 
             progress(CreateStage::AllocatingBackingFile);
@@ -136,16 +166,20 @@ pub fn run(
                 None => capacity,
             };
 
-            // Below this, `cryptsetup luksFormat`/`mkfs.ext4` fail deep inside
+            // Below this, `cryptsetup luksFormat`/`mkfs.*` fail deep inside
             // the adapter with a cryptic error instead of a clear refusal.
             // An explicit `--size` is already floor-checked by the CLI's
-            // `parse_size`, but a defaulted-from-capacity size (no `--size`
-            // given) never passes through that check — this is domain's own
-            // independent guarantee, not a trust in the CLI having done it.
-            if resolved_size < MIN_VOLUME_SIZE_BYTES {
+            // `parse_size` against the generic minimum, but a
+            // defaulted-from-capacity size (no `--size` given) never passes
+            // through that check — this is domain's own independent
+            // guarantee, not a trust in the CLI having done it — and, same
+            // as the File branch above, the only place that can apply a
+            // filesystem-specific floor.
+            if resolved_size < size_floor_for(filesystem) {
                 return Err(DomainError::DeviceTooSmall {
                     path,
                     size: resolved_size,
+                    minimum: size_floor_for(filesystem),
                 });
             }
 

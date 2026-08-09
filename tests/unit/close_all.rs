@@ -41,6 +41,7 @@ fn closes_every_discovered_mapping_using_the_full_close_sequence() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "list_open_mappings".to_string(),
             "mount_point_of".to_string(),
             "path_exists".to_string(),
@@ -161,7 +162,13 @@ fn zero_open_mappings_yields_ok_empty_vec_with_no_further_port_calls() {
         matches!(result, Ok(ref v) if v.is_empty()),
         "expected Ok(vec![]), got {result:?}"
     );
-    assert_eq!(*log.borrow(), vec!["list_open_mappings".to_string()]);
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "check_prerequisites".to_string(),
+            "list_open_mappings".to_string()
+        ]
+    );
 }
 
 #[test]
@@ -174,10 +181,10 @@ fn preflight_failure_short_circuits_before_list_open_mappings_is_called() {
     let result = close_all::run(false, &|_| {}, &luks, &fido2, &fs);
 
     assert!(matches!(result, Err(DomainError::PreflightFailed(_))));
-    assert!(
-        log.borrow().is_empty(),
-        "expected no port calls before preflight fails, log: {:?}",
-        log.borrow()
+    assert_eq!(
+        *log.borrow(),
+        vec!["check_prerequisites".to_string()],
+        "no port call beyond preflight's own check_prerequisites should run before preflight fails"
     );
 }
 
@@ -205,6 +212,7 @@ fn skip_hooks_true_skips_hooks_for_every_mapping_in_the_batch() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "list_open_mappings".to_string(),
             "umount".to_string(),
             "close".to_string(),
@@ -226,5 +234,11 @@ fn list_open_mappings_failure_propagates_as_close_alls_own_err_distinct_from_a_p
     let result = close_all::run(false, &|_| {}, &luks, &fido2, &fs);
 
     assert!(result.is_err(), "expected Err, got {result:?}");
-    assert_eq!(*log.borrow(), vec!["list_open_mappings".to_string()]);
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "check_prerequisites".to_string(),
+            "list_open_mappings".to_string()
+        ]
+    );
 }

@@ -7,7 +7,12 @@ use crate::domain::types::{Filesystem, HookFileMeta, MapperHandle, Pid, Signal};
 pub trait FilesystemBackend {
     /// `Err` carries one human-readable string per missing/unsupported dependency
     /// this port's real adapter needs; `Ok(())` means all are satisfied.
-    fn check_prerequisites(&self) -> Result<(), Vec<String>>;
+    /// `filesystem` narrows which mkfs/growfs toolchain to check: `None`
+    /// means no such toolchain is needed for this operation (every
+    /// non-create/resize workflow); `Some(fs)` means check exactly `fs`'s
+    /// toolchain, not the others (`create` passes the requested type,
+    /// `resize` the existing one).
+    fn check_prerequisites(&self, filesystem: Option<Filesystem>) -> Result<(), Vec<String>>;
 
     /// True if `path` already exists (AD-9's create-mode refusal check).
     fn path_exists(&self, path: &Path) -> bool;
@@ -28,17 +33,19 @@ pub trait FilesystemBackend {
     /// itself must refuse to clobber anything already there (AC #2).
     fn set_backing_file_size(&self, path: &Path, size: u64) -> Result<(), DomainError>;
 
-    /// Formats the opened mapping with `fs` (v1: `Filesystem::Ext4` only, AD-8).
+    /// Formats the opened mapping with `fs` (`Filesystem::Ext4`/`Xfs`/`Btrfs`,
+    /// AD-8).
     fn mkfs(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<(), DomainError>;
 
-    /// Grows `fs` on `mapper`'s already-resized mapping to fill it (v1:
-    /// `Filesystem::Ext4` only, AD-8) — Story 3.2, AC #1/#4. Called after
-    /// `LuksBackend::resize`, so the mapping already reflects the new,
-    /// larger size; no explicit target size is passed.
+    /// Grows `fs` on `mapper`'s already-resized mapping to fill it
+    /// (`Filesystem::Ext4`/`Xfs`/`Btrfs`, AD-8) — Story 3.2, AC #1/#4; Story
+    /// 6.4 added Xfs/Btrfs. Called after `LuksBackend::resize`, so the
+    /// mapping already reflects the new, larger size; no explicit target
+    /// size is passed.
     fn growfs(&self, mapper: &MapperHandle, fs: Filesystem) -> Result<(), DomainError>;
 
     /// The `fs` filesystem's own current size on `mapper`'s active mapping
-    /// (v1: `Filesystem::Ext4` only) — a pure query, no mutation. This is
+    /// (`Filesystem::Ext4`/`Xfs`/`Btrfs`) — a pure query, no mutation. This is
     /// deliberately distinct from `device_capacity(&mapper.device_node())`:
     /// confirmed empirically on real hardware that a LUKS2 mapping's dynamic
     /// segment always reflects the *full* backing storage on every reopen,

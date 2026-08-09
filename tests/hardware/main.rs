@@ -2519,3 +2519,383 @@ fn create_file_with_scaffold_hooks_writes_inert_templates_and_the_renamed_exec_h
 
     UnlockCleanup::new(mountpoint, name).run();
 }
+
+/// End-to-end XFS verification (Story 6.4, AC #1/#3): create with
+/// `--filesystem xfs`, unlock, write a file, close, unlock again, confirm the
+/// file survived — proving `mkfs.xfs` actually formatted the volume and the
+/// `filesystem` token field round-trips correctly through `read_filesystem`.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root, `xfsprogs`, and a
+/// real FIDO2 security key present, ready to be touched and to enter its PIN
+/// when prompted (once for `create`, once each for the two `unlock` calls).
+#[test]
+#[ignore]
+fn create_file_with_xfs_filesystem_succeeds_and_is_readable() {
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-xfs");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("volume.img");
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::File {
+        path: path.clone(),
+        // mkfs.xfs refuses any filesystem at or below 300MB ("Filesystem
+        // must be larger than 300MB", confirmed against real mkfs.xfs
+        // output) — unlike Btrfs's --mixed floor, this is a hard XFS
+        // minimum with no size-gated workaround. 400 MiB leaves a
+        // comfortable ~384 MiB post-LUKS2-header payload.
+        size: 400 * 1024 * 1024,
+    };
+
+    println!("Creating an XFS volume — touch the key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Xfs,
+        false,
+        None,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    println!("Unlocking to write a marker file — touch the key when prompted.");
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
+        .expect("first unlock::run failed");
+    let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
+
+    let contents = vec![0xABu8; 1024 * 1024];
+    std::fs::write(mountpoint.join("marker.bin"), &contents).expect("failed to write marker file");
+
+    println!("Closing before re-unlocking.");
+    let result = close::run(&path, false, &|_| {}, &adapter, &adapter, &adapter);
+    assert!(result.is_ok(), "close::run failed: {result:?}");
+
+    println!(
+        "Unlocking again to confirm the data and key survived — touch the same key when prompted."
+    );
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
+        .expect("unlock::run after close failed — the previously enrolled key must still work");
+
+    let recovered =
+        std::fs::read(mountpoint.join("marker.bin")).expect("failed to read back marker file");
+    assert_eq!(
+        recovered, contents,
+        "data must survive a close/unlock cycle on XFS"
+    );
+
+    UnlockCleanup::new(mountpoint, name).run();
+}
+
+/// End-to-end Btrfs verification (Story 6.4, AC #1/#2/#3): create with
+/// `--filesystem btrfs`, unlock, write a file, close, unlock again, confirm
+/// the file survived — proving `mkfs.btrfs --mixed` actually formatted the
+/// volume and the `filesystem` token field round-trips correctly.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root, `btrfs-progs`,
+/// and a real FIDO2 security key present, ready to be touched and to enter
+/// its PIN when prompted (once for `create`, once each for the two `unlock`
+/// calls).
+#[test]
+#[ignore]
+fn create_file_with_btrfs_filesystem_succeeds_and_is_readable() {
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-btrfs");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("volume.img");
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::File {
+        path: path.clone(),
+        size: 64 * 1024 * 1024,
+    };
+
+    println!("Creating a Btrfs volume — touch the key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Btrfs,
+        false,
+        None,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    println!("Unlocking to write a marker file — touch the key when prompted.");
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
+        .expect("first unlock::run failed");
+    let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
+
+    let contents = vec![0xCDu8; 1024 * 1024];
+    std::fs::write(mountpoint.join("marker.bin"), &contents).expect("failed to write marker file");
+
+    println!("Closing before re-unlocking.");
+    let result = close::run(&path, false, &|_| {}, &adapter, &adapter, &adapter);
+    assert!(result.is_ok(), "close::run failed: {result:?}");
+
+    println!(
+        "Unlocking again to confirm the data and key survived — touch the same key when prompted."
+    );
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
+        .expect("unlock::run after close failed — the previously enrolled key must still work");
+
+    let recovered =
+        std::fs::read(mountpoint.join("marker.bin")).expect("failed to read back marker file");
+    assert_eq!(
+        recovered, contents,
+        "data must survive a close/unlock cycle on Btrfs"
+    );
+
+    UnlockCleanup::new(mountpoint, name).run();
+}
+
+/// Proves AC #2 directly: `--mixed` mode is unconditional for every Btrfs
+/// volume this tool creates, not size-gated — a volume at ~32 MiB
+/// (`MIN_VOLUME_SIZE_BYTES`, leaving a ~16 MiB post-header payload) must
+/// succeed, the exact case standard-mode Btrfs (~109 MiB floor) would fail.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root, `btrfs-progs`,
+/// and a real FIDO2 security key present, ready to be touched and to enter
+/// its PIN when prompted.
+#[test]
+#[ignore]
+fn create_file_with_btrfs_filesystem_at_a_small_size_succeeds() {
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-btrfs-small");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("volume.img");
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::File {
+        path: path.clone(),
+        // MIN_VOLUME_SIZE_BYTES (32 MiB) leaves a ~16 MiB post-header
+        // payload — comfortably below standard-mode Btrfs's ~109 MiB floor,
+        // so this only succeeds if --mixed is actually taking effect.
+        size: hypogaol::domain::workflows::create::MIN_VOLUME_SIZE_BYTES,
+    };
+
+    println!("Creating a small Btrfs volume — touch the key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Btrfs,
+        false,
+        None,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(
+        result.is_ok(),
+        "create::run failed for a small --mixed Btrfs volume: {result:?}"
+    );
+
+    println!(
+        "Unlocking to confirm the small volume is actually usable — touch the key when prompted."
+    );
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
+        .expect("unlock::run failed");
+    let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
+    assert_readable_and_writable(&mountpoint);
+
+    UnlockCleanup::new(mountpoint, name).run();
+}
+
+/// XFS analog of `resize_grows_a_file_backed_volume_preserving_data_and_keys`
+/// — create small, resize larger, confirm the grow succeeds and prior data
+/// survives, proving `xfs_growfs` (via `with_transient_mount`) actually grew
+/// the filesystem, not just the LUKS mapping.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root, `xfsprogs`, and a
+/// real FIDO2 security key present, ready to be touched and to enter its PIN
+/// when prompted (once for `create`, once for `resize`, once for the final
+/// `unlock`).
+#[test]
+#[ignore]
+fn resize_grows_a_file_backed_xfs_volume() {
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-resize-xfs");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("volume.img");
+
+    let adapter = ExecAdapter::default();
+    // mkfs.xfs refuses any filesystem at or below 300MB ("Filesystem must be
+    // larger than 300MB", confirmed against real mkfs.xfs output) — 400 MiB
+    // leaves a comfortable ~384 MiB post-LUKS2-header payload at create
+    // time, and 700 MiB leaves ~684 MiB after the grow.
+    let initial_size: u64 = 400 * 1024 * 1024;
+    let grown_size: u64 = 700 * 1024 * 1024;
+
+    let target = CreateTarget::File {
+        path: path.clone(),
+        size: initial_size,
+    };
+
+    println!("Creating an XFS volume — touch the key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Xfs,
+        false,
+        None,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    println!("Unlocking to write a marker file — touch the key when prompted.");
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
+        .expect("first unlock::run failed");
+    let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
+
+    let before_contents = vec![0xABu8; 8 * 1024 * 1024];
+    std::fs::write(mountpoint.join("before-resize.bin"), &before_contents)
+        .expect("failed to write pre-resize file");
+
+    println!("Closing the volume via close::run before resizing.");
+    let result = close::run(&path, false, &|_| {}, &adapter, &adapter, &adapter);
+    assert!(result.is_ok(), "close::run failed: {result:?}");
+
+    println!("Resizing the volume — touch the key when prompted (re-authenticates the grow).");
+    let result = resize::run(
+        &path,
+        grown_size,
+        &no_progress,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "resize::run failed: {result:?}");
+
+    println!("Unlocking again to confirm data, key, and new capacity — touch the same key when prompted.");
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
+        .expect("unlock::run after resize failed — the previously enrolled key must still work");
+    let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
+    assert_actually_mounted(&device_node, &mountpoint);
+
+    let recovered = std::fs::read(mountpoint.join("before-resize.bin"))
+        .expect("failed to read back the pre-resize marker file after growing");
+    assert_eq!(
+        recovered, before_contents,
+        "pre-resize data must survive the grow untouched"
+    );
+
+    // A write comfortably larger than the ORIGINAL ~384 MiB payload, but
+    // well within the grown ~684 MiB one, must now succeed — proves
+    // xfs_growfs actually grew the filesystem, not just the LUKS mapping.
+    let after_contents = vec![0xCDu8; 500 * 1024 * 1024];
+    std::fs::write(mountpoint.join("after-resize.bin"), &after_contents).expect(
+        "writing a file larger than the pre-resize capacity failed — filesystem growth didn't take effect",
+    );
+
+    UnlockCleanup::new(mountpoint, name).run();
+}
+
+/// Btrfs analog of `resize_grows_a_file_backed_volume_preserving_data_and_keys`
+/// — create small, resize larger, confirm the grow succeeds and prior data
+/// survives, proving `btrfs filesystem resize max` (via `with_transient_mount`)
+/// actually grew the filesystem, not just the LUKS mapping.
+///
+/// Manual-only (AD-7, `make test-hardware`): requires root, `btrfs-progs`,
+/// and a real FIDO2 security key present, ready to be touched and to enter
+/// its PIN when prompted (once for `create`, once for `resize`, once for the
+/// final `unlock`).
+#[test]
+#[ignore]
+fn resize_grows_a_file_backed_btrfs_volume() {
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-resize-btrfs");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("volume.img");
+
+    let adapter = ExecAdapter::default();
+    // Btrfs's own resize ioctl refuses any resize whose resulting size is
+    // under 256 MiB (confirmed against real hardware, 2026-08-09) — a real,
+    // separate floor from mkfs.btrfs --mixed's much smaller creation-time
+    // minimum, so `initial_size` can stay small (this tool's own
+    // MIN_VOLUME_SIZE_BYTES floor is enough at create time) but `grown_size`
+    // must clear 256 MiB post-header. 320 MiB leaves a ~304 MiB payload,
+    // comfortably above it.
+    let initial_size: u64 = 64 * 1024 * 1024;
+    let grown_size: u64 = 320 * 1024 * 1024;
+
+    let target = CreateTarget::File {
+        path: path.clone(),
+        size: initial_size,
+    };
+
+    println!("Creating a Btrfs volume — touch the key when prompted.");
+    let result = create::run(
+        target,
+        Filesystem::Btrfs,
+        false,
+        None,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    println!("Unlocking to write a marker file — touch the key when prompted.");
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
+        .expect("first unlock::run failed");
+    let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
+
+    let before_contents = vec![0xABu8; 8 * 1024 * 1024];
+    std::fs::write(mountpoint.join("before-resize.bin"), &before_contents)
+        .expect("failed to write pre-resize file");
+
+    println!("Closing the volume via close::run before resizing.");
+    let result = close::run(&path, false, &|_| {}, &adapter, &adapter, &adapter);
+    assert!(result.is_ok(), "close::run failed: {result:?}");
+
+    println!("Resizing the volume — touch the key when prompted (re-authenticates the grow).");
+    let result = resize::run(
+        &path,
+        grown_size,
+        &no_progress,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "resize::run failed: {result:?}");
+
+    println!("Unlocking again to confirm data, key, and new capacity — touch the same key when prompted.");
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
+        .expect("unlock::run after resize failed — the previously enrolled key must still work");
+    let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
+    assert_actually_mounted(&device_node, &mountpoint);
+
+    let recovered = std::fs::read(mountpoint.join("before-resize.bin"))
+        .expect("failed to read back the pre-resize marker file after growing");
+    assert_eq!(
+        recovered, before_contents,
+        "pre-resize data must survive the grow untouched"
+    );
+
+    // A write comfortably larger than the ORIGINAL ~48 MiB payload, but
+    // well within the grown ~304 MiB one, must now succeed — proves btrfs
+    // filesystem resize actually grew the filesystem, not just the LUKS
+    // mapping.
+    let after_contents = vec![0xCDu8; 200 * 1024 * 1024];
+    std::fs::write(mountpoint.join("after-resize.bin"), &after_contents).expect(
+        "writing a file larger than the pre-resize capacity failed — filesystem growth didn't take effect",
+    );
+
+    UnlockCleanup::new(mountpoint, name).run();
+}

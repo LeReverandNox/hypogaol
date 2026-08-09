@@ -88,6 +88,7 @@ fn happy_path_opens_and_mounts_using_the_shared_mapping_name() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "open".to_string(),
             "mount".to_string(),
             "invoking_home_dir".to_string(),
@@ -149,7 +150,12 @@ fn mount_failure_closes_the_just_opened_mapping() {
     assert!(result.is_err(), "expected Err, got {result:?}");
     assert_eq!(
         *log.borrow(),
-        vec!["open".to_string(), "mount".to_string(), "close".to_string()]
+        vec![
+            "check_prerequisites".to_string(),
+            "open".to_string(),
+            "mount".to_string(),
+            "close".to_string()
+        ]
     );
 }
 
@@ -172,7 +178,12 @@ fn read_only_mount_failure_still_closes_the_just_opened_mapping() {
     assert!(result.is_err(), "expected Err, got {result:?}");
     assert_eq!(
         *log.borrow(),
-        vec!["open".to_string(), "mount".to_string(), "close".to_string()]
+        vec![
+            "check_prerequisites".to_string(),
+            "open".to_string(),
+            "mount".to_string(),
+            "close".to_string()
+        ]
     );
 }
 
@@ -457,7 +468,14 @@ fn open_skips_all_hooks_when_skip_hooks_true() {
     let result = unlock::run(&fixture.0, false, true, &|_| {}, &luks, &fido2, &fs);
 
     assert!(result.is_ok(), "expected Ok, got {result:?}");
-    assert_eq!(*log.borrow(), vec!["open".to_string(), "mount".to_string()]);
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "check_prerequisites".to_string(),
+            "open".to_string(),
+            "mount".to_string()
+        ]
+    );
 }
 
 #[test]
@@ -474,5 +492,12 @@ fn open_skips_all_hooks_when_read_only_true_even_if_skip_hooks_false() {
     let result = unlock::run(&fixture.0, true, false, &|_| {}, &luks, &fido2, &fs);
 
     assert!(result.is_ok(), "expected Ok, got {result:?}");
-    assert_eq!(*log.borrow(), vec!["open".to_string(), "mount".to_string()]);
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "check_prerequisites".to_string(),
+            "open".to_string(),
+            "mount".to_string()
+        ]
+    );
 }

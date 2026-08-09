@@ -32,10 +32,14 @@ pub enum DomainError {
     },
 
     #[error(
-        "resolved size {size} bytes for {} is too small for a viable volume",
+        "resolved size {size} bytes for {} is too small for a viable volume (needs at least {minimum} bytes)",
         .path.display()
     )]
-    DeviceTooSmall { path: PathBuf, size: u64 },
+    DeviceTooSmall {
+        path: PathBuf,
+        size: u64,
+        minimum: u64,
+    },
 
     #[error(
         "requested size {requested} bytes is not larger than the current size {current_size} bytes for {} — resize is grow-only",

@@ -208,6 +208,20 @@ fn create_device_help_lists_the_fido2_device_flag() {
 }
 
 #[test]
+fn create_file_help_lists_xfs_and_btrfs_as_filesystem_values() {
+    let help = help_text(&["hypogaol", "create", "file", "--help"]);
+    assert!(help.contains("xfs"));
+    assert!(help.contains("btrfs"));
+}
+
+#[test]
+fn create_device_help_lists_xfs_and_btrfs_as_filesystem_values() {
+    let help = help_text(&["hypogaol", "create", "device", "--help"]);
+    assert!(help.contains("xfs"));
+    assert!(help.contains("btrfs"));
+}
+
+#[test]
 fn create_file_help_lists_label_as_a_flag() {
     let help = help_text(&["hypogaol", "create", "file", "--help"]);
     assert!(help.contains("--label"));

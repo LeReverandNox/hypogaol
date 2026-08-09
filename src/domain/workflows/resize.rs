@@ -17,6 +17,21 @@ use crate::ports::luks_backend::LuksBackend;
 /// succeed regardless of the raw byte count asked for.
 const EXT4_BLOCK_SIZE_BYTES: u64 = 4096;
 
+/// Btrfs's own resize ioctl refuses any resize whose *resulting* filesystem
+/// size is under 256 MiB — confirmed empirically against real hardware
+/// (2026-08-09): `btrfs filesystem resize` itself warns "the new size ... is
+/// < 256MiB, this may be rejected by kernel", then the kernel does reject it
+/// with EINVAL, regardless of the requested target being phrased as `max`
+/// or an explicit absolute size. This is a real, separate floor from
+/// `mkfs.btrfs --mixed`'s own much smaller creation-time minimum (~16 MiB
+/// payload) — mixed mode lets a volume be *created* small, but does not
+/// exempt it from this floor once it's later grown. Expressed in
+/// post-header payload bytes (what the kernel's resize ioctl actually
+/// measures), with a small margin above the literal 256 MiB so
+/// `EXT4_BLOCK_SIZE_BYTES` flooring elsewhere in `grow_open_mapping` can
+/// never land exactly on the boundary.
+const MIN_BTRFS_RESIZE_PAYLOAD_BYTES: u64 = 260 * 1024 * 1024;
+
 /// `fido2` is unused beyond `preflight::check` — kept in the signature only
 /// for AD-4's uniform three-port preflight gate, same as every sibling
 /// workflow.
@@ -40,7 +55,7 @@ pub fn run(
     fido2: &dyn Fido2Backend,
     fs: &dyn FilesystemBackend,
 ) -> Result<(), DomainError> {
-    preflight::check(luks, fido2, fs)?;
+    preflight::check(luks, fido2, fs, None)?;
 
     let name = mapping_name::mapping_name(path)?;
     let device_backed = fs.is_block_device(path)?;
@@ -93,6 +108,12 @@ pub fn run(
     // mapping); placed here so a read failure aborts before the mapping is
     // opened at all.
     let filesystem = luks.read_filesystem(path)?;
+
+    // A second, narrower preflight call: fails fast on a missing xfs/btrfs
+    // toolchain before `luks.open` spends a real FIDO2 touch. Non-mutating
+    // and cheap — "a re-check, not a bypass" (AD-4's Epic-6 amendment; see
+    // Dev Notes "Why resize calls preflight::check twice").
+    preflight::check(luks, fido2, fs, Some(filesystem))?;
 
     let mapper = luks.open(path, &name, false)?;
 
@@ -232,6 +253,25 @@ fn grow_open_mapping(
             path: path.to_path_buf(),
             requested: new_size,
             current_size: live_current_size + header_size,
+        });
+    }
+
+    // Checked here (not earlier, tier-1-style): the exact post-header
+    // payload size — what Btrfs's own resize ioctl actually measures — is
+    // only known once `header_size` is derived above, which itself needs
+    // the mapping open. Checked after the grow-only comparison, so a
+    // genuine shrink/no-op is still reported as `ResizeMustGrow`, not this
+    // — but still before any mutating call below.
+    if filesystem == Filesystem::Btrfs && new_size_as_payload < MIN_BTRFS_RESIZE_PAYLOAD_BYTES {
+        // `size`/`minimum` are both reported on the same basis (post-header
+        // payload bytes) as the comparison just above, not `new_size`'s raw
+        // whole-file/whole-device bytes — otherwise the number shown here
+        // wouldn't match the number the rejection was actually computed
+        // from (review finding, 2026-08-09).
+        return Err(DomainError::DeviceTooSmall {
+            path: path.to_path_buf(),
+            size: new_size_as_payload,
+            minimum: MIN_BTRFS_RESIZE_PAYLOAD_BYTES,
         });
     }
 

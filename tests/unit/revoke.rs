@@ -26,9 +26,10 @@ fn preflight_failure_short_circuits_before_any_port_call() {
         other => panic!("expected DomainError::PreflightFailed, got {other:?}"),
     }
 
-    assert!(
-        log.borrow().is_empty(),
-        "no port call should run before preflight fails"
+    assert_eq!(
+        *log.borrow(),
+        vec!["check_prerequisites".to_string()],
+        "no port call beyond preflight's own check_prerequisites should run before preflight fails"
     );
 }
 

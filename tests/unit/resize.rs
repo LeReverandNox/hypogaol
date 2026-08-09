@@ -51,8 +51,10 @@ fn file_backed_happy_path_runs_every_port_call_once_in_order() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "is_block_device".to_string(),
             "read_filesystem".to_string(),
+            "check_prerequisites".to_string(),
             "open".to_string(),
             "device_capacity".to_string(),
             "filesystem_size".to_string(),
@@ -109,9 +111,11 @@ fn device_backed_happy_path_never_calls_set_backing_file_size() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "is_block_device".to_string(),
             "device_capacity".to_string(),
             "read_filesystem".to_string(),
+            "check_prerequisites".to_string(),
             "open".to_string(),
             "device_capacity".to_string(),
             "filesystem_size".to_string(),
@@ -148,7 +152,10 @@ fn file_backed_true_shrink_is_rejected_by_tier_one_before_any_adapter_call() {
     assert_eq!(current_size, 4096);
     assert_eq!(
         *log.borrow(),
-        vec!["is_block_device".to_string()],
+        vec![
+            "check_prerequisites".to_string(),
+            "is_block_device".to_string()
+        ],
         "a true shrink must be rejected before any adapter call"
     );
 }
@@ -184,8 +191,10 @@ fn file_backed_no_op_same_size_request_is_rejected_by_tier_two() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "is_block_device".to_string(),
             "read_filesystem".to_string(),
+            "check_prerequisites".to_string(),
             "open".to_string(),
             "device_capacity".to_string(),
             "filesystem_size".to_string(),
@@ -245,8 +254,10 @@ fn file_backed_same_size_request_is_rejected_even_with_a_large_header_overhead()
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "is_block_device".to_string(),
             "read_filesystem".to_string(),
+            "check_prerequisites".to_string(),
             "open".to_string(),
             "device_capacity".to_string(),
             "filesystem_size".to_string(),
@@ -303,9 +314,11 @@ fn device_backed_same_size_request_is_rejected_even_with_a_large_header_overhead
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "is_block_device".to_string(),
             "device_capacity".to_string(),
             "read_filesystem".to_string(),
+            "check_prerequisites".to_string(),
             "open".to_string(),
             "device_capacity".to_string(),
             "filesystem_size".to_string(),
@@ -342,8 +355,10 @@ fn file_backed_retry_after_a_partial_failure_completes_instead_of_being_rejected
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "is_block_device".to_string(),
             "read_filesystem".to_string(),
+            "check_prerequisites".to_string(),
             "open".to_string(),
             "device_capacity".to_string(),
             "filesystem_size".to_string(),
@@ -382,7 +397,11 @@ fn device_backed_too_small_partition_rejection_never_calls_open() {
     assert_eq!(capacity, 1024);
     assert_eq!(
         *log.borrow(),
-        vec!["is_block_device".to_string(), "device_capacity".to_string()],
+        vec![
+            "check_prerequisites".to_string(),
+            "is_block_device".to_string(),
+            "device_capacity".to_string()
+        ],
         "too-small-partition rejection must not reach read_filesystem or luks.open"
     );
 }
@@ -425,9 +444,11 @@ fn device_backed_headroom_shrink_is_caught_by_tier_two_and_closes_the_mapping() 
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "is_block_device".to_string(),
             "device_capacity".to_string(),
             "read_filesystem".to_string(),
+            "check_prerequisites".to_string(),
             "open".to_string(),
             "device_capacity".to_string(),
             "filesystem_size".to_string(),
@@ -457,8 +478,10 @@ fn mid_flow_failure_after_a_successful_resize_still_closes_the_mapping() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "is_block_device".to_string(),
             "read_filesystem".to_string(),
+            "check_prerequisites".to_string(),
             "open".to_string(),
             "device_capacity".to_string(),
             "filesystem_size".to_string(),
@@ -501,5 +524,178 @@ fn close_failure_after_a_successful_grow_reports_the_grow_succeeded() {
     assert!(
         message.contains("failed to re-lock afterward"),
         "message should distinguish this from a plain resize failure: {message:?}"
+    );
+}
+
+// Proves resize's two preflight calls fire in the right order with the right
+// arguments: the unconditional first call (AD-4's base rule, `None`), then a
+// second, narrower call using whatever `read_filesystem` actually reported —
+// not a stand-in — same "prove the real value flows through" discipline
+// Stories 6.2/6.3 established for their own capture fields.
+#[test]
+fn resize_calls_check_prerequisites_twice_with_none_then_the_read_filesystem_value() {
+    let luks = FakeLuksBackend::passing().with_read_filesystem(Filesystem::Xfs);
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing()
+        .with_device_capacity(4096)
+        .with_filesystem_size(4096);
+
+    let fixture = RealFixtureFile::create("resize-check-prerequisites-order", &[0u8; 4096]);
+
+    let result = resize::run(&fixture.0, 8192, &no_progress, &luks, &fido2, &fs);
+
+    assert!(result.is_ok(), "expected Ok, got {result:?}");
+    assert_eq!(
+        fs.check_prerequisites_filesystem_calls(),
+        vec![None, Some(Filesystem::Xfs)]
+    );
+}
+
+// Proves a missing xfs toolchain actually aborts resize with PreflightFailed
+// before luks.open ever spends a real FIDO2 touch — the preflight gate is
+// load-bearing, not just logged.
+#[test]
+fn resize_aborts_before_opening_when_preflight_finds_a_missing_toolchain() {
+    let luks = FakeLuksBackend::passing().with_read_filesystem(Filesystem::Xfs);
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::failing(&["mkfs.xfs"]);
+
+    let fixture = RealFixtureFile::create("resize-second-preflight-blocks-open", &[0u8; 4096]);
+
+    let result = resize::run(&fixture.0, 8192, &no_progress, &luks, &fido2, &fs);
+
+    assert!(
+        matches!(result, Err(DomainError::PreflightFailed(_))),
+        "expected PreflightFailed, got {result:?}"
+    );
+    assert_eq!(
+        luks.last_open(),
+        None,
+        "the second preflight call must abort before luks.open is ever reached"
+    );
+}
+
+// Distinct from the test above: there, `FakeFilesystemBackend::failing`
+// makes *every* `check_prerequisites` call fail, so it can't tell "the
+// second, type-specific call is what caught this" apart from "the first,
+// unconditional call already caught it" — a regression that silently turned
+// the second call into a no-op (e.g. `let _ =` instead of `?`) would go
+// undetected. This test makes the first (`None`) call pass and only the
+// second (`Some(Filesystem::Xfs)`) call fail, proving the second call is
+// independently load-bearing (review finding, 2026-08-09 — Task 9's own
+// Completion Notes admitted this gap).
+#[test]
+fn resize_aborts_when_only_the_second_type_specific_preflight_call_finds_a_missing_toolchain() {
+    let luks = FakeLuksBackend::passing().with_read_filesystem(Filesystem::Xfs);
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing()
+        .with_failure_for_filesystem(Some(Filesystem::Xfs), &["mkfs.xfs"]);
+
+    let fixture = RealFixtureFile::create(
+        "resize-second-preflight-call-alone-is-load-bearing",
+        &[0u8; 4096],
+    );
+
+    let result = resize::run(&fixture.0, 8192, &no_progress, &luks, &fido2, &fs);
+
+    assert!(
+        matches!(result, Err(DomainError::PreflightFailed(_))),
+        "expected PreflightFailed, got {result:?}"
+    );
+    assert_eq!(
+        fs.check_prerequisites_filesystem_calls(),
+        vec![None, Some(Filesystem::Xfs)],
+        "both preflight calls must have fired, in order, before the second one's failure aborted resize"
+    );
+    assert_eq!(
+        luks.last_open(),
+        None,
+        "the second preflight call must abort before luks.open is ever reached"
+    );
+}
+
+// Btrfs's own resize ioctl refuses any resize whose resulting size is under
+// 256 MiB (confirmed empirically on real hardware, 2026-08-09) — a genuine
+// grow request (well above the live current size) that's still too small
+// for Btrfs's own kernel floor must be refused before any mutating call,
+// not left to fail deep inside `fs.growfs`.
+#[test]
+fn resize_to_btrfs_below_its_own_kernel_floor_is_refused_before_any_mutating_call() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing()
+        .with_log(log.clone())
+        .with_read_filesystem(Filesystem::Btrfs);
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_device_capacity(4096)
+        .with_filesystem_size(4096);
+
+    let fixture = RealFixtureFile::create("resize-btrfs-below-kernel-floor", &[0u8; 4096]);
+
+    // A real grow (200 MiB is comfortably above the live 4096-byte current
+    // size), but well under Btrfs's own 256 MiB resize floor.
+    let target_size = 200 * 1024 * 1024;
+    let result = resize::run(&fixture.0, target_size, &no_progress, &luks, &fido2, &fs);
+
+    match result {
+        Err(DomainError::DeviceTooSmall {
+            path,
+            size,
+            minimum,
+        }) => {
+            assert_eq!(path, fixture.0);
+            // Header size is 0 in this fixture (device_capacity == the raw
+            // fixture size, mapper_capacity defaults to the same), so
+            // payload bytes == raw bytes here and `size` still equals
+            // `target_size` — but `size`/`minimum` are always reported on
+            // the same (post-header payload) basis the comparison itself
+            // used, not `new_size`'s raw basis (review finding, 2026-08-09).
+            assert_eq!(size, target_size);
+            assert_eq!(minimum, 260 * 1024 * 1024);
+        }
+        other => panic!("expected DomainError::DeviceTooSmall, got {other:?}"),
+    }
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "check_prerequisites".to_string(),
+            "is_block_device".to_string(),
+            "read_filesystem".to_string(),
+            "check_prerequisites".to_string(),
+            "open".to_string(),
+            "device_capacity".to_string(),
+            "filesystem_size".to_string(),
+            "close".to_string(),
+        ],
+        "must be refused before set_backing_file_size/resize/growfs, but still close the mapping it opened"
+    );
+}
+
+// Proves the Btrfs-specific floor doesn't leak onto other filesystems: the
+// exact same target size that Btrfs's own kernel floor refuses must still
+// succeed for ext4, which has no equivalent resize-time minimum.
+#[test]
+fn resize_to_the_same_small_target_still_succeeds_for_ext4() {
+    let luks = FakeLuksBackend::passing().with_read_filesystem(Filesystem::Ext4);
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing()
+        .with_device_capacity(4096)
+        .with_filesystem_size(4096);
+
+    let fixture = RealFixtureFile::create("resize-ext4-below-btrfs-floor", &[0u8; 4096]);
+
+    let result = resize::run(
+        &fixture.0,
+        200 * 1024 * 1024,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(
+        result.is_ok(),
+        "ext4 must not be rejected by Btrfs's own, much higher resize floor: {result:?}"
     );
 }
