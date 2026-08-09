@@ -352,6 +352,31 @@ fn run_cryptsetup_close(name: &str) -> Result<(), DomainError> {
     }
 }
 
+/// Shared by `mount_point_of` (wants an error when nothing is mounted) and
+/// `close_stale_mapping` (wants `None` — "not mounted" is the common case,
+/// not a failure). Only the first `findmnt` line, same embedded-newline
+/// guard as `mount_point_of` used before this was extracted.
+fn find_mount_target(device_node: &Path) -> Result<Option<String>, DomainError> {
+    let output = Command::new("findmnt")
+        .args(["-n", "-o", "TARGET"])
+        .arg(device_node)
+        .output()
+        .map_err(|e| DomainError::AdapterFailure(format!("failed to run findmnt: {e}")))?;
+
+    let target = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_string();
+
+    if output.status.success() && !target.is_empty() {
+        Ok(Some(target))
+    } else {
+        Ok(None)
+    }
+}
+
 fn dump_json_metadata(path: &Path) -> Result<Value, DomainError> {
     let output = Command::new("cryptsetup")
         .arg("luksDump")
@@ -1163,9 +1188,33 @@ impl LuksBackend for ExecAdapter {
         // mapping at all" from a real failure (src/adapters/exec/mod.rs's
         // `umount`): `/dev/mapper/<name>` only exists while device-mapper
         // has an active mapping under that name.
-        if !PathBuf::from(format!("/dev/mapper/{name}")).exists() {
+        let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
+        if !device_node.exists() {
             return Ok(());
         }
+
+        // Story 6.3's scaffold-hooks step is the first place `create`'s own
+        // flow ever mounts a filesystem mid-provisioning. A crash between
+        // that `fs.mount` and its matching `fs.umount` leaves this mapping
+        // busy with a live mount on top of it — `cryptsetup close` alone
+        // would fail "device busy" and permanently jam resume. Unmount
+        // first if `findmnt` reports it mounted at all; "not mounted" is
+        // the overwhelmingly common case here and not itself an error
+        // (review finding, 2026-08-09).
+        if let Some(mountpoint) = find_mount_target(&device_node)? {
+            let umount_output = privileged("umount")
+                .arg(&mountpoint)
+                .output()
+                .map_err(|e| DomainError::AdapterFailure(format!("failed to run umount: {e}")))?;
+            if !umount_output.status.success() {
+                return Err(DomainError::AdapterFailure(format!(
+                    "failed to unmount stale mapping {} at {mountpoint}: {}",
+                    device_node.display(),
+                    String::from_utf8_lossy(&umount_output.stderr).trim()
+                )));
+            }
+        }
+
         run_cryptsetup_close(name)
     }
 
@@ -2157,30 +2206,14 @@ impl FilesystemBackend for ExecAdapter {
     fn mount_point_of(&self, mapper: &MapperHandle) -> Result<PathBuf, DomainError> {
         let device_node = mapper.device_node();
 
-        let findmnt_output = Command::new("findmnt")
-            .args(["-n", "-o", "TARGET"])
-            .arg(&device_node)
-            .output()
-            .map_err(|e| DomainError::AdapterFailure(format!("failed to run findmnt: {e}")))?;
-
-        // Only the first line: a device mounted at more than one target
-        // would otherwise hand `umount` a multi-line argument with an
-        // embedded newline (review finding, 2026-07-26).
-        let mountpoint = String::from_utf8_lossy(&findmnt_output.stdout)
-            .lines()
-            .next()
-            .unwrap_or("")
-            .trim()
-            .to_string();
-
-        if !findmnt_output.status.success() || mountpoint.is_empty() {
-            return Err(DomainError::AdapterFailure(format!(
-                "{} is not currently mounted",
-                device_node.display()
-            )));
-        }
-
-        Ok(PathBuf::from(mountpoint))
+        find_mount_target(&device_node)?
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                DomainError::AdapterFailure(format!(
+                    "{} is not currently mounted",
+                    device_node.display()
+                ))
+            })
     }
 
     fn unmount_bind_hook_destination(&self, dest: &Path) -> Result<(), DomainError> {
