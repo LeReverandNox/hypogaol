@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitStatus;
 
 use crate::domain::errors::DomainError;
-use crate::domain::types::{Filesystem, HookFileMeta, MapperHandle, Pid, Signal};
+use crate::domain::types::{Filesystem, HookFileMeta, LockGuard, MapperHandle, Pid, Signal};
 
 pub trait FilesystemBackend {
     /// `Err` carries one human-readable string per missing/unsupported dependency
@@ -135,4 +135,17 @@ pub trait FilesystemBackend {
     /// FIDO2 selection: by the time `create` calls this, `mount` has already
     /// chowned `mountpoint` to the invoking user.
     fn scaffold_hook_templates(&self, mountpoint: &Path) -> Result<(), DomainError>;
+
+    /// Acquires a non-blocking, exclusive `flock(2)` lock on `path` (AD-20,
+    /// CAP-24) — the second statement of every mutating workflow
+    /// (`create`/`enroll`/`revoke`/`close`/`resize`), immediately after
+    /// `preflight` passes, and per-mapping inside `close_all`/`slam`'s
+    /// existing loops. Returns `DomainError::LockContention` immediately
+    /// (never blocks) if another invocation already holds it. The returned
+    /// `LockGuard` releases the lock when dropped — hold it for the
+    /// remainder of the caller's work; dropping it early re-opens the
+    /// race window this method exists to close. `info` and `unlock`
+    /// (including read-only unlock) never call this — excluded from the
+    /// guard by design (AC #4).
+    fn lock_target(&self, path: &Path) -> Result<LockGuard, DomainError>;
 }
