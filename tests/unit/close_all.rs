@@ -181,10 +181,10 @@ fn preflight_failure_short_circuits_before_list_open_mappings_is_called() {
     let result = close_all::run(false, &|_| {}, &luks, &fido2, &fs);
 
     assert!(matches!(result, Err(DomainError::PreflightFailed(_))));
-    assert!(
-        !log.borrow().contains(&"list_open_mappings".to_string()),
-        "expected no port calls beyond preflight's own check_prerequisites before it fails, log: {:?}",
-        log.borrow()
+    assert_eq!(
+        *log.borrow(),
+        vec!["check_prerequisites".to_string()],
+        "no port call beyond preflight's own check_prerequisites should run before preflight fails"
     );
 }
 
