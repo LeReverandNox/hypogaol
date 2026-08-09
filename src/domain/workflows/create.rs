@@ -71,6 +71,7 @@ pub fn run(
     fs: &dyn FilesystemBackend,
 ) -> Result<(), DomainError> {
     preflight::check(luks, fido2, fs, Some(filesystem))?;
+    let _lock = fs.lock_target(target_path(&target))?;
 
     match target {
         CreateTarget::File { path, size } => {
@@ -200,6 +201,13 @@ pub fn run(
                 fs,
             )
         }
+    }
+}
+
+fn target_path(target: &CreateTarget) -> &Path {
+    match target {
+        CreateTarget::File { path, .. } => path,
+        CreateTarget::Device { path, .. } => path,
     }
 }
 
