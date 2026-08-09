@@ -1,7 +1,8 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::io::{self, Write};
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::fd::{AsRawFd, OwnedFd};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -13,7 +14,8 @@ use crate::domain::errors::DomainError;
 use crate::domain::hooks;
 use crate::domain::mapping_name;
 use crate::domain::types::{
-    Filesystem, HookFileMeta, KeyMetadata, KeyslotInfo, KeyslotRef, MapperHandle, Pid, Signal,
+    Filesystem, HookFileMeta, KeyMetadata, KeyslotInfo, KeyslotRef, LockGuard, MapperHandle, Pid,
+    Signal,
 };
 use crate::ports::fido2_backend::{Fido2Backend, Fido2DeviceSelection};
 use crate::ports::filesystem_backend::FilesystemBackend;
@@ -242,8 +244,6 @@ struct TempKeyFile {
 
 impl TempKeyFile {
     fn create(passphrase: &[u8]) -> Result<Self, String> {
-        use std::os::unix::fs::OpenOptionsExt;
-
         let dir = if Path::new("/dev/shm").is_dir() {
             PathBuf::from("/dev/shm")
         } else {
@@ -1791,7 +1791,6 @@ impl FilesystemBackend for ExecAdapter {
                     )));
                 }
 
-                use std::os::unix::fs::OpenOptionsExt;
                 // Linux's `O_NOFOLLOW` (this project only targets Linux, see
                 // Cargo.toml's dist `targets`) — makes the open itself
                 // atomically refuse a symlink, closing the race window
@@ -2547,6 +2546,35 @@ impl FilesystemBackend for ExecAdapter {
                 pid.0,
                 String::from_utf8_lossy(&output.stderr).trim()
             )))
+        }
+    }
+
+    fn lock_target(&self, path: &Path) -> Result<LockGuard, DomainError> {
+        let target = mapping_name::lock_target_path(path)?;
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_CLOEXEC)
+            .open(&target)
+            .map_err(|e| {
+                DomainError::AdapterFailure(format!(
+                    "failed to open {} for locking: {e}",
+                    target.display()
+                ))
+            })?;
+        let fd: OwnedFd = file.into();
+        let ret = unsafe { libc::flock(fd.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if ret == 0 {
+            Ok(LockGuard(Some(fd)))
+        } else {
+            let err = std::io::Error::last_os_error();
+            if err.raw_os_error() == Some(libc::EWOULDBLOCK) {
+                Err(DomainError::LockContention(path.to_path_buf()))
+            } else {
+                Err(DomainError::AdapterFailure(format!(
+                    "failed to lock {}: {err}",
+                    target.display()
+                )))
+            }
         }
     }
 
