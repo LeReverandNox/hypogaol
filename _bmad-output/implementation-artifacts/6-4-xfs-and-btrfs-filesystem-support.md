@@ -4,7 +4,7 @@ baseline_commit: 25c655d823c4fcd790c70fc82b659a1ff6e50d5a
 
 # Story 6.4: XFS and Btrfs Filesystem Support
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
