@@ -221,7 +221,9 @@ fn bootstrap_and_provision(
         Ok(()) => luks.close(&mapper),
         Err(err) => Err(match luks.close(&mapper) {
             Ok(()) => err,
-            Err(close_err) => err.with_rollback_cleanup_failure(close_err),
+            Err(close_err) => {
+                err.with_rollback_cleanup_failure("re-lock the LUKS2 mapping", close_err)
+            }
         }),
     }
 }
@@ -268,7 +270,8 @@ fn finish_provisioning(
             Err(umount_err) => {
                 return Err(match scaffold_result {
                     Ok(()) => umount_err,
-                    Err(scaffold_err) => scaffold_err.with_rollback_cleanup_failure(umount_err),
+                    Err(scaffold_err) => scaffold_err
+                        .with_rollback_cleanup_failure("unmount the filesystem", umount_err),
                 });
             }
         }
