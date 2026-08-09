@@ -277,6 +277,26 @@ fn translates_adapter_failure_umount_failure_is_not_swallowed_by_the_unlock_moun
     );
 }
 
+// `with_transient_mount`'s own error messages deliberately avoid the bare
+// "mount" substring standing alone, but "for a filesystem operation" also
+// doesn't contain "mount"/"mkfs" as a whole word — without a dedicated
+// branch, this would fall through to the generic mount/mkfs bucket's
+// unlock-flavored framing, which is wrong: this failure only ever
+// originates from resize's growfs/filesystem_size, never unlock.
+#[test]
+fn translates_adapter_failure_transient_mount_failure_is_not_swallowed_by_the_unlock_mount_message()
+{
+    let err = DomainError::AdapterFailure(
+        "failed to prepare /dev/mapper/foo for a filesystem operation: some stderr".to_string(),
+    );
+    let message = translate(&err);
+    assert_no_jargon(&message);
+    assert!(
+        !message.contains("Your volume unlocked"),
+        "resize's own transient-mount failure was misclassified as unlock's mount-failure message: {message:?}"
+    );
+}
+
 #[test]
 fn translates_adapter_failure_findmnt_failure_is_not_swallowed_by_the_unlock_mount_message() {
     let err = DomainError::AdapterFailure("failed to run findmnt: some io error".to_string());

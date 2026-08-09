@@ -370,6 +370,19 @@ fn translate_adapter_failure(inner: &str) -> String {
             .to_string();
     }
 
+    // `resize`'s own `with_transient_mount` failures (Xfs/Btrfs's
+    // `growfs`/`filesystem_size`, which need a live mount to run
+    // `xfs_growfs`/`xfs_info`/`btrfs filesystem resize`/`usage`) — checked
+    // before the generic `mount`/`mkfs` bucket below since these messages
+    // deliberately avoid the bare "mount"/"umount" substrings, but would
+    // otherwise fall through to that bucket's unlock-flavored framing, which
+    // is wrong here: these failures only ever originate from `resize`, never
+    // `unlock` (marker-bleed guard).
+    if inner.contains("for a filesystem operation") {
+        return "Hypogaol couldn't access this volume's filesystem to check or grow it."
+            .to_string();
+    }
+
     // Mount/filesystem failures (`mkfs`, `mount`, `chmod`, mount-point
     // create/remove).
     if inner.contains("mount") || inner.contains("mkfs") {
