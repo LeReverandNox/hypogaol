@@ -50,6 +50,28 @@ fn lock_target_path_of_a_nonexistent_path_returns_its_parents_canonical_path() {
     assert_eq!(result.unwrap(), expected_parent);
 }
 
+// Regression test for a bug found post-review (2026-08-10): a real
+// `hypogaol create file --size 64M volume.img` invocation failed outright
+// with a misleading "couldn't find volume.img" error, even though the path
+// was perfectly valid. Root cause: `Path::parent()` on a bare relative
+// filename (no directory component at all) returns `Some("")` — the empty
+// path — not `None`, so a naive `path.parent().unwrap_or_else(|| Path::new("."))`
+// never reaches its own "." fallback, and `canonicalize("")` fails with
+// ENOENT. Every other test in this file uses an absolute path (via
+// `std::env::temp_dir()`), which never exercises this branch.
+#[test]
+fn lock_target_path_of_a_bare_relative_filename_falls_back_to_the_current_directory() {
+    let missing = std::path::PathBuf::from(
+        "hypogaol-unit-test-lock-target-path-bare-relative-filename-does-not-exist",
+    );
+
+    let result = lock_target_path(&missing);
+
+    let expected_parent =
+        std::fs::canonicalize(".").expect("current directory should canonicalize");
+    assert_eq!(result.unwrap(), expected_parent);
+}
+
 #[test]
 fn lock_target_path_of_a_path_whose_parent_also_does_not_exist_returns_an_adapter_failure() {
     let missing = std::env::temp_dir()

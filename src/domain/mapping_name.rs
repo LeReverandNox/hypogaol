@@ -59,7 +59,17 @@ pub fn lock_target_path(path: &Path) -> Result<PathBuf, DomainError> {
     if let Ok(canonical) = std::fs::canonicalize(path) {
         return Ok(canonical);
     }
-    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    // `Path::parent()` on a bare relative filename (e.g. "volume.img", no
+    // directory component) returns `Some("")` — the empty path — not `None`,
+    // so `unwrap_or_else` alone never reaches the "." fallback and
+    // `canonicalize("")` fails with ENOENT (bug found post-review,
+    // 2026-08-10: `hypogaol create file --size 64M volume.img` failed with a
+    // misleading "couldn't find volume.img" error on a perfectly valid,
+    // brand-new relative path).
+    let parent = match path.parent() {
+        Some(parent) if !parent.as_os_str().is_empty() => parent,
+        _ => Path::new("."),
+    };
     std::fs::canonicalize(parent).map_err(|e| {
         DomainError::AdapterFailure(format!(
             "failed to canonicalize {} or its parent directory: {e}",
