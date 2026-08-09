@@ -43,11 +43,13 @@ fn closes_every_discovered_mapping_using_the_full_close_sequence() {
         vec![
             "check_prerequisites".to_string(),
             "list_open_mappings".to_string(),
+            "lock_target".to_string(),
             "mount_point_of".to_string(),
             "path_exists".to_string(),
             "path_exists".to_string(),
             "umount".to_string(),
             "close".to_string(),
+            "lock_target".to_string(),
             "mount_point_of".to_string(),
             "path_exists".to_string(),
             "path_exists".to_string(),
@@ -214,8 +216,10 @@ fn skip_hooks_true_skips_hooks_for_every_mapping_in_the_batch() {
         vec![
             "check_prerequisites".to_string(),
             "list_open_mappings".to_string(),
+            "lock_target".to_string(),
             "umount".to_string(),
             "close".to_string(),
+            "lock_target".to_string(),
             "umount".to_string(),
             "close".to_string(),
         ]
@@ -240,5 +244,60 @@ fn list_open_mappings_failure_propagates_as_close_alls_own_err_distinct_from_a_p
             "check_prerequisites".to_string(),
             "list_open_mappings".to_string()
         ]
+    );
+}
+
+#[test]
+fn lock_contention_on_every_mapping_reports_each_mappings_own_failure_without_stopping_the_batch() {
+    let log = new_call_log();
+    let mapper_a = mapper("vault-aaaa", "/volume/a.img");
+    let mapper_b = mapper("vault-bbbb", "/volume/b.img");
+
+    let luks = FakeLuksBackend::passing()
+        .with_log(log.clone())
+        .with_open_mappings(vec![mapper_a.clone(), mapper_b.clone()]);
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_lock_contention();
+
+    let results = close_all::run(false, &|_| {}, &luks, &fido2, &fs).expect("expected Ok");
+
+    assert_eq!(results.len(), 2);
+    assert!(
+        results
+            .iter()
+            .all(|(_, r)| matches!(r, Err(DomainError::LockContention(_)))),
+        "expected every mapping to report its own LockContention, got {results:?}"
+    );
+    assert_eq!(
+        log.borrow()
+            .iter()
+            .filter(|c| *c == "list_open_mappings")
+            .count(),
+        1,
+        "discovery itself must run exactly once, unaffected by per-mapping lock contention"
+    );
+}
+
+#[test]
+fn acquires_one_lock_per_mapping_using_each_mappings_own_source_path() {
+    let log = new_call_log();
+    let mapper_a = mapper("vault-aaaa", "/volume/a.img");
+    let mapper_b = mapper("vault-bbbb", "/volume/b.img");
+
+    let luks = FakeLuksBackend::passing()
+        .with_log(log.clone())
+        .with_open_mappings(vec![mapper_a.clone(), mapper_b.clone()]);
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing().with_log(log.clone());
+
+    let results = close_all::run(false, &|_| {}, &luks, &fido2, &fs).expect("expected Ok");
+
+    assert!(results.iter().all(|(_, r)| r.is_ok()));
+    assert_eq!(
+        fs.lock_target_calls(),
+        vec![mapper_a.source_path.clone(), mapper_b.source_path.clone()],
+        "expected one lock per mapping, using that mapping's own source_path, not one shared lock for the batch"
     );
 }
