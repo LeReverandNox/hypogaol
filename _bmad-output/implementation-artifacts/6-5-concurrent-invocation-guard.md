@@ -4,7 +4,7 @@ baseline_commit: 3f630dbf17189f62150bcb11f8aea83e5553f208
 
 # Story 6.5: Concurrent-Invocation Guard
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -24,11 +24,11 @@ so that I can never accidentally corrupt state or bypass a safety guard like the
 
 ## Tasks / Subtasks
 
-- [ ] **Task 0: Read every file this story touches before changing anything** (AC: all)
+- [x] **Task 0: Read every file this story touches before changing anything** (AC: all)
   - Read in full: `src/domain/types.rs` (`Filesystem`, `MapperHandle` — note `MapperHandle.source_path` is already `pub`, the per-mapping lock target for `close_all`/`slam`), `src/domain/errors.rs` (full `DomainError` enum — exhaustively matched by `ux::translate`, so a new variant fails compilation everywhere it isn't handled), `src/domain/mapping_name.rs` (full file — `mapping_name`'s existing canonicalize-or-fail pattern, the direct sibling this story's new helper sits next to), `src/domain/preflight.rs` (confirm `check`'s signature — unchanged by this story, already takes `Option<Filesystem>` from Story 6.4), `src/ports/filesystem_backend.rs` (full trait, 14 methods today — note the doc-comment style to mirror for the 15th), `src/adapters/exec/mod.rs` — specifically `privileged` (~line 54), the `FilesystemBackend impl` block starting ~line 1690 and its `check_prerequisites` (~line 1705), and the file's existing `use std::os::unix::fs::{MetadataExt, PermissionsExt}` import (no `std::os::fd`/`OpenOptionsExt` imports exist yet — this story adds them), `src/domain/workflows/create.rs` (full file — `run`'s single `preflight::check` call and the `CreateTarget` match consuming `target` by value), `src/domain/workflows/enroll.rs`, `revoke.rs`, `close.rs` (full file — note `close_mapping` is `pub(crate)`, shared by `close::run` and `close_all::run`), `close_all.rs`, `resize.rs` (full file — the **two** `preflight::check` calls and exactly where the first one sits relative to `mapping_name::mapping_name`), `slam.rs` (full file — `slam_mapping` is private, used only by `slam::run`, structurally parallel to `close_mapping` but never shared with `close_all`), `unlock.rs`/`info.rs` (confirm neither needs any change — AC #4), `src/cli/main.rs` (confirm its own direct `preflight::check(&adapter, &adapter, &adapter, None)` calls in every `run_*` function are a *separate*, CLI-level pre-check that never calls into `domain::workflows::*` — the lock belongs only inside the `domain` layer, never added at the CLI level), `src/cli/ux.rs` (`translate`'s top-level `match` on lines ~19-100 — an exhaustive match over `DomainError`, the precedent for adding a new arm; distinct from `translate_adapter_failure`'s substring-bucket chain, which only applies to the `AdapterFailure` variant and is *not* where this story's new error goes), `tests/unit/fakes.rs` (`FakeFilesystemBackend`'s full field list, `passing()`/`failing()` constructors, `with_failure_at`/`fail_if` convention, and the `check_prerequisites_filesystem_calls`/`with_failure_for_filesystem` pair added by Story 6.4 — the direct precedent for this story's own per-argument call-capture and selective-failure fields), `tests/unit/workflows.rs` (all 6 `*_stops_at_preflight_before_touching_any_port`/`*_before_reaching_its_own_todo` tests — understand why they still pass unmodified after this story, see Dev Notes), `Cargo.toml`/`Cargo.lock` (confirm `libc 0.2.189` is present as a transitive dependency today, pulled in via `getrandom` — promoting it to a direct dependency adds no new crate to the dependency tree).
   - No spike needed — AD-20 fully specifies the mechanism (`flock(2)`, `LOCK_EX | LOCK_NB`, `O_CLOEXEC`, canonicalize-with-parent-fallback). The concrete Rust-level design gap AD-20 leaves open — **how a single, object-safe `FilesystemBackend` trait method returns something that is a real held OS lock in production but a harmless no-op in the fake** — is resolved below in Dev Notes ("Load-Bearing Design Decision: `LockGuard`'s shape"). Read that section before starting Task 2.
 
-- [ ] **Task 1: Add `DomainError::LockContention`** (AC: #1, #2)
+- [x] **Task 1: Add `DomainError::LockContention`** (AC: #1, #2)
   - `src/domain/errors.rs`: add a new variant, following this enum's existing `#[error(...)]` style:
     ```rust
     #[error("another operation is already in progress on {}", .0.display())]
@@ -36,7 +36,7 @@ so that I can never accidentally corrupt state or bypass a safety guard like the
     ```
     Placement: anywhere in the enum (order is not semantically significant — `PreflightFailed`/`AdapterFailure` are the nearest thematic neighbors). No new fields needed on any existing variant.
 
-- [ ] **Task 2: Add `LockGuard` to `domain::types`** (AC: #2, #5)
+- [x] **Task 2: Add `LockGuard` to `domain::types`** (AC: #2, #5)
   - `src/domain/types.rs`: add a new struct, publicly holding an `Option<std::os::fd::OwnedFd>` — **the field must be `pub`, not private or `pub(crate)`**: `tests/unit/*.rs` compiles as a separate integration-test crate against the `hypogaol` lib (confirmed via `tests/unit/main.rs`'s `mod` declarations and `tests/unit/fakes.rs`'s `use hypogaol::domain::types::{...}`), so `FakeFilesystemBackend::lock_target` — which lives in that separate crate — must be able to construct `LockGuard(None)` directly, the same way it already constructs other `domain::types` values by field access (`MapperHandle { name, source_path }`'s fields are `pub` for the same reason).
     ```rust
     /// Held for the remainder of a mutating workflow's execution (AD-20).
@@ -47,7 +47,7 @@ so that I can never accidentally corrupt state or bypass a safety guard like the
     pub struct LockGuard(pub Option<std::os::fd::OwnedFd>);
     ```
 
-- [ ] **Task 3: Add `lock_target_path` to `domain::mapping_name`** (AC: #2)
+- [x] **Task 3: Add `lock_target_path` to `domain::mapping_name`** (AC: #2)
   - `src/domain/mapping_name.rs`: add a new `pub` function, alongside (not replacing) `mapping_name` — AD-20 explicitly places this "in `domain`, not reimplemented separately" in `adapters::exec`, as a sibling to the existing canonicalize helper:
     ```rust
     /// Resolves `path` to an absolute, canonical form for `lock_target`'s
@@ -78,7 +78,7 @@ so that I can never accidentally corrupt state or bypass a safety guard like the
     ```
     Needs `use std::path::PathBuf;` added to this file's existing `use std::path::Path;` import.
 
-- [ ] **Task 4: Add `lock_target` to the `FilesystemBackend` trait** (AC: #2)
+- [x] **Task 4: Add `lock_target` to the `FilesystemBackend` trait** (AC: #2)
   - `src/ports/filesystem_backend.rs`: add a 15th trait method, mirroring the existing doc-comment style (e.g. `scaffold_hook_templates`'s, the most recently added):
     ```rust
     /// Acquires a non-blocking, exclusive `flock(2)` lock on `path` (AD-20,
@@ -96,7 +96,7 @@ so that I can never accidentally corrupt state or bypass a safety guard like the
     ```
     Add `LockGuard` to this file's existing `use crate::domain::types::{Filesystem, HookFileMeta, MapperHandle, Pid, Signal};` import line.
 
-- [ ] **Task 5: Implement `lock_target` in the real `ExecAdapter`** (AC: #2, #5)
+- [x] **Task 5: Implement `lock_target` in the real `ExecAdapter`** (AC: #2, #5)
   - `src/adapters/exec/mod.rs`, inside the `FilesystemBackend for ExecAdapter` impl block (near `check_prerequisites`, ~line 1705):
     ```rust
     fn lock_target(&self, path: &Path) -> Result<LockGuard, DomainError> {
@@ -131,7 +131,7 @@ so that I can never accidentally corrupt state or bypass a safety guard like the
     New imports needed at the top of `src/adapters/exec/mod.rs`: `std::os::fd::{AsRawFd, OwnedFd}` and `std::os::unix::fs::OpenOptionsExt` (for `.custom_flags`) — add alongside the existing `use std::os::unix::fs::{MetadataExt, PermissionsExt};` line. `O_CLOEXEC` on the open call is required, not optional (AD-20 states this explicitly) — a locking fd must never leak into a spawned `cryptsetup`/`mkfs`/etc. subprocess, since an inherited fd in a child process would keep the lock held even after the parent's `LockGuard` drops.
   - `Cargo.toml`: add `libc = "0.2"` to `[dependencies]`, alongside the existing entries (matches the version already pinned transitively in `Cargo.lock` via `getrandom` — `cargo build` should not need to change `Cargo.lock`'s resolved `libc` version, only add it as a direct dependency edge; verify this with `cargo tree -i libc` before and after).
 
-- [ ] **Task 6: Wire the lock into `create`, `enroll`, `revoke`, `close`, `resize`** (AC: #1, #2)
+- [x] **Task 6: Wire the lock into `create`, `enroll`, `revoke`, `close`, `resize`** (AC: #1, #2)
   - `src/domain/workflows/create.rs`: `target: CreateTarget` is consumed by value in the `match target { ... }` block, so the lock target path must be read from it *before* that match. Add a small private helper (both `CreateTarget` variants have a `path` field):
     ```rust
     fn target_path(target: &CreateTarget) -> &Path {
@@ -151,7 +151,7 @@ so that I can never accidentally corrupt state or bypass a safety guard like the
   - `src/domain/workflows/close.rs`: same position in `close::run`, right after `preflight::check(luks, fido2, fs, None)?;`, before `let name = mapping_name::mapping_name(path)?;`: `let _lock = fs.lock_target(path)?;`. **Do not** add a lock call inside `close_mapping` itself — `close_mapping` is also called per-mapping by `close_all::run` (Task 7), which needs its own, independently-scoped lock acquisition per iteration; locking inside `close_mapping` would either double-lock (if `close_all` also locks) or make `close::run`'s own single-target lock indistinguishable from `close_all`'s per-mapping one.
   - `src/domain/workflows/resize.rs`: right after the **first** `preflight::check(luks, fido2, fs, None)?;` (line 58 in the baseline — the unconditional one, still the literal first statement, unchanged), before `let name = mapping_name::mapping_name(path)?;` (line 60): `let _lock = fs.lock_target(path)?;`. The **second** `preflight::check(luks, fido2, fs, Some(filesystem))?;` (line 116, after `read_filesystem`) is unaffected — it stays exactly where it is; AC #2 only requires the lock to be acquired "immediately after preflight passes," and resize's Dev Notes precedent (Story 6.4) already established that the *first* preflight call is the one satisfying `resize_run_stops_at_preflight_before_touching_any_port`'s "first statement" invariant, so the lock's natural position is immediately after that first call, not the second.
 
-- [ ] **Task 7: Wire per-mapping locking into `close_all` and `slam`** (AC: #3)
+- [x] **Task 7: Wire per-mapping locking into `close_all` and `slam`** (AC: #3)
   - `src/domain/workflows/close_all.rs`: wrap each mapping's `close_mapping` call in its own lock acquisition, scoped to that single `.map()` iteration — the guard is a local binding inside the closure, so it drops (releasing the lock) when the closure body finishes, before the next mapping is processed:
     ```rust
     Ok(mappings
@@ -181,7 +181,7 @@ so that I can never accidentally corrupt state or bypass a safety guard like the
     ```
   - `unlock.rs`/`info.rs`: **no change** — confirms AC #4 structurally, not just by omission.
 
-- [ ] **Task 8: `ux::translate` — add the `LockContention` arm** (AC: #1)
+- [x] **Task 8: `ux::translate` — add the `LockContention` arm** (AC: #1)
   - `src/cli/ux.rs`: add a new arm to `translate`'s top-level `match` (not `translate_adapter_failure` — `LockContention` is its own `DomainError` variant, not a substring-matched `AdapterFailure`, so it carries no marker-bleed risk and needs no substring guard). Placement anywhere in the match (order doesn't matter here since it's a distinct variant, not a string-substring check):
     ```rust
     DomainError::LockContention(path) => format!(
@@ -191,7 +191,7 @@ so that I can never accidentally corrupt state or bypass a safety guard like the
     ```
     This satisfies AC #1's literal "another operation is already in progress" wording. The match is exhaustive by construction (this module's own doc comment says so) — omitting this arm fails compilation everywhere `translate` is called, which is how Task 1's new variant gets caught if forgotten.
 
-- [ ] **Task 9: Extend `FakeFilesystemBackend` for `lock_target`** (AC: all — needed by every new unit test)
+- [x] **Task 9: Extend `FakeFilesystemBackend` for `lock_target`** (AC: all — needed by every new unit test)
   - `tests/unit/fakes.rs`: add `lock_target` to the `FilesystemBackend for FakeFilesystemBackend` impl, following the existing `check_prerequisites`/`fail_if` conventions:
     ```rust
     fn lock_target(&self, path: &Path) -> Result<LockGuard, DomainError> {
@@ -226,17 +226,17 @@ so that I can never accidentally corrupt state or bypass a safety guard like the
     ```
     `LockGuard` needs importing into `tests/unit/fakes.rs`'s existing `use hypogaol::domain::types::{...}` block.
 
-- [ ] **Task 10: Unit tests proving the lock is acquired at the right position for each single-target workflow** (AC: #1, #2)
+- [x] **Task 10: Unit tests proving the lock is acquired at the right position for each single-target workflow** (AC: #1, #2)
   - `tests/unit/workflows.rs` (or each workflow's own test file if it has one — check Task 0's read for where `create`/`enroll`/`revoke`/`close`/`resize`-specific tests currently live; `create.rs`/`resize.rs` exist under `tests/unit/`, so prefer adding there over the shared `workflows.rs` file where a dedicated file exists): for each of `create`, `enroll`, `revoke`, `close`, `resize`, add a test asserting `fs.lock_target_calls() == vec![<expected path>]` after a successful run, proving the real target path (not a stand-in) was passed.
   - For each of the same five, add a lock-contention test: `FakeFilesystemBackend::passing().with_lock_contention()`, assert the workflow returns `Err(DomainError::LockContention(_))`, and assert no *mutating* `luks`/`fido2` call happened first (e.g. `luks.open`/`luks.bootstrap_format_and_open`/`fido2.enroll_fido2_key` never appear in the shared `CallLog`) — proving the lock genuinely gates the workflow's real work, not just something logged alongside it. Mirrors the existing `*_stops_at_preflight_before_touching_any_port` tests' shape (`tests/unit/workflows.rs` lines ~59-110) but for the lock instead of preflight.
   - For `resize` specifically, add one test proving the lock sits between the two `preflight::check` calls in the actual execution order: configure `FakeLuksBackend::passing().with_read_filesystem(Filesystem::Xfs)`, run to completion, assert `fs.check_prerequisites_filesystem_calls() == vec![None, Some(Filesystem::Xfs)]` (Story 6.4's existing assertion shape) **and** `fs.lock_target_calls() == vec![<path>]`, with the `CallLog` showing `lock_target` appearing after the first `check_prerequisites` and before `read_filesystem`/the second `check_prerequisites` — proving the lock is genuinely the second statement, not just eventually called somewhere.
 
-- [ ] **Task 11: Unit tests proving per-mapping locking for `close_all`/`slam`** (AC: #3)
+- [x] **Task 11: Unit tests proving per-mapping locking for `close_all`/`slam`** (AC: #3)
   - `tests/unit/close_all.rs`: configure `FakeLuksBackend` with 2+ open mappings (check this file's existing multi-mapping test, if any, for the setup pattern — likely already exists for AC #2's per-mapping fault tolerance from Story 4.5); make `FakeFilesystemBackend::passing().with_lock_contention()` **not** apply to all mappings uniformly — since `with_lock_contention()` as specced above is all-or-nothing, this test needs `with_lock_contention()` unconditionally (contention on *every* mapping) to prove each mapping's own result carries its own `LockContention` error (not one shared failure that stops the batch): assert the returned `CloseAllResults` has one `Err(DomainError::LockContention(_))` entry per mapping, **and** that `luks.list_open_mappings` was still called exactly once (discovery itself is unaffected) — proving the loop still visits every mapping even though every one fails to lock.
   - Add a second test with `FakeFilesystemBackend::passing()` (no contention) and 2+ mappings: assert `fs.lock_target_calls().len()` equals the number of mappings, each called with that mapping's own `source_path` — proving one lock per mapping, not one shared lock for the batch (the literal AC #3 assertion).
   - `tests/unit/slam.rs`: mirror both tests above for `slam::run`/`slam_mapping`.
 
-- [ ] **Task 12: A real, hardware-independent regression test for the actual `flock` behavior** (AC: #2, #5 — the only task in this story that exercises real OS-level locking, not a fake)
+- [x] **Task 12: A real, hardware-independent regression test for the actual `flock` behavior** (AC: #2, #5 — the only task in this story that exercises real OS-level locking, not a fake)
   - This does **not** need FIDO2 hardware, `sudo`, or a real LUKS volume — `flock(2)` semantics apply to any regular file, and two independent `open()` calls against the same path within a single test process behave exactly like two separate processes for locking purposes (a lock is associated with the *open file description*, not the process). Add a test in `tests/unit/` (a new small module, e.g. `tests/unit/lock_target.rs`, registered in `tests/unit/main.rs`'s `mod` list) that:
     1. Constructs a real `hypogaol::adapters::exec::ExecAdapter::default()` (same constructor `tests/hardware/main.rs` already uses).
     2. Creates a real temp file (e.g. via `std::env::temp_dir()` plus a unique-enough name, or check if this project already has a temp-dir test helper elsewhere in `tests/unit/` to reuse).
@@ -245,7 +245,7 @@ so that I can never accidentally corrupt state or bypass a safety guard like the
     5. Drops the first `LockGuard` explicitly (`drop(first_guard)`), then calls `adapter.lock_target(&path)` a third time — asserts `Ok(_)`, proving the lock is genuinely released on drop (AC #5's "no stale-lock state" behavior, exercised directly rather than only asserted by architecture text).
   - This test needs no `#[ignore]` — unlike the hardware suite, it has no external dependency (no `cryptsetup`, no FIDO2, no `sudo`), so it should run in the default `make test`/`cargo test` suite alongside every other unit test.
 
-- [ ] **Task 13: Full regression pass**
+- [x] **Task 13: Full regression pass**
   - `cargo build` succeeds. `make test` passes with all prior tests green (baseline **235 total: 17 lib + 218 `tests/unit`**, per Story 6.4's Completion Notes, verified fresh against this story's own `baseline_commit` — not from memory) plus this story's new tests. **Every existing test that shares a `CallLog` across `create`/`enroll`/`revoke`/`close`/`close_all`/`resize`/`slam`'s fakes and asserts an exact call sequence (or `log.borrow().is_empty()`) will need `"lock_target"` inserted at the correct position** — this is the same class of ripple Story 6.4's `check_prerequisites` logging change caused (54 assertions across 9 files that time). `unlock.rs`/`info.rs` tests are unaffected (no `lock_target` call added there). Fix every compiler/assertion failure the real `cargo test` run surfaces; do not trust this task list's own file enumeration as exhaustive — same discipline Story 6.4's Dev Notes documents for its own signature-ripple.
   - `cargo fmt --check` and `cargo clippy --all-targets` both clean. This story adds **no new parameters to any public workflow function** (`create::run`/`enroll::run`/`revoke::run`/`close::run`/`resize::run`/`close_all::run`/`slam::run` all keep their existing signatures — only their internal bodies gain a `fs.lock_target(...)` call), so the 5 pre-existing `too_many_arguments` warnings Story 6.4 confirmed (`run_create`/`create::run`/`bootstrap_and_provision`/`finish_provisioning`/`grow_open_mapping`) should be unchanged; if a new clippy warning appears anywhere, note it explicitly in Completion Notes rather than silently suppressing it.
   - `cargo tree -i libc` before/after Task 5's `Cargo.toml` change: confirm `libc`'s resolved version in `Cargo.lock` doesn't change (it's already present transitively at `0.2.189` via `getrandom`) — only its dependency-graph edges change (a new direct edge from the `hypogaol` package itself). If it does change version, note why in Completion Notes.
@@ -306,8 +306,52 @@ _To be filled in during code review._
 
 ### Agent Model Used
 
+Claude Sonnet 5 (claude-sonnet-5)
+
 ### Debug Log References
+
+None — no HALT conditions encountered; all tasks completed straight through.
 
 ### Completion Notes List
 
+- `LockGuard` (Task 2) derives `Debug` in addition to the story's specified `pub struct LockGuard(pub Option<std::os::fd::OwnedFd>);` — `OwnedFd` implements `Debug`, and `tests/unit/lock_target.rs`'s real-`flock` test needed to format `Result<LockGuard, DomainError>` with `{:?}` on assertion failure. Not called for explicitly in the story's Task 2 code block but consistent with every other `domain::types` struct's own `#[derive(Debug, ...)]` convention, and required for the crate to compile once that test existed.
+- `src/adapters/exec/mod.rs` had two pre-existing local `use std::os::unix::fs::OpenOptionsExt;` statements (inside `TempKeyFile::create` and `set_backing_file_size`) that became redundant once `OpenOptionsExt` was added to the file's top-level `use std::os::unix::fs::{...}` import (Task 5) — both removed to keep `cargo build`/`cargo clippy` free of new `unused_imports` warnings. Not itself part of any task's literal instructions, but load-bearing for Task 13's "no new clippy warnings" gate.
+- Task 13's ripple: 43 pre-existing tests across `create.rs` (24), `close.rs` (5), `close_all.rs` (2), `resize.rs` (11), `enroll.rs` (1) needed `"lock_target"` inserted at the correct position in their exact-`CallLog`-sequence assertions — confirmed via real `cargo test` failure output at every step (each mismatch's `left`/`right` diff was read directly, never inferred), not from this story's own file enumeration alone. `revoke.rs` needed no changes: its tests never attach `FakeFilesystemBackend`'s log to the shared `CallLog`, so `fs.check_prerequisites`/`fs.lock_target` calls are invisible to those assertions. `slam.rs`/most of `close_all.rs`'s existing tests needed no changes either — they assert call *counts* (`.filter(|c| *c == "...").count()`) rather than exact sequences, which are insensitive to `lock_target`'s insertion.
+- Baseline re-verified fresh against this story's own `baseline_commit` (3f630db) via `make test`: **235 total (17 lib + 218 tests/unit)** — confirmed, not from memory, matching Story 6.4's own Completion Notes claim exactly. Final count after this story: **256 total (17 lib + 239 tests/unit)**, +21 new tests (`create.rs` +2, `enroll.rs` +2, `revoke.rs` +2, `close.rs` +2, `resize.rs` +3, `close_all.rs` +2, `slam.rs` +2, `lock_target.rs` +1 new file, `mapping_name.rs` +3).
+- `cargo tree -i libc` before/after: `libc 0.2.189` unchanged (already present transitively via `getrandom`) — promoting it to a direct dependency in `Cargo.toml` added only a new direct edge from the `hypogaol` package itself, no version change in `Cargo.lock`.
+- `cargo fmt --check` and `cargo clippy --all-targets` both clean. Clippy reports the same 5 pre-existing `too_many_arguments` warnings Story 6.4 confirmed (`run_create`/`create::run`/`bootstrap_and_provision`/`finish_provisioning`/`grow_open_mapping`), unchanged — no new warnings anywhere, confirmed by direct `cargo clippy --all-targets` output.
+- Task 12's real, hardware-independent `flock` regression test (`tests/unit/lock_target.rs`) passes: constructs a real `ExecAdapter`, locks a real temp file, proves a second `lock_target` call on the same path while the first `LockGuard` is still held returns `DomainError::LockContention`, then proves dropping the first guard releases the lock (a third call then succeeds) — the primary correctness mechanism for this story, needing no hardware.
+- Hardware verification: `cryptsetup`/`fido2-token`/`systemd-cryptenroll` and `/dev/hidraw*` devices are present in this environment, but this automated session has no interactive `sudo` prompt and cannot perform a physical FIDO2 key touch — consistent with this project's standing convention (Stories 4.3, 5.1, 5.2, 6.1, 6.2, 6.3, 6.4), the literal two-real-OS-process scenario in Task 13's last paragraph (two concurrent `revoke` invocations against a real volume with 2 enrolled keys) was not run in this session. Flagging as a retrospective action item for `LeReverandNox` to verify on real hardware: run two concurrent `revoke` invocations (or `cryptsetup`-backed equivalent) against a volume with 2 valid FIDO2 keyslots and confirm exactly one succeeds while the other reports the "another operation is already in progress" message (AC #1). This project also has no existing `assert_cmd`-style plumbing to spawn `CARGO_BIN_EXE_hypogaol` as a child process from `tests/hardware/main.rs`, so a future hardware-verification pass would need either that plumbing added or the in-process two-thread fallback Task 13 describes.
+
 ### File List
+
+**Production:**
+- `Cargo.toml` — `libc = "0.2"` promoted to a direct dependency
+- `src/domain/errors.rs` — `DomainError::LockContention(PathBuf)` variant
+- `src/domain/types.rs` — `LockGuard` struct
+- `src/domain/mapping_name.rs` — `lock_target_path` function
+- `src/ports/filesystem_backend.rs` — `lock_target` trait method
+- `src/adapters/exec/mod.rs` — `lock_target` impl (real `flock(2)`), new `std::os::fd`/`OpenOptionsExt` imports, removal of 2 now-redundant local `OpenOptionsExt` imports
+- `src/domain/workflows/create.rs` — `target_path` helper + 1 lock call
+- `src/domain/workflows/enroll.rs` — 1 lock call
+- `src/domain/workflows/revoke.rs` — 1 lock call
+- `src/domain/workflows/close.rs` — 1 lock call
+- `src/domain/workflows/resize.rs` — 1 lock call
+- `src/domain/workflows/close_all.rs` — per-mapping lock wrapping the existing `.map()` closure
+- `src/domain/workflows/slam.rs` — per-mapping lock wrapping the existing `.map()` closure
+- `src/cli/ux.rs` — 1 new `translate` match arm for `LockContention`
+
+**Tests:**
+- `tests/unit/fakes.rs` — `FakeFilesystemBackend::lock_target` impl, `lock_target_calls`/`lock_contention` fields, `lock_target_calls()`/`with_lock_contention()` methods
+- `tests/unit/lock_target.rs` — new file, Task 12's real-`ExecAdapter` `flock` regression test
+- `tests/unit/main.rs` — registers the new `lock_target` module
+- `tests/unit/mapping_name.rs` — 3 new direct unit tests for `lock_target_path`
+- `tests/unit/create.rs` — 22 existing `CallLog` assertions updated + 2 new tests
+- `tests/unit/enroll.rs` — 1 existing `CallLog` assertion updated + 2 new tests
+- `tests/unit/revoke.rs` — 2 new tests (no existing assertions needed updating)
+- `tests/unit/close.rs` — 5 existing `CallLog` assertions updated + 2 new tests
+- `tests/unit/resize.rs` — 11 existing `CallLog` assertions updated + 3 new tests
+- `tests/unit/close_all.rs` — 2 existing `CallLog` assertions updated + 2 new tests
+- `tests/unit/slam.rs` — 2 new tests (no existing assertions needed updating)
+- `tests/unit/workflows.rs` — no changes needed (preflight-failure tests abort before `lock_target` is ever reached)
+- `tests/unit/unlock.rs`, `tests/unit/info.rs` — no changes (confirms AC #4)
