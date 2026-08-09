@@ -178,7 +178,13 @@ fn zero_open_mappings_yields_ok_empty_vec() {
         matches!(result, Ok(ref v) if v.is_empty()),
         "expected Ok(vec![]), got {result:?}"
     );
-    assert_eq!(*log.borrow(), vec!["list_open_mappings".to_string()]);
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "check_prerequisites".to_string(),
+            "list_open_mappings".to_string()
+        ]
+    );
 }
 
 #[test]
@@ -192,8 +198,8 @@ fn preflight_failure_short_circuits_before_list_open_mappings_is_called() {
 
     assert!(matches!(result, Err(DomainError::PreflightFailed(_))));
     assert!(
-        log.borrow().is_empty(),
-        "expected no port calls before preflight fails, log: {:?}",
+        !log.borrow().contains(&"list_open_mappings".to_string()),
+        "expected no port calls beyond preflight's own check_prerequisites before it fails, log: {:?}",
         log.borrow()
     );
 }
@@ -210,5 +216,11 @@ fn list_open_mappings_failure_propagates_as_slams_own_err() {
     let result = slam::run(&|_| {}, &luks, &fido2, &fs);
 
     assert!(result.is_err(), "expected Err, got {result:?}");
-    assert_eq!(*log.borrow(), vec!["list_open_mappings".to_string()]);
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "check_prerequisites".to_string(),
+            "list_open_mappings".to_string()
+        ]
+    );
 }

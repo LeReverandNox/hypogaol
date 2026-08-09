@@ -72,7 +72,11 @@ fn refuses_before_touching_anything_if_destination_already_exists() {
     // attempted (AC #2/#3).
     assert_eq!(
         *log.borrow(),
-        vec!["path_exists".to_string(), "has_marker_token".to_string()]
+        vec![
+            "check_prerequisites".to_string(),
+            "path_exists".to_string(),
+            "has_marker_token".to_string()
+        ]
     );
 }
 
@@ -115,6 +119,7 @@ fn file_backed_resume_proceeds_through_the_full_happy_path_with_no_confirmation_
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "path_exists".to_string(),
             "has_marker_token".to_string(),
             "set_backing_file_size".to_string(),
@@ -166,7 +171,10 @@ fn refuses_a_file_backed_size_below_the_minimum_before_touching_any_port() {
     // The CLI's own `parse_size` already floor-checks this, but domain must
     // not rely on it as the only gate (mirroring the Device branch) — no
     // backing file allocated, no adapter touched.
-    assert_eq!(*log.borrow(), vec!["path_exists".to_string()]);
+    assert_eq!(
+        *log.borrow(),
+        vec!["check_prerequisites".to_string(), "path_exists".to_string()]
+    );
 }
 
 #[test]
@@ -205,6 +213,7 @@ fn happy_path_runs_every_port_call_once_in_order() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -473,6 +482,7 @@ fn enroll_failure_closes_the_mapping_and_removes_the_backing_file() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -516,6 +526,7 @@ fn mkfs_failure_closes_the_mapping_and_removes_the_backing_file() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -564,6 +575,7 @@ fn bootstrap_format_and_open_failure_removes_the_backing_file_without_closing_a_
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -613,6 +625,7 @@ fn close_stale_mapping_failure_aborts_before_bootstrap_format_and_open_ever_runs
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -655,6 +668,7 @@ fn device_happy_path_with_no_size_given_uses_the_full_capacity() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string(),
             "close_stale_mapping".to_string(),
@@ -705,6 +719,7 @@ fn device_happy_path_with_a_size_smaller_than_capacity_uses_the_requested_size()
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string(),
             "close_stale_mapping".to_string(),
@@ -759,6 +774,7 @@ fn device_with_no_size_given_and_capacity_below_the_minimum_refuses_before_any_m
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string()
         ]
@@ -808,6 +824,7 @@ fn device_with_existing_luks2_header_refuses_even_when_confirmed() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "has_marker_token".to_string()
         ]
@@ -854,6 +871,7 @@ fn device_backed_resume_proceeds_even_when_not_confirmed() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "has_marker_token".to_string(),
             "device_capacity".to_string(),
@@ -920,6 +938,7 @@ fn device_backed_resume_still_enforces_size_against_capacity() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "has_marker_token".to_string(),
             "device_capacity".to_string()
@@ -963,7 +982,13 @@ fn device_without_confirmation_refuses_even_with_no_header() {
 
     // has_luks2_header still ran (AC #4's check always runs first), but
     // confirmation is checked before any sizing/mutating call (AC #5).
-    assert_eq!(*log.borrow(), vec!["has_luks2_header".to_string()]);
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "check_prerequisites".to_string(),
+            "has_luks2_header".to_string()
+        ]
+    );
 }
 
 #[test]
@@ -1011,6 +1036,7 @@ fn device_with_requested_size_greater_than_capacity_refuses_before_any_mutating_
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string()
         ]
@@ -1056,6 +1082,7 @@ fn device_branch_failure_closes_the_mapping_without_removing_any_backing_file() 
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string(),
             "close_stale_mapping".to_string(),
@@ -1099,6 +1126,7 @@ fn create_with_scaffold_hooks_true_mounts_writes_templates_and_unmounts_after_mk
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -1154,6 +1182,7 @@ fn create_with_scaffold_hooks_false_never_mounts_for_scaffolding() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -1203,6 +1232,7 @@ fn create_device_with_scaffold_hooks_true_mounts_writes_templates_and_unmounts_a
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string(),
             "close_stale_mapping".to_string(),
@@ -1259,6 +1289,7 @@ fn create_device_with_scaffold_hooks_false_never_mounts_for_scaffolding() {
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string(),
             "close_stale_mapping".to_string(),
@@ -1307,6 +1338,7 @@ fn create_scaffold_hook_templates_failure_still_unmounts_before_returning_the_er
     assert_eq!(
         *log.borrow(),
         vec![
+            "check_prerequisites".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),

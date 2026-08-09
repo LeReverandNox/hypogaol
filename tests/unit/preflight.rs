@@ -1,5 +1,6 @@
 use hypogaol::domain::errors::DomainError;
 use hypogaol::domain::preflight;
+use hypogaol::domain::types::Filesystem;
 
 use crate::fakes::{FakeFido2Backend, FakeFilesystemBackend, FakeLuksBackend};
 
@@ -9,7 +10,7 @@ fn all_ports_passing_returns_ok() {
     let fido2 = FakeFido2Backend::passing();
     let fs = FakeFilesystemBackend::passing();
 
-    assert!(preflight::check(&luks, &fido2, &fs).is_ok());
+    assert!(preflight::check(&luks, &fido2, &fs, None).is_ok());
 }
 
 #[test]
@@ -18,7 +19,7 @@ fn one_missing_dependency_is_named_in_the_error() {
     let fido2 = FakeFido2Backend::passing();
     let fs = FakeFilesystemBackend::passing();
 
-    let err = preflight::check(&luks, &fido2, &fs).unwrap_err();
+    let err = preflight::check(&luks, &fido2, &fs, None).unwrap_err();
     let DomainError::PreflightFailed(missing) = err else {
         panic!("expected DomainError::PreflightFailed, got {err:?}");
     };
@@ -32,7 +33,7 @@ fn failures_from_every_port_are_aggregated_not_short_circuited() {
     let fido2 = FakeFido2Backend::failing(&["fido2-token"]);
     let fs = FakeFilesystemBackend::failing(&["mkfs.ext4"]);
 
-    let err = preflight::check(&luks, &fido2, &fs).unwrap_err();
+    let err = preflight::check(&luks, &fido2, &fs, None).unwrap_err();
     let DomainError::PreflightFailed(missing) = err else {
         panic!("expected DomainError::PreflightFailed, got {err:?}");
     };
@@ -44,5 +45,18 @@ fn failures_from_every_port_are_aggregated_not_short_circuited() {
             "fido2-token".to_string(),
             "mkfs.ext4".to_string(),
         ]
+    );
+}
+
+#[test]
+fn preflight_forwards_the_filesystem_argument_to_check_prerequisites_unchanged() {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    assert!(preflight::check(&luks, &fido2, &fs, Some(Filesystem::Xfs)).is_ok());
+    assert_eq!(
+        fs.check_prerequisites_filesystem_calls(),
+        vec![Some(Filesystem::Xfs)]
     );
 }

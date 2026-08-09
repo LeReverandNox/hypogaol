@@ -467,6 +467,10 @@ pub struct FakeFilesystemBackend {
     // `scaffold_hook_templates` — lets a test prove `create::run` threaded
     // `mount`'s own return value through, not a stand-in.
     last_scaffold_hook_templates_mountpoint: RefCell<Option<PathBuf>>,
+    // Story 6.4: every `filesystem` argument passed to `check_prerequisites`,
+    // in call order — lets a test prove `preflight::check` forwards it
+    // unchanged, and that `resize::run` calls it twice with the right values.
+    check_prerequisites_filesystem_calls: RefCell<Vec<Option<Filesystem>>>,
 }
 
 /// A valid, unrejectable `exec-hooks` file's metadata (AC #3's guardrail
@@ -509,6 +513,7 @@ impl FakeFilesystemBackend {
             umount_fail_times: Cell::new(0),
             last_signal_calls: RefCell::new(Vec::new()),
             last_scaffold_hook_templates_mountpoint: RefCell::new(None),
+            check_prerequisites_filesystem_calls: RefCell::new(Vec::new()),
         }
     }
 
@@ -538,6 +543,7 @@ impl FakeFilesystemBackend {
             umount_fail_times: Cell::new(0),
             last_signal_calls: RefCell::new(Vec::new()),
             last_scaffold_hook_templates_mountpoint: RefCell::new(None),
+            check_prerequisites_filesystem_calls: RefCell::new(Vec::new()),
         }
     }
 
@@ -708,10 +714,22 @@ impl FakeFilesystemBackend {
             .borrow()
             .clone()
     }
+
+    /// Every `filesystem` argument passed to `check_prerequisites`, in call
+    /// order — lets a test inspect exactly what `preflight::check` forwarded.
+    pub fn check_prerequisites_filesystem_calls(&self) -> Vec<Option<Filesystem>> {
+        self.check_prerequisites_filesystem_calls.borrow().clone()
+    }
 }
 
 impl FilesystemBackend for FakeFilesystemBackend {
-    fn check_prerequisites(&self) -> Result<(), Vec<String>> {
+    fn check_prerequisites(&self, filesystem: Option<Filesystem>) -> Result<(), Vec<String>> {
+        self.log
+            .borrow_mut()
+            .push("check_prerequisites".to_string());
+        self.check_prerequisites_filesystem_calls
+            .borrow_mut()
+            .push(filesystem);
         self.prerequisites.clone()
     }
 
