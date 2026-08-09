@@ -74,6 +74,7 @@ fn refuses_before_touching_anything_if_destination_already_exists() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "path_exists".to_string(),
             "has_marker_token".to_string()
         ]
@@ -120,6 +121,7 @@ fn file_backed_resume_proceeds_through_the_full_happy_path_with_no_confirmation_
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "path_exists".to_string(),
             "has_marker_token".to_string(),
             "set_backing_file_size".to_string(),
@@ -178,7 +180,11 @@ fn refuses_a_file_backed_size_below_the_minimum_before_touching_any_port() {
     // backing file allocated, no adapter touched.
     assert_eq!(
         *log.borrow(),
-        vec!["check_prerequisites".to_string(), "path_exists".to_string()]
+        vec![
+            "check_prerequisites".to_string(),
+            "lock_target".to_string(),
+            "path_exists".to_string()
+        ]
     );
 }
 
@@ -226,7 +232,11 @@ fn refuses_a_file_backed_xfs_volume_below_the_xfs_specific_minimum_before_touchi
 
     assert_eq!(
         *log.borrow(),
-        vec!["check_prerequisites".to_string(), "path_exists".to_string()],
+        vec![
+            "check_prerequisites".to_string(),
+            "lock_target".to_string(),
+            "path_exists".to_string()
+        ],
         "a size above the generic floor but below XFS's own must still be refused before any adapter call"
     );
 }
@@ -281,6 +291,7 @@ fn device_with_xfs_filesystem_and_capacity_below_the_xfs_specific_minimum_refuse
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string()
         ]
@@ -358,6 +369,7 @@ fn happy_path_runs_every_port_call_once_in_order() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -627,6 +639,7 @@ fn enroll_failure_closes_the_mapping_and_removes_the_backing_file() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -671,6 +684,7 @@ fn mkfs_failure_closes_the_mapping_and_removes_the_backing_file() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -720,6 +734,7 @@ fn bootstrap_format_and_open_failure_removes_the_backing_file_without_closing_a_
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -770,6 +785,7 @@ fn close_stale_mapping_failure_aborts_before_bootstrap_format_and_open_ever_runs
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -813,6 +829,7 @@ fn device_happy_path_with_no_size_given_uses_the_full_capacity() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string(),
             "close_stale_mapping".to_string(),
@@ -864,6 +881,7 @@ fn device_happy_path_with_a_size_smaller_than_capacity_uses_the_requested_size()
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string(),
             "close_stale_mapping".to_string(),
@@ -924,6 +942,7 @@ fn device_with_no_size_given_and_capacity_below_the_minimum_refuses_before_any_m
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string()
         ]
@@ -974,6 +993,7 @@ fn device_with_existing_luks2_header_refuses_even_when_confirmed() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "has_luks2_header".to_string(),
             "has_marker_token".to_string()
         ]
@@ -1021,6 +1041,7 @@ fn device_backed_resume_proceeds_even_when_not_confirmed() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "has_luks2_header".to_string(),
             "has_marker_token".to_string(),
             "device_capacity".to_string(),
@@ -1088,6 +1109,7 @@ fn device_backed_resume_still_enforces_size_against_capacity() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "has_luks2_header".to_string(),
             "has_marker_token".to_string(),
             "device_capacity".to_string()
@@ -1135,6 +1157,7 @@ fn device_without_confirmation_refuses_even_with_no_header() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "has_luks2_header".to_string()
         ]
     );
@@ -1186,6 +1209,7 @@ fn device_with_requested_size_greater_than_capacity_refuses_before_any_mutating_
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string()
         ]
@@ -1232,6 +1256,7 @@ fn device_branch_failure_closes_the_mapping_without_removing_any_backing_file() 
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string(),
             "close_stale_mapping".to_string(),
@@ -1276,6 +1301,7 @@ fn create_with_scaffold_hooks_true_mounts_writes_templates_and_unmounts_after_mk
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -1332,6 +1358,7 @@ fn create_with_scaffold_hooks_false_never_mounts_for_scaffolding() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -1382,6 +1409,7 @@ fn create_device_with_scaffold_hooks_true_mounts_writes_templates_and_unmounts_a
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string(),
             "close_stale_mapping".to_string(),
@@ -1439,6 +1467,7 @@ fn create_device_with_scaffold_hooks_false_never_mounts_for_scaffolding() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "has_luks2_header".to_string(),
             "device_capacity".to_string(),
             "close_stale_mapping".to_string(),
@@ -1488,6 +1517,7 @@ fn create_scaffold_hook_templates_failure_still_unmounts_before_returning_the_er
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "path_exists".to_string(),
             "set_backing_file_size".to_string(),
             "close_stale_mapping".to_string(),
@@ -1582,5 +1612,76 @@ fn create_scaffold_hooks_umount_failure_alone_surfaces_the_bare_umount_error() {
         !matches!(result, Err(DomainError::RollbackCleanupAlsoFailed { .. })),
         "scaffold_hook_templates succeeded, so this must not be reported as a rollback-also-failed, \
          got {result:?}"
+    );
+}
+
+#[test]
+fn locks_the_target_path_as_the_second_statement_after_preflight() {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let fixture = RealFixtureFile::create("lock-target-happy-path");
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_VOLUME_SIZE_BYTES,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        None,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(fs.lock_target_calls(), vec![fixture.0.clone()]);
+}
+
+#[test]
+fn lock_contention_aborts_before_any_mutating_luks_or_fido2_call() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_lock_contention();
+
+    let fixture = RealFixtureFile::create("lock-contention");
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_VOLUME_SIZE_BYTES,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        None,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(matches!(result, Err(DomainError::LockContention(_))));
+    assert!(
+        !log.borrow()
+            .contains(&"bootstrap_format_and_open".to_string()),
+        "lock contention must abort before any mutating luks call, log: {:?}",
+        log.borrow()
+    );
+    assert!(
+        !log.borrow().contains(&"enroll_fido2_key".to_string()),
+        "lock contention must abort before any mutating fido2 call, log: {:?}",
+        log.borrow()
     );
 }

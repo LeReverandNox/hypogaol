@@ -86,6 +86,7 @@ fn happy_path_calls_enroll_fido2_key_exactly_once_with_the_given_key_label() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "enroll_fido2_key".to_string()
         ]
     );
@@ -159,4 +160,48 @@ fn enroll_without_the_flag_passes_false_unchanged_from_epic_2() {
 
     assert!(result.is_ok(), "expected Ok(()), got {result:?}");
     assert_eq!(fido2.user_verification_received(), Some(false));
+}
+
+#[test]
+fn locks_the_target_path_as_the_second_statement_after_preflight() {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let fixture = RealFixtureFile::create("lock-target-happy-path");
+
+    let result = enroll::run(
+        &fixture.0,
+        "backup".to_string(),
+        Fido2DeviceSelection::Interactive,
+        false,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(fs.lock_target_calls(), vec![fixture.0.clone()]);
+}
+
+#[test]
+fn lock_contention_aborts_before_enroll_fido2_key_is_called() {
+    let fido2 = FakeFido2Backend::passing();
+    let luks = FakeLuksBackend::passing();
+    let fs = FakeFilesystemBackend::passing().with_lock_contention();
+
+    let fixture = RealFixtureFile::create("lock-contention");
+
+    let result = enroll::run(
+        &fixture.0,
+        "backup".to_string(),
+        Fido2DeviceSelection::Interactive,
+        false,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(matches!(result, Err(DomainError::LockContention(_))));
+    assert_eq!(fido2.user_verification_received(), None);
 }

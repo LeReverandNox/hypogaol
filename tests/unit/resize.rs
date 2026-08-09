@@ -52,6 +52,7 @@ fn file_backed_happy_path_runs_every_port_call_once_in_order() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "is_block_device".to_string(),
             "read_filesystem".to_string(),
             "check_prerequisites".to_string(),
@@ -112,6 +113,7 @@ fn device_backed_happy_path_never_calls_set_backing_file_size() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "is_block_device".to_string(),
             "device_capacity".to_string(),
             "read_filesystem".to_string(),
@@ -154,6 +156,7 @@ fn file_backed_true_shrink_is_rejected_by_tier_one_before_any_adapter_call() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "is_block_device".to_string()
         ],
         "a true shrink must be rejected before any adapter call"
@@ -192,6 +195,7 @@ fn file_backed_no_op_same_size_request_is_rejected_by_tier_two() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "is_block_device".to_string(),
             "read_filesystem".to_string(),
             "check_prerequisites".to_string(),
@@ -255,6 +259,7 @@ fn file_backed_same_size_request_is_rejected_even_with_a_large_header_overhead()
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "is_block_device".to_string(),
             "read_filesystem".to_string(),
             "check_prerequisites".to_string(),
@@ -315,6 +320,7 @@ fn device_backed_same_size_request_is_rejected_even_with_a_large_header_overhead
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "is_block_device".to_string(),
             "device_capacity".to_string(),
             "read_filesystem".to_string(),
@@ -356,6 +362,7 @@ fn file_backed_retry_after_a_partial_failure_completes_instead_of_being_rejected
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "is_block_device".to_string(),
             "read_filesystem".to_string(),
             "check_prerequisites".to_string(),
@@ -399,6 +406,7 @@ fn device_backed_too_small_partition_rejection_never_calls_open() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "is_block_device".to_string(),
             "device_capacity".to_string()
         ],
@@ -445,6 +453,7 @@ fn device_backed_headroom_shrink_is_caught_by_tier_two_and_closes_the_mapping() 
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "is_block_device".to_string(),
             "device_capacity".to_string(),
             "read_filesystem".to_string(),
@@ -479,6 +488,7 @@ fn mid_flow_failure_after_a_successful_resize_still_closes_the_mapping() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "is_block_device".to_string(),
             "read_filesystem".to_string(),
             "check_prerequisites".to_string(),
@@ -660,6 +670,7 @@ fn resize_to_btrfs_below_its_own_kernel_floor_is_refused_before_any_mutating_cal
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "is_block_device".to_string(),
             "read_filesystem".to_string(),
             "check_prerequisites".to_string(),
@@ -697,5 +708,86 @@ fn resize_to_the_same_small_target_still_succeeds_for_ext4() {
     assert!(
         result.is_ok(),
         "ext4 must not be rejected by Btrfs's own, much higher resize floor: {result:?}"
+    );
+}
+
+#[test]
+fn locks_the_target_path_as_the_second_statement_after_preflight() {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing()
+        .with_device_capacity(4096)
+        .with_filesystem_size(4096);
+
+    let fixture = RealFixtureFile::create("resize-lock-target-happy-path", &[0u8; 4096]);
+
+    let result = resize::run(&fixture.0, 8192, &no_progress, &luks, &fido2, &fs);
+
+    assert!(result.is_ok(), "expected Ok, got {result:?}");
+    assert_eq!(fs.lock_target_calls(), vec![fixture.0.clone()]);
+}
+
+#[test]
+fn lock_contention_aborts_before_luks_open_is_called() {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing().with_lock_contention();
+
+    let fixture = RealFixtureFile::create("resize-lock-contention", &[0u8; 4096]);
+
+    let result = resize::run(&fixture.0, 8192, &no_progress, &luks, &fido2, &fs);
+
+    assert!(matches!(result, Err(DomainError::LockContention(_))));
+    assert_eq!(
+        luks.last_open(),
+        None,
+        "lock contention must abort before luks.open is ever reached"
+    );
+}
+
+// Proves the lock sits between the two preflight::check calls in the actual
+// execution order (AD-20, AC #2): after the first (unconditional)
+// check_prerequisites and before read_filesystem/the second, type-specific
+// check_prerequisites — genuinely the second statement, not just eventually
+// called somewhere.
+#[test]
+fn lock_sits_between_the_first_and_second_preflight_calls() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing()
+        .with_log(log.clone())
+        .with_read_filesystem(Filesystem::Xfs);
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_device_capacity(4096)
+        .with_filesystem_size(4096);
+
+    let fixture = RealFixtureFile::create("resize-lock-between-preflights", &[0u8; 4096]);
+
+    let result = resize::run(&fixture.0, 8192, &no_progress, &luks, &fido2, &fs);
+
+    assert!(result.is_ok(), "expected Ok, got {result:?}");
+    assert_eq!(
+        fs.check_prerequisites_filesystem_calls(),
+        vec![None, Some(Filesystem::Xfs)]
+    );
+    assert_eq!(fs.lock_target_calls(), vec![fixture.0.clone()]);
+    assert_eq!(
+        *log.borrow(),
+        vec![
+            "check_prerequisites".to_string(),
+            "lock_target".to_string(),
+            "is_block_device".to_string(),
+            "read_filesystem".to_string(),
+            "check_prerequisites".to_string(),
+            "open".to_string(),
+            "device_capacity".to_string(),
+            "filesystem_size".to_string(),
+            "set_backing_file_size".to_string(),
+            "resize".to_string(),
+            "growfs".to_string(),
+            "close".to_string(),
+        ],
+        "lock_target must appear right after the first check_prerequisites and before read_filesystem/the second"
     );
 }

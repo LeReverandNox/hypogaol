@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use hypogaol::domain::errors::DomainError;
 use hypogaol::domain::mapping_name;
 use hypogaol::domain::types::HookFileMeta;
 use hypogaol::domain::workflows::close;
@@ -75,6 +76,7 @@ fn happy_path_unmounts_then_closes_using_the_shared_mapping_name() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "mount_point_of".to_string(),
             "path_exists".to_string(),
             "path_exists".to_string(),
@@ -109,6 +111,7 @@ fn umount_failure_stops_before_calling_luks_close() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "mount_point_of".to_string(),
             "path_exists".to_string(),
             "path_exists".to_string(),
@@ -140,6 +143,7 @@ fn umount_reporting_not_currently_mounted_still_proceeds_to_luks_close() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "mount_point_of".to_string(),
             "path_exists".to_string(),
             "path_exists".to_string(),
@@ -167,6 +171,7 @@ fn luks_close_failure_after_a_successful_umount_still_propagates_as_an_error() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "mount_point_of".to_string(),
             "path_exists".to_string(),
             "path_exists".to_string(),
@@ -317,8 +322,49 @@ fn close_skips_all_hooks_when_skip_hooks_true() {
         *log.borrow(),
         vec![
             "check_prerequisites".to_string(),
+            "lock_target".to_string(),
             "umount".to_string(),
             "close".to_string()
         ]
+    );
+}
+
+#[test]
+fn locks_the_target_path_as_the_second_statement_after_preflight() {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let fixture = RealFixtureFile::create("lock-target-happy-path");
+
+    let result = close::run(&fixture.0, false, &|_| {}, &luks, &fido2, &fs);
+
+    assert!(result.is_ok(), "expected Ok, got {result:?}");
+    assert_eq!(fs.lock_target_calls(), vec![fixture.0.clone()]);
+}
+
+#[test]
+fn lock_contention_aborts_before_umount_or_close_is_called() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_lock_contention();
+
+    let fixture = RealFixtureFile::create("lock-contention");
+
+    let result = close::run(&fixture.0, false, &|_| {}, &luks, &fido2, &fs);
+
+    assert!(matches!(result, Err(DomainError::LockContention(_))));
+    assert!(
+        !log.borrow().contains(&"umount".to_string()),
+        "lock contention must abort before umount, log: {:?}",
+        log.borrow()
+    );
+    assert!(
+        !log.borrow().contains(&"close".to_string()),
+        "lock contention must abort before luks.close, log: {:?}",
+        log.borrow()
     );
 }
