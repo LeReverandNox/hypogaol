@@ -1359,3 +1359,47 @@ fn create_scaffold_hooks_umount_failure_after_a_scaffold_failure_wraps_as_rollba
         "expected Err(DomainError::RollbackCleanupAlsoFailed), got {result:?}"
     );
 }
+
+#[test]
+fn create_scaffold_hooks_umount_failure_alone_surfaces_the_bare_umount_error() {
+    // The third arm of finish_provisioning's `match fs.umount(mapper)`:
+    // scaffold_hook_templates succeeds but umount fails alone. Distinct from
+    // both "scaffold fails, umount succeeds" and "scaffold fails, umount
+    // also fails" above — this is the one arm that returns umount_err
+    // untouched, and had no direct test coverage (review finding,
+    // 2026-08-09).
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+
+    let fixture = RealFixtureFile::create("scaffold-hooks-umount-failure-alone");
+    let expected_name = mapping_name::mapping_name(&fixture.0).unwrap();
+    let fs = FakeFilesystemBackend::passing().with_umount_failure_for(&expected_name);
+
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_VOLUME_SIZE_BYTES,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        None,
+        true,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(
+        matches!(result, Err(DomainError::AdapterFailure(_))),
+        "expected the bare umount error to surface untouched, got {result:?}"
+    );
+    assert!(
+        !matches!(result, Err(DomainError::RollbackCleanupAlsoFailed { .. })),
+        "scaffold_hook_templates succeeded, so this must not be reported as a rollback-also-failed, \
+         got {result:?}"
+    );
+}
