@@ -1,5 +1,5 @@
 # generated: 2026-07-22
-# last_updated: 2026-08-09 (story 6.4 code review complete, done)
+# last_updated: 2026-08-10 (story 6.5 created, ready-for-dev)
 # project: hypogaol
 # project_key: NOKEY
 # tracking_system: file-system
@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-22
-last_updated: 2026-08-09 (story 6.4 code review complete)
+last_updated: 2026-08-10 (story 6.5 created, ready-for-dev)
 project: hypogaol
 project_key: NOKEY
 tracking_system: file-system
@@ -92,7 +92,7 @@ development_status:
   6-2-custom-key-label-at-create: done
   6-3-hook-template-scaffolding-at-create: done
   6-4-xfs-and-btrfs-filesystem-support: done
-  6-5-concurrent-invocation-guard: backlog
+  6-5-concurrent-invocation-guard: ready-for-dev
   6-6-proactive-fido2-pin-status-guidance: backlog
   6-7-one-letter-cli-flag-shorthand: backlog
   6-8-repository-hygiene-badges: backlog
