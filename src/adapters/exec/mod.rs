@@ -372,18 +372,52 @@ impl Fido2StderrSignal {
         }
     }
 
-    fn warning(self) -> &'static str {
-        match self {
-            Self::WrongPin => {
-                "Heads up: that PIN was wrong. Retries are limited — running out temporarily \
-                 blocks the security key's PIN until it's unplugged and reinserted."
+    /// Builds this signal's plain-language warning text. `retries`, when
+    /// `Some`, is the device's *live* PIN retry count re-queried right
+    /// after this signal was detected (never cached/proactive — see
+    /// `fido2_token_pin_retries`), folded in so the user sees a concrete
+    /// number instead of vague "retries are limited" text (review
+    /// feedback, 2026-08-11: the original static wording "felt
+    /// cumbersome" and never showed the actual count). `None` covers both
+    /// "couldn't determine which single device to query" (e.g. `resize()`,
+    /// which has no prior device enumeration, or multiple candidates) and
+    /// "the live query itself failed or timed out" — either way, falls
+    /// back to the original device-agnostic wording.
+    fn warning(self, retries: Option<u32>) -> String {
+        match (self, retries) {
+            (Self::WrongPin, Some(0)) => "Wrong PIN — no attempts left; the security key's PIN \
+                 is now locked until it's unplugged and reinserted."
+                .to_string(),
+            (Self::WrongPin, Some(n)) => format!(
+                "Wrong PIN — {n} attempt{} left before the security key's PIN locks.",
+                if n == 1 { "" } else { "s" }
+            ),
+            (Self::WrongPin, None) => {
+                "Heads up: that PIN was wrong — retries are limited.".to_string()
             }
-            Self::PinBlocked => {
-                "Heads up: the security key's PIN is now temporarily blocked — remove and \
-                 reinsert it before trying again."
-            }
+            (Self::PinBlocked, _) => "Heads up: the security key's PIN is now locked — remove \
+                 and reinsert it before trying again."
+                .to_string(),
         }
     }
+}
+
+/// Wraps `fido2_token_pin_retries` with a short bound so a slow/contended
+/// device query can never stall the reader thread for long. The reader
+/// thread must keep draining the pty concurrently with the main thread's
+/// `child.wait()` (AD-3) — an unbounded call here, right in that hot loop,
+/// would reintroduce exactly the deadlock risk this story exists to
+/// prevent if the device happens to be mid-transaction with the very
+/// subprocess we're watching. Returns `None` on any failure or on timeout.
+fn fido2_token_pin_retries_bounded(path: &str) -> Option<u32> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let path = path.to_string();
+    std::thread::spawn(move || {
+        let _ = tx.send(fido2_token_pin_retries(&path));
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(1))
+        .ok()?
+        .ok()?
 }
 
 /// Opens a fresh PTY pair via `posix_openpt`/`grantpt`/`unlockpt`/
@@ -490,7 +524,17 @@ fn open_pty_pair() -> Result<(File, PathBuf), DomainError> {
 /// The full raw bytes are also returned (lossily decoded to a `String` once,
 /// at the end) so a caller can fold the real subprocess's own diagnostic
 /// text into its own `AdapterFailure` message on a non-zero exit.
-fn run_with_stderr_watch(cmd: &mut Command) -> Result<(ExitStatus, String), DomainError> {
+///
+/// `retry_query_devices` names the device path(s) that might be the one a
+/// wrong-PIN signal came from — when there's exactly one, its live PIN
+/// retry count is re-queried (bounded, see `fido2_token_pin_retries_bounded`)
+/// and folded into the printed warning. Pass an empty slice when no
+/// specific device is known (e.g. `resize()`, which has no prior device
+/// enumeration) to fall back to the original device-agnostic wording.
+fn run_with_stderr_watch(
+    cmd: &mut Command,
+    retry_query_devices: &[String],
+) -> Result<(ExitStatus, String), DomainError> {
     let (mut master, slave_path) = open_pty_pair()?;
 
     let slave = std::fs::OpenOptions::new()
@@ -536,6 +580,7 @@ fn run_with_stderr_watch(cmd: &mut Command) -> Result<(ExitStatus, String), Doma
     let mut child = spawn_result
         .map_err(|e| DomainError::AdapterFailure(format!("failed to spawn {cmd:?}: {e}")))?;
 
+    let retry_query_devices = retry_query_devices.to_vec();
     let reader = std::thread::spawn(move || {
         let mut captured = Vec::new();
         let mut scan_buffer = Vec::new();
@@ -564,13 +609,21 @@ fn run_with_stderr_watch(cmd: &mut Command) -> Result<(ExitStatus, String), Doma
                 let line = String::from_utf8_lossy(&scan_buffer[..boundary]).into_owned();
                 scan_buffer.drain(..=boundary);
                 if let Some(signal) = Fido2StderrSignal::classify(&line) {
-                    println!("{}", signal.warning());
+                    let retries = match retry_query_devices.as_slice() {
+                        [path] => fido2_token_pin_retries_bounded(path),
+                        _ => None,
+                    };
+                    println!("{}", signal.warning(retries));
                 }
             }
         }
 
         if let Some(signal) = Fido2StderrSignal::classify(&String::from_utf8_lossy(&scan_buffer)) {
-            println!("{}", signal.warning());
+            let retries = match retry_query_devices.as_slice() {
+                [path] => fido2_token_pin_retries_bounded(path),
+                _ => None,
+            };
+            println!("{}", signal.warning(retries));
         }
 
         String::from_utf8_lossy(&captured).into_owned()
@@ -816,6 +869,35 @@ fn parse_client_pin_configured(fido2_token_info_output: &str) -> bool {
         .find_map(|line| line.strip_prefix("options: "))
         .map(|options| options.split(", ").any(|opt| opt == "clientPin"))
         .unwrap_or(false)
+}
+
+/// Runs `fido2-token -I <path>` (no `-c` — never prompts) and parses the
+/// device's *current* PIN retry count. Reactive-only: called right after a
+/// wrong-PIN signal is detected on stderr, never proactively — a query
+/// taken before the failed attempt would report the stale, pre-failure
+/// count (this is exactly why AC #3's Dev Notes rule out sourcing this from
+/// the same `-I` call Task 1/2 already make during enumeration).
+fn fido2_token_pin_retries(path: &str) -> Result<Option<u32>, DomainError> {
+    let output = Command::new("fido2-token")
+        .args(["-I", path])
+        .output()
+        .map_err(|e| DomainError::AdapterFailure(format!("failed to run fido2-token -I: {e}")))?;
+    if !output.status.success() {
+        return Err(DomainError::AdapterFailure(format!(
+            "fido2-token -I failed for {path}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(parse_pin_retries(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Pure parser, unit-testable without a real device: extracts the integer
+/// from a `pin retries: N` line, if present and well-formed.
+fn parse_pin_retries(fido2_token_info_output: &str) -> Option<u32> {
+    fido2_token_info_output
+        .lines()
+        .find_map(|line| line.strip_prefix("pin retries: "))
+        .and_then(|n| n.trim().parse().ok())
 }
 
 /// Blocks, polling `fido2-token -L`, until at least `needed` devices are
@@ -1616,10 +1698,10 @@ impl LuksBackend for ExecAdapter {
         // "the" device to name. Fires regardless of `read_only`: a read-only
         // unlock still authenticates against a real device. Devices are
         // already enriched with `client_pin` by `wait_for_enough_fido2_devices`.
-        let pin_configured: Vec<&str> = devices
+        let pin_configured: Vec<String> = devices
             .iter()
             .filter(|device| device.client_pin)
-            .map(|device| device.path.as_str())
+            .map(|device| device.path.clone())
             .collect();
         if !pin_configured.is_empty() {
             println!(
@@ -1642,7 +1724,7 @@ impl LuksBackend for ExecAdapter {
             cmd.arg("--readonly");
         }
         cmd.arg(path).arg(name);
-        let (status, stderr) = run_with_stderr_watch(&mut cmd)?;
+        let (status, stderr) = run_with_stderr_watch(&mut cmd, &pin_configured)?;
 
         if status.success() {
             Ok(MapperHandle {
@@ -1677,9 +1759,12 @@ impl LuksBackend for ExecAdapter {
         // amended Rule is written per-subprocess-call generically, not
         // scoped to two named workflows (Task 5's scope-decision — applied
         // here for consistency, not left as a documented gap).
+        // No prior device enumeration exists here (unlike `open`), so no
+        // specific device is known to re-query a live retry count for on a
+        // wrong-PIN signal — falls back to the count-less generic wording.
         let mut cmd = privileged("cryptsetup");
         cmd.args(["resize", "--token-only"]).arg(&mapper.name);
-        let (status, stderr) = run_with_stderr_watch(&mut cmd)?;
+        let (status, stderr) = run_with_stderr_watch(&mut cmd, &[])?;
 
         if status.success() {
             Ok(())
@@ -1904,6 +1989,16 @@ impl Fido2Backend for ExecAdapter {
         // is piped and read concurrently (`run_with_stderr_watch`) for the
         // wrong-PIN warning (AC #3) without risking a pipe-buffer deadlock.
         //
+        // Computed before the match below moves `existing_device` in its
+        // `None` arm — whichever of `new_device`/`existing_device` actually
+        // has a PIN configured is the candidate to re-query a live retry
+        // count for on a wrong-PIN signal.
+        let retry_query_devices: Vec<String> = std::iter::once(&new_device)
+            .chain(existing_device.as_ref())
+            .filter(|device| device.client_pin)
+            .map(|device| device.path.clone())
+            .collect();
+
         // `key_file_guard` (when `Some`) must outlive the
         // `run_with_stderr_watch` call below — its `Drop` impl wipes the
         // on-disk temp file, which `systemd-cryptenroll` needs to still
@@ -1960,7 +2055,7 @@ impl Fido2Backend for ExecAdapter {
             }
         };
 
-        let (status, stderr) = run_with_stderr_watch(&mut cmd)?;
+        let (status, stderr) = run_with_stderr_watch(&mut cmd, &retry_query_devices)?;
         drop(key_file_guard);
 
         if !status.success() {
@@ -3165,6 +3260,59 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn parse_pin_retries_from_real_captured_output() {
+        assert_eq!(parse_pin_retries(REAL_INFO_OUTPUT_WITH_PIN), Some(8));
+    }
+
+    #[test]
+    fn parse_pin_retries_none_when_line_absent_or_malformed() {
+        assert_eq!(parse_pin_retries(""), None);
+        assert_eq!(parse_pin_retries("pin retries: not-a-number"), None);
+        assert_eq!(parse_pin_retries("options: rk, up, uv, clientPin"), None);
+    }
+
+    #[test]
+    fn fido2_stderr_signal_wrong_pin_warning_includes_live_retry_count() {
+        assert_eq!(
+            Fido2StderrSignal::WrongPin.warning(Some(5)),
+            "Wrong PIN — 5 attempts left before the security key's PIN locks."
+        );
+    }
+
+    #[test]
+    fn fido2_stderr_signal_wrong_pin_warning_singular_for_one_retry_left() {
+        assert_eq!(
+            Fido2StderrSignal::WrongPin.warning(Some(1)),
+            "Wrong PIN — 1 attempt left before the security key's PIN locks."
+        );
+    }
+
+    #[test]
+    fn fido2_stderr_signal_wrong_pin_warning_zero_retries_reads_as_locked() {
+        assert_eq!(
+            Fido2StderrSignal::WrongPin.warning(Some(0)),
+            "Wrong PIN — no attempts left; the security key's PIN is now locked until it's \
+             unplugged and reinserted."
+        );
+    }
+
+    #[test]
+    fn fido2_stderr_signal_wrong_pin_warning_falls_back_without_a_live_count() {
+        assert_eq!(
+            Fido2StderrSignal::WrongPin.warning(None),
+            "Heads up: that PIN was wrong — retries are limited."
+        );
+    }
+
+    #[test]
+    fn fido2_stderr_signal_pin_blocked_warning_ignores_retries() {
+        assert_eq!(
+            Fido2StderrSignal::PinBlocked.warning(Some(0)),
+            Fido2StderrSignal::PinBlocked.warning(None)
+        );
+    }
+
     // Real stderr transcript captured (2026-08-10) from a deliberate
     // wrong-PIN attempt against physical hardware — see this story's
     // Completion Notes.
@@ -3224,7 +3372,7 @@ mod tests {
             let mut cmd = Command::new("sh");
             // 200KiB comfortably exceeds any real pty/pipe buffer size.
             cmd.arg("-c").arg("yes | head -c 200000 1>&2");
-            let _ = tx.send(run_with_stderr_watch(&mut cmd));
+            let _ = tx.send(run_with_stderr_watch(&mut cmd, &[]));
         });
 
         match rx.recv_timeout(std::time::Duration::from_secs(10)) {
