@@ -331,6 +331,106 @@ fn run_piping_stdin(cmd: &mut Command, input: &[u8]) -> Result<(), String> {
     }
 }
 
+/// The literal `systemd-cryptenroll`/`cryptsetup` stderr text for a wrong
+/// FIDO2 PIN entry on a retry. Captured verbatim (2026-08-10) from a real,
+/// deliberate wrong-PIN attempt against physical hardware in this dev
+/// environment (`/dev/hidraw5`, user consented to the live test) — not
+/// documented anywhere web-verifiable at the time of writing, per this
+/// story's Task 5/Dev Notes. See this story's Completion Notes for the full
+/// captured transcript.
+const WRONG_PIN_STDERR_MARKER: &str = "PIN incorrect, please try again.";
+
+/// The literal stderr text once retries are exhausted and the token
+/// temporarily blocks further PIN attempts until physically reinserted —
+/// captured alongside `WRONG_PIN_STDERR_MARKER` from the same real spike.
+const PIN_BLOCKED_STDERR_MARKER: &str =
+    "Token PIN is currently blocked, please remove and reinsert token.";
+
+/// Which plain-language warning (if any) a single stderr `line` from
+/// `run_with_stderr_watch` should trigger. A separate, pure, directly
+/// unit-testable function rather than inline `if`s in the reader thread —
+/// this project's recurring review-pattern watchlist flags new stderr-line
+/// matching logic shipping without a direct test.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Fido2StderrSignal {
+    WrongPin,
+    PinBlocked,
+}
+
+impl Fido2StderrSignal {
+    fn classify(line: &str) -> Option<Self> {
+        if line.contains(WRONG_PIN_STDERR_MARKER) {
+            Some(Self::WrongPin)
+        } else if line.contains(PIN_BLOCKED_STDERR_MARKER) {
+            Some(Self::PinBlocked)
+        } else {
+            None
+        }
+    }
+
+    fn warning(self) -> &'static str {
+        match self {
+            Self::WrongPin => {
+                "Heads up: that PIN was wrong. Retries are limited — running out temporarily \
+                 blocks the security key's PIN until it's unplugged and reinserted."
+            }
+            Self::PinBlocked => {
+                "Heads up: the security key's PIN is now temporarily blocked — remove and \
+                 reinsert it before trying again."
+            }
+        }
+    }
+}
+
+/// Runs `cmd` with stdin/stdout left inherited (`Command`'s default,
+/// deliberately not overridden — the actual touch/PIN exchange must reach
+/// the real terminal, AD-3) and only stderr piped, read **concurrently on a
+/// background thread** while the main thread blocks in `child.wait()`. This
+/// avoids a pipe-buffer deadlock on a long touch/PIN-blocking call if the
+/// child writes enough stderr before it's drained (AD-3's Epic 6 amendment)
+/// — mirroring `run_piping_stdin`'s existing concurrent-thread precedent,
+/// used there for exactly this reason on a different pipe (stdin, not
+/// stderr).
+///
+/// Each stderr line is checked against `WRONG_PIN_STDERR_MARKER`/
+/// `PIN_BLOCKED_STDERR_MARKER` and, on a match, a plain-language warning is
+/// printed as soon as it's seen (never batched until the child exits, per
+/// AC #3/#4). Every line — matched or not — is also forwarded to the real
+/// stderr unchanged and appended to the returned `String`, so a caller can
+/// fold the real subprocess's own diagnostic text into its own
+/// `AdapterFailure` message on a non-zero exit (a real improvement over
+/// this file's previous generic-message-only failure paths for these
+/// calls — a deliberate decision, not an oversight; see this story's
+/// Completion Notes).
+fn run_with_stderr_watch(cmd: &mut Command) -> Result<(ExitStatus, String), DomainError> {
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| DomainError::AdapterFailure(format!("failed to spawn {cmd:?}: {e}")))?;
+
+    let stderr = child.stderr.take().expect("stderr was requested as piped");
+    let reader = std::thread::spawn(move || {
+        let mut captured = String::new();
+        for line in io::BufRead::lines(io::BufReader::new(stderr)).map_while(Result::ok) {
+            match Fido2StderrSignal::classify(&line) {
+                Some(signal) => println!("{}", signal.warning()),
+                None => eprintln!("{line}"),
+            }
+            captured.push_str(&line);
+            captured.push('\n');
+        }
+        captured
+    });
+
+    let status = child
+        .wait()
+        .map_err(|e| DomainError::AdapterFailure(format!("failed waiting for {cmd:?}: {e}")))?;
+    let captured = reader.join().unwrap_or_default();
+
+    Ok((status, captured))
+}
+
 /// Shared by `close` (an already-open mapper the caller knows exists) and
 /// `close_stale_mapping` (a name that may or may not currently be mapped —
 /// the caller checks presence first).
@@ -1379,18 +1479,17 @@ impl LuksBackend for ExecAdapter {
         // `--token-only` is not optional: without it, `cryptsetup open` falls
         // back to an interactive passphrase prompt instead of the FIDO2
         // PIN/touch flow (confirmed empirically during Story 1.6's hardware
-        // run). Inherited stdio (`.status()`, not `.output()`) lets the
-        // systemd-fido2 plugin's own prompt reach the real terminal, the same
-        // pattern `enroll_fido2_key`'s `systemd-cryptenroll` call already
-        // uses.
+        // run). stdin/stdout stay inherited so the systemd-fido2 plugin's
+        // own prompt reaches the real terminal; stderr is piped and read
+        // concurrently (`run_with_stderr_watch`) for the wrong-PIN warning
+        // (AC #3/#4) without risking a pipe-buffer deadlock.
         let mut cmd = privileged("cryptsetup");
         cmd.args(["open", "--token-only"]);
         if read_only {
             cmd.arg("--readonly");
         }
-        let status = cmd.arg(path).arg(name).status().map_err(|e| {
-            DomainError::AdapterFailure(format!("failed to run cryptsetup open: {e}"))
-        })?;
+        cmd.arg(path).arg(name);
+        let (status, stderr) = run_with_stderr_watch(&mut cmd)?;
 
         if status.success() {
             Ok(MapperHandle {
@@ -1399,8 +1498,9 @@ impl LuksBackend for ExecAdapter {
             })
         } else {
             Err(DomainError::AdapterFailure(format!(
-                "cryptsetup open --token-only failed for {} as {name}",
-                path.display()
+                "cryptsetup open --token-only failed for {} as {name}: {}",
+                path.display(),
+                stderr.trim()
             )))
         }
     }
@@ -1416,23 +1516,25 @@ impl LuksBackend for ExecAdapter {
         // `open --token-only` populated — it falls back to an interactive
         // passphrase prompt, which this workflow has no passphrase to
         // satisfy. `--token-only` instead re-authenticates via the enrolled
-        // FIDO2 token, the same mechanism `open` already uses. Inherited
-        // stdio (`.status()`, not `.output()`) lets that touch/PIN prompt
-        // reach the real terminal, same pattern as `open`.
-        let status = privileged("cryptsetup")
-            .args(["resize", "--token-only"])
-            .arg(&mapper.name)
-            .status()
-            .map_err(|e| {
-                DomainError::AdapterFailure(format!("failed to run cryptsetup resize: {e}"))
-            })?;
+        // FIDO2 token, the same mechanism `open` already uses. stdin/stdout
+        // stay inherited so that touch/PIN prompt reaches the real terminal,
+        // same pattern as `open` — including `run_with_stderr_watch`'s
+        // wrong-PIN detection (AC #3): a `resize` re-authentication is just
+        // as likely to hit a wrong-PIN retry as `open`/`enroll`, and AD-3's
+        // amended Rule is written per-subprocess-call generically, not
+        // scoped to two named workflows (Task 5's scope-decision — applied
+        // here for consistency, not left as a documented gap).
+        let mut cmd = privileged("cryptsetup");
+        cmd.args(["resize", "--token-only"]).arg(&mapper.name);
+        let (status, stderr) = run_with_stderr_watch(&mut cmd)?;
 
         if status.success() {
             Ok(())
         } else {
             Err(DomainError::AdapterFailure(format!(
-                "cryptsetup resize --token-only failed for {}",
-                mapper.name
+                "cryptsetup resize --token-only failed for {}: {}",
+                mapper.name,
+                stderr.trim()
             )))
         }
     }
@@ -1642,12 +1744,18 @@ impl Fido2Backend for ExecAdapter {
         // the documented non-interactive path instead, so the passphrase is
         // written to a tightly-permissioned, promptly-deleted temp file.
         //
-        // stdin/stdout/stderr all stay inherited in both branches
-        // (`.status()`, never `.output()`): the unlock credential, when one
-        // exists, travels via `--unlock-key-file` rather than stdin, so the
-        // user's terminal is free to handle systemd-cryptenroll's own FIDO2
-        // touch/PIN prompt normally.
-        let status = match passphrase {
+        // stdin/stdout stay inherited in both branches: the unlock
+        // credential, when one exists, travels via `--unlock-key-file`
+        // rather than stdin, so the user's terminal is free to handle
+        // systemd-cryptenroll's own FIDO2 touch/PIN prompt normally. stderr
+        // is piped and read concurrently (`run_with_stderr_watch`) for the
+        // wrong-PIN warning (AC #3) without risking a pipe-buffer deadlock.
+        //
+        // `key_file_guard` (when `Some`) must outlive the
+        // `run_with_stderr_watch` call below — its `Drop` impl wipes the
+        // on-disk temp file, which `systemd-cryptenroll` needs to still
+        // exist while it runs.
+        let (mut cmd, key_file_guard) = match passphrase {
             Some(passphrase) => {
                 let key_file = TempKeyFile::create(passphrase.as_bytes())
                     .map_err(DomainError::AdapterFailure)?;
@@ -1658,12 +1766,12 @@ impl Fido2Backend for ExecAdapter {
                 // own Drop impl once this function returns.
                 drop(passphrase);
 
-                Command::new("systemd-cryptenroll")
-                    .arg(format!("--fido2-device={}", new_device.path))
+                let mut cmd = Command::new("systemd-cryptenroll");
+                cmd.arg(format!("--fido2-device={}", new_device.path))
                     .arg(format!("--unlock-key-file={}", key_file.path.display()))
                     .args(fido2_verification_args(user_verification))
-                    .arg(path)
-                    .status()
+                    .arg(path);
+                (cmd, Some(key_file))
             }
             None => {
                 // No transient bootstrap passphrase exists (this story's
@@ -1690,22 +1798,23 @@ impl Fido2Backend for ExecAdapter {
                 let existing_device = existing_device
                     .expect("resolve_device_selection guarantees Some when need_existing is true");
 
-                Command::new("systemd-cryptenroll")
-                    .arg(format!("--fido2-device={}", new_device.path))
+                let mut cmd = Command::new("systemd-cryptenroll");
+                cmd.arg(format!("--fido2-device={}", new_device.path))
                     .arg(format!("--unlock-fido2-device={}", existing_device.path))
                     .args(fido2_verification_args(user_verification))
-                    .arg(path)
-                    .status()
+                    .arg(path);
+                (cmd, None)
             }
-        }
-        .map_err(|e| {
-            DomainError::AdapterFailure(format!("failed to run systemd-cryptenroll: {e}"))
-        })?;
+        };
+
+        let (status, stderr) = run_with_stderr_watch(&mut cmd)?;
+        drop(key_file_guard);
 
         if !status.success() {
-            return Err(DomainError::AdapterFailure(
-                "systemd-cryptenroll failed".to_string(),
-            ));
+            return Err(DomainError::AdapterFailure(format!(
+                "systemd-cryptenroll failed: {}",
+                stderr.trim()
+            )));
         }
 
         let new_token_ids = find_systemd_fido2_token_ids(path)?;
@@ -2898,7 +3007,47 @@ mod tests {
     #[test]
     fn parse_client_pin_configured_false_for_empty_or_malformed_input() {
         assert!(!parse_client_pin_configured(""));
-        assert!(!parse_client_pin_configured("not a real fido2-token -I output at all"));
+        assert!(!parse_client_pin_configured(
+            "not a real fido2-token -I output at all"
+        ));
+    }
+
+    // Real stderr transcript captured (2026-08-10) from a deliberate
+    // wrong-PIN attempt against physical hardware — see this story's
+    // Completion Notes.
+    const REAL_WRONG_PIN_STDERR: &str = "Initializing FIDO2 credential on security token.\n(Hint: This might require confirmation of user presence on security token.)\nPIN incorrect, please try again.\nPIN incorrect, please try again.\nToken PIN is currently blocked, please remove and reinsert token.\n";
+
+    #[test]
+    fn fido2_stderr_signal_classifies_wrong_pin_line_from_real_transcript() {
+        let wrong_pin_line = REAL_WRONG_PIN_STDERR
+            .lines()
+            .find(|line| line.contains("PIN incorrect"))
+            .expect("fixture must contain a wrong-PIN line");
+        assert_eq!(
+            Fido2StderrSignal::classify(wrong_pin_line),
+            Some(Fido2StderrSignal::WrongPin)
+        );
+    }
+
+    #[test]
+    fn fido2_stderr_signal_classifies_pin_blocked_line_from_real_transcript() {
+        let blocked_line = REAL_WRONG_PIN_STDERR
+            .lines()
+            .find(|line| line.contains("currently blocked"))
+            .expect("fixture must contain a PIN-blocked line");
+        assert_eq!(
+            Fido2StderrSignal::classify(blocked_line),
+            Some(Fido2StderrSignal::PinBlocked)
+        );
+    }
+
+    #[test]
+    fn fido2_stderr_signal_ignores_unrelated_lines() {
+        assert_eq!(
+            Fido2StderrSignal::classify("Initializing FIDO2 credential on security token."),
+            None
+        );
+        assert_eq!(Fido2StderrSignal::classify(""), None);
     }
 
     #[test]
