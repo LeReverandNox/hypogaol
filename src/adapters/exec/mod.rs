@@ -490,6 +490,12 @@ fn keyslots_for_token(metadata: &Value, token_id: &str) -> Vec<u32> {
 struct Fido2Device {
     path: String,
     description: String,
+    /// Whether this device currently has a FIDO2 PIN configured (CTAP2
+    /// `clientPin` option), per AD-21/CAP-25. Populated separately from
+    /// enumeration itself — see `fido2_token_has_pin` and Task 2's
+    /// "Avoid poll-loop spam" — so it defaults to `false` wherever a device
+    /// is constructed before that lookup runs.
+    client_pin: bool,
 }
 
 /// Every FIDO2 security key currently plugged in, per one `fido2-token -L`
@@ -518,10 +524,45 @@ fn list_fido2_devices() -> Result<Vec<Fido2Device>, DomainError> {
             line.split_once(':').map(|(path, description)| Fido2Device {
                 path: path.trim().to_string(),
                 description: description.trim().to_string(),
+                client_pin: false,
             })
         })
         .filter(|device| !device.path.is_empty())
         .collect())
+}
+
+/// Runs `fido2-token -I <path>` (no `-c` — never prompts for a PIN or
+/// touch, safe to call during plain enumeration) and parses whether the
+/// device currently has a PIN configured, per AD-21/CAP-25.
+fn fido2_token_has_pin(path: &str) -> Result<bool, DomainError> {
+    let output = Command::new("fido2-token")
+        .args(["-I", path])
+        .output()
+        .map_err(|e| DomainError::AdapterFailure(format!("failed to run fido2-token -I: {e}")))?;
+    if !output.status.success() {
+        return Err(DomainError::AdapterFailure(format!(
+            "fido2-token -I failed for {path}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(parse_client_pin_configured(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+/// Pure parser, unit-testable without a real device: `true` iff the
+/// `options:` line contains the bare token `clientPin` (CTAP2
+/// authenticatorGetInfo semantics: `clientPin` option `true` = a PIN is
+/// currently set). `fido2-token` renders a `false` boolean option with a
+/// `no` prefix instead of omitting it (e.g. `noplat`, `noalwaysUv`), so
+/// `noclientPin` (PIN capability present but not set) and no `clientPin`
+/// token at all (capability unsupported) both correctly parse as `false`.
+fn parse_client_pin_configured(fido2_token_info_output: &str) -> bool {
+    fido2_token_info_output
+        .lines()
+        .find_map(|line| line.strip_prefix("options: "))
+        .map(|options| options.split(", ").any(|opt| opt == "clientPin"))
+        .unwrap_or(false)
 }
 
 /// Blocks, polling `fido2-token -L`, until at least `needed` devices are
@@ -2682,6 +2723,7 @@ mod tests {
         Fido2Device {
             path: path.to_string(),
             description: "test key".to_string(),
+            client_pin: false,
         }
     }
 
@@ -2722,6 +2764,34 @@ mod tests {
             fido2_verification_args(false),
             vec!["--fido2-with-user-verification=no".to_string()]
         );
+    }
+
+    // Real sample captured from `fido2-token -I /dev/hidraw5` against a
+    // TOKEN2 FIDO2 Security Key with a PIN configured (2026-08-10, see this
+    // story's Dev Notes).
+    const REAL_INFO_OUTPUT_WITH_PIN: &str = "options: rk, up, uv, noplat, noalwaysUv, credMgmt, authnrCfg, bioEnroll, clientPin, largeBlobs, pinUvAuthToken, setMinPINLength, makeCredUvNotRqd, credentialMgmtPreview, userVerificationMgmtPreview\n...\npin retries: 8\npin change required: false\n";
+
+    #[test]
+    fn parse_client_pin_configured_true_for_real_captured_output_with_pin_set() {
+        assert!(parse_client_pin_configured(REAL_INFO_OUTPUT_WITH_PIN));
+    }
+
+    #[test]
+    fn parse_client_pin_configured_false_when_capability_present_but_no_pin_set() {
+        let output = REAL_INFO_OUTPUT_WITH_PIN.replace("clientPin", "noclientPin");
+        assert!(!parse_client_pin_configured(&output));
+    }
+
+    #[test]
+    fn parse_client_pin_configured_false_when_token_absent_entirely() {
+        let output = "options: rk, up, uv, noplat, noalwaysUv\npin retries: 8\n";
+        assert!(!parse_client_pin_configured(output));
+    }
+
+    #[test]
+    fn parse_client_pin_configured_false_for_empty_or_malformed_input() {
+        assert!(!parse_client_pin_configured(""));
+        assert!(!parse_client_pin_configured("not a real fido2-token -I output at all"));
     }
 
     #[test]

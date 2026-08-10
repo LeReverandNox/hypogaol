@@ -27,7 +27,7 @@ so that a PIN-required device never surprises me mid-touch-prompt or leaves me c
   - Read in full: `src/adapters/exec/mod.rs` lines 485-736 (`Fido2Device` struct, `list_fido2_devices`, `wait_for_enough_fido2_devices`, `print_numbered_fido2_devices`, `prompt_for_device_index`, `resolve_interactive_selection`, `validate_device_enumerated`, `resolve_explicit_selection`, `resolve_device_selection`, `fido2_verification_args` — every device-selection/enumeration function this story extends), lines 1222-1258 (`open`'s presence-wait + `cryptsetup open --token-only` call), lines 1260-1290 (`resize`'s `cryptsetup resize --token-only` call — same touch/PIN-blocking shape as `open`, relevant to Task 5's scope decision below), lines 1444-1600ish (`enroll_fido2_key`'s full impl: device-selection resolution, the two `systemd-cryptenroll` branches with/without a transient passphrase), lines 55-59 (`privileged()` — wraps a `Command` in `sudo`, used by `open`/`resize` but **not** by `enroll_fido2_key`'s `systemd-cryptenroll` call, which runs directly since it operates on the LUKS2 header file and needs no elevation), lines 292-330 (`run_piping_stdin` — the existing concurrent-thread pattern for a pipe that could otherwise deadlock; `enroll_fido2_key`'s `--unlock-key-file` path doesn't use this today because the passphrase travels via a temp file, not stdin, but this function is the direct precedent for Task 5's concurrent-stderr-read thread). Also skim `src/ports/fido2_backend.rs` (confirm the trait is genuinely untouched by this story — see Dev Notes) and `tests/unit/fakes.rs`'s `FakeFido2Backend` (confirm it too is genuinely untouched).
   - **No spike needed for the PIN-status detection mechanism** — Task 0's own research (see Dev Notes' "Verified `fido2-token -I` output format") already confirms the exact field and parsing rule against a real device in this dev environment. **A spike is required for Task 5** (the reactive wrong-PIN-retry warning) — the exact stderr text `cryptsetup`/`systemd-cryptenroll` emit on a wrong PIN attempt is not documented anywhere web-verifiable (checked 2026-08-10 — see References) and must be captured from a real deliberate-wrong-PIN attempt against the physical FIDO2 device already present in this environment (`fido2-token -L` reports `/dev/hidraw5`, PIN already configured — confirmed live, see Dev Notes) before any detection logic is written against guessed text.
 
-- [ ] **Task 1: Add `client_pin: bool` to `Fido2Device` and a PIN-status query function** (AC: #1, #2)
+- [x] **Task 1: Add `client_pin: bool` to `Fido2Device` and a PIN-status query function** (AC: #1, #2)
   - `src/adapters/exec/mod.rs`: add a `client_pin: bool` field to the `Fido2Device` struct (~line 490).
   - Add a new pure-parsing function, e.g.:
     ```rust
@@ -152,4 +152,8 @@ so that a PIN-required device never surprises me mid-touch-prompt or leaves me c
 
 ### Completion Notes List
 
+- Task 1: Added `client_pin: bool` to `Fido2Device`, plus `fido2_token_has_pin` (runs `fido2-token -I`, never prompts) and the pure `parse_client_pin_configured` parser. Added 4 unit tests using the real captured `-I` output from Dev Notes (with-PIN, no-PIN via `noclientPin`, capability-absent, empty/malformed). All pass. Both new functions are currently unused (wired in by Task 2) — expected `dead_code` warnings until then.
+
 ### File List
+
+- `src/adapters/exec/mod.rs`
