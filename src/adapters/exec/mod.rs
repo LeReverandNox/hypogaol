@@ -674,7 +674,11 @@ fn run_with_stderr_watch(
     let status = child
         .wait()
         .map_err(|e| DomainError::AdapterFailure(format!("failed waiting for {cmd:?}: {e}")))?;
-    let captured = reader.join().unwrap_or_default();
+    let captured = reader.join().map_err(|_| {
+        DomainError::AdapterFailure(format!(
+            "stderr reader thread panicked while watching {cmd:?}"
+        ))
+    })?;
 
     Ok((status, captured))
 }
