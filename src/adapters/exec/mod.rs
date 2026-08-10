@@ -417,6 +417,43 @@ fn fido2_token_pin_retries_bounded(path: &str) -> Option<u32> {
         .ok()?
 }
 
+/// Builds `run_with_stderr_watch`'s post-exit wrong-PIN summary text, if
+/// any — a pure function, separated out so the success/failure wording
+/// split is directly unit-testable without a real device or subprocess.
+///
+/// `succeeded` matters because CTAP2 resets a device's PIN retry counter
+/// back to its maximum on a *successful* verification (found live,
+/// 2026-08-11: a create/enroll with 2 wrong PINs followed by the correct
+/// one reported "8 attempts remain" — the device's true post-transaction
+/// state, but deeply misleading paired with "you entered 2 incorrect
+/// PINs", since it implies those attempts still count against something
+/// they no longer do). On success, this reports only the wrong-attempt
+/// count, with no retry-count claim; on failure, `retries` (when `Some`,
+/// from a query made only when the overall command failed) is genuine and
+/// safe to report, since no reset happened.
+fn wrong_pin_summary(
+    succeeded: bool,
+    wrong_pin_attempts: u32,
+    retries: Option<u32>,
+) -> Option<String> {
+    if wrong_pin_attempts == 0 {
+        return None;
+    }
+    let plural = if wrong_pin_attempts == 1 { "" } else { "s" };
+    if succeeded {
+        return Some(format!(
+            "You entered {wrong_pin_attempts} incorrect PIN{plural} before succeeding."
+        ));
+    }
+    let retries = retries?;
+    Some(format!(
+        "You entered {wrong_pin_attempts} incorrect PIN{plural} — {retries} attempt{} \
+         remain{} on this security key.",
+        if retries == 1 { "" } else { "s" },
+        if retries == 1 { "s" } else { "" }
+    ))
+}
+
 /// Opens a fresh PTY pair via `posix_openpt`/`grantpt`/`unlockpt`/
 /// `ptsname_r`, returning the master end (as a `File`, for the caller to
 /// read from) and the slave device's path (e.g. `/dev/pts/7`) for the
@@ -651,18 +688,20 @@ fn run_with_stderr_watch(
     // *entire* PIN retry loop, so a concurrent query while the subprocess
     // is still running reliably contends and fails. The device is
     // guaranteed idle now that `child.wait()` has returned, making this the
-    // one point where a fresh query is both accurate and safe.
-    if wrong_pin_attempts > 0 && !pin_blocked {
-        if let [path] = retry_query_devices {
-            if let Some(retries) = fido2_token_pin_retries_bounded(path) {
-                println!(
-                    "You entered {wrong_pin_attempts} incorrect PIN{} — {retries} attempt{} \
-                     remain{} on this security key.",
-                    if wrong_pin_attempts == 1 { "" } else { "s" },
-                    if retries == 1 { "" } else { "s" },
-                    if retries == 1 { "s" } else { "" }
-                );
+    // one point where a fresh query is safe. Only queried when the overall
+    // command failed — see `wrong_pin_summary`'s doc comment for why a
+    // successful outcome must never claim a retry count.
+    if !pin_blocked {
+        let retries = if status.success() {
+            None
+        } else {
+            match retry_query_devices {
+                [path] => fido2_token_pin_retries_bounded(path),
+                _ => None,
             }
+        };
+        if let Some(summary) = wrong_pin_summary(status.success(), wrong_pin_attempts, retries) {
+            println!("{summary}");
         }
     }
 
@@ -3319,6 +3358,59 @@ mod tests {
             "Heads up: the security key's PIN is now locked — remove and reinsert it before \
              trying again."
         );
+    }
+
+    #[test]
+    fn wrong_pin_summary_none_when_no_wrong_attempts() {
+        assert_eq!(wrong_pin_summary(true, 0, Some(8)), None);
+        assert_eq!(wrong_pin_summary(false, 0, Some(8)), None);
+    }
+
+    #[test]
+    fn wrong_pin_summary_on_success_never_claims_a_retry_count() {
+        // Real hardware finding (2026-08-11): CTAP2 resets the PIN retry
+        // counter to max on a successful verification, so even though
+        // `retries` here is `Some(8)` (what a query would show right
+        // after success), the summary must not imply those 2 wrong
+        // attempts still count against anything.
+        assert_eq!(
+            wrong_pin_summary(true, 2, Some(8)),
+            Some("You entered 2 incorrect PINs before succeeding.".to_string())
+        );
+    }
+
+    #[test]
+    fn wrong_pin_summary_on_success_singular_wording() {
+        assert_eq!(
+            wrong_pin_summary(true, 1, Some(8)),
+            Some("You entered 1 incorrect PIN before succeeding.".to_string())
+        );
+    }
+
+    #[test]
+    fn wrong_pin_summary_on_failure_reports_the_genuine_retry_count() {
+        assert_eq!(
+            wrong_pin_summary(false, 2, Some(6)),
+            Some(
+                "You entered 2 incorrect PINs — 6 attempts remain on this security key."
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn wrong_pin_summary_on_failure_singular_wording_for_both_counts() {
+        assert_eq!(
+            wrong_pin_summary(false, 1, Some(1)),
+            Some(
+                "You entered 1 incorrect PIN — 1 attempt remains on this security key.".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn wrong_pin_summary_on_failure_none_when_retry_query_unavailable() {
+        assert_eq!(wrong_pin_summary(false, 2, None), None);
     }
 
     // Real stderr transcript captured (2026-08-10) from a deliberate
