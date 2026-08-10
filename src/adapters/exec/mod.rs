@@ -963,16 +963,18 @@ fn wait_for_enough_fido2_devices(needed: usize) -> Result<Vec<Fido2Device>, Doma
     loop {
         let devices = list_fido2_devices()?;
         if devices.len() >= needed {
-            return devices
+            // A failed `-I` query for one device (permission issue, a
+            // flaky/unrelated key, device mid-transaction) must not abort
+            // enumeration for every other device — this is an advisory
+            // enrichment, not a prerequisite for unlocking. Falls back to
+            // `false` (no warning) for that one device on query failure.
+            return Ok(devices
                 .into_iter()
-                .map(|device| {
-                    let client_pin = fido2_token_has_pin(&device.path)?;
-                    Ok(Fido2Device {
-                        client_pin,
-                        ..device
-                    })
+                .map(|device| Fido2Device {
+                    client_pin: fido2_token_has_pin(&device.path).unwrap_or(false),
+                    ..device
                 })
-                .collect();
+                .collect());
         }
         if devices.len() != last_seen {
             let more = needed - devices.len();
