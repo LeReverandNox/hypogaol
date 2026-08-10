@@ -625,6 +625,11 @@ fn run_with_stderr_watch(
                 // end-of-stream signal for this transport, not a real
                 // error.
                 Err(e) if e.raw_os_error() == Some(libc::EIO) => break,
+                // A transient interruption (e.g. a signal arriving during a
+                // multi-second touch/PIN wait) is not end-of-stream — retry
+                // the read instead of silently truncating capture and
+                // disabling wrong-PIN detection for the rest of this call.
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
                 Err(_) => break,
                 Ok(n) => n,
             };
