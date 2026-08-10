@@ -1354,7 +1354,25 @@ impl LuksBackend for ExecAdapter {
         // Cryptsetup's own credential-based `--token-only auto` already
         // disambiguates correctly once at least one device is present, so no
         // picker/explicit-device flag is needed here, unlike `enroll`.
-        wait_for_enough_fido2_devices(1)?;
+        let devices = wait_for_enough_fido2_devices(1)?;
+
+        // Blanket warning (AC #2): cryptsetup matches the stored token to
+        // whichever device answers, so — unlike enroll — there's no single
+        // "the" device to name. Fires regardless of `read_only`: a read-only
+        // unlock still authenticates against a real device. Devices are
+        // already enriched with `client_pin` by `wait_for_enough_fido2_devices`.
+        let pin_configured: Vec<&str> = devices
+            .iter()
+            .filter(|device| device.client_pin)
+            .map(|device| device.path.as_str())
+            .collect();
+        if !pin_configured.is_empty() {
+            println!(
+                "Heads up: the following currently-plugged-in security keys have a PIN \
+                 configured — you may be asked to enter one: {}.",
+                pin_configured.join(", ")
+            );
+        }
 
         // `--token-only` is not optional: without it, `cryptsetup open` falls
         // back to an interactive passphrase prompt instead of the FIDO2
