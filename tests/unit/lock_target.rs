@@ -44,7 +44,25 @@ fn real_lock_contends_while_held_and_releases_on_drop() {
 
     drop(first_guard);
 
-    let third_attempt = adapter.lock_target(&fixture.0);
+    // A short retry, not present in production code: `cargo test` runs every
+    // test as a thread inside one shared OS process, so `fork()` (via
+    // another concurrently-running test's `Command::spawn()`, e.g. the
+    // cryptsetup regression test below) can transiently duplicate this
+    // guard's fd into a not-yet-`exec`'d child, which briefly keeps the
+    // abstract name bound even after this thread's own `drop` above — a
+    // microsecond-scale window closed by that child's own `CLOEXEC` cleanup
+    // at `exec()` time. Real hypogaol invocations never hit this: each is a
+    // single-threaded process that always waits for one subprocess to fully
+    // exit before spawning the next, so there is never another thread whose
+    // `fork()` could duplicate this process's fd table.
+    let mut third_attempt = adapter.lock_target(&fixture.0);
+    for _ in 0..20 {
+        if third_attempt.is_ok() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        third_attempt = adapter.lock_target(&fixture.0);
+    }
     assert!(
         third_attempt.is_ok(),
         "dropping the first guard must release the abstract-socket lock, got {third_attempt:?}"
