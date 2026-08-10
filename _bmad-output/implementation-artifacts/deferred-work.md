@@ -1,5 +1,13 @@
 # Deferred Work
 
+## Deferred from: code review of 6-6-proactive-fido2-pin-status-guidance (2026-08-11)
+
+- `open_pty_pair`'s fixed 128-byte `ptsname_r` buffer has no `ERANGE` handling — pre-existing pattern (fixed-size stack buffers elsewhere in this file), effectively unreachable on Linux. [src/adapters/exec/mod.rs:472-484]
+- The pty master fd `open_pty_pair` returns is never marked close-on-exec, leaking into every subprocess `run_with_stderr_watch` spawns afterward — low real-world impact for this short-lived, single-operation-per-invocation CLI. [src/adapters/exec/mod.rs:443-491]
+- No test exercises `run_with_stderr_watch`'s full reader-thread accumulation loop end-to-end (e.g. a wrong-PIN marker split across a 4096-byte `read()` chunk boundary) — `Fido2StderrSignal::classify`/`wrong_pin_attempt_text` are each unit-tested in isolation but not through this integration point. [src/adapters/exec/mod.rs:604-663]
+- `Fido2StderrSignal::classify` matches locale/vendor-specific English literal stderr text with no fallback — consistent with this file's pre-existing, project-wide convention of assuming English-locale subprocess output. [src/adapters/exec/mod.rs:364-373]
+- `run_with_stderr_watch`'s `captured`/`scan_buffer` grow unbounded if the child ever emits stderr with no `\n`/`\r` boundary — low likelihood for `cryptsetup`/`systemd-cryptenroll`'s actual output shape. [src/adapters/exec/mod.rs:604-627]
+
 ## Deferred from: code review of 6-4-xfs-and-btrfs-filesystem-support (2026-08-09)
 
 - `with_transient_mount` performs two independent, unguarded mount/unmount cycles per resize (`filesystem_size` then `growfs`) with no protection against filesystem state changing between them — Story 6.5 "concurrent-invocation-guard" is the planned fix for this exact class of issue. [src/adapters/exec/mod.rs]

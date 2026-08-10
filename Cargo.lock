@@ -134,6 +134,7 @@ dependencies = [
  "anyhow",
  "clap",
  "getrandom",
+ "libc",
  "serde",
  "serde_json",
  "thiserror",

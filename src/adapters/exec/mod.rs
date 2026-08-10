@@ -1,7 +1,11 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::ffi::CStr;
+use std::fs::File;
 use std::io::{self, Write};
+use std::os::fd::{FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -331,6 +335,354 @@ fn run_piping_stdin(cmd: &mut Command, input: &[u8]) -> Result<(), String> {
     }
 }
 
+/// The literal `systemd-cryptenroll`/`cryptsetup` stderr text for a wrong
+/// FIDO2 PIN entry on a retry. Captured verbatim (2026-08-10) from a real,
+/// deliberate wrong-PIN attempt against physical hardware in this dev
+/// environment (`/dev/hidraw5`, user consented to the live test) — not
+/// documented anywhere web-verifiable at the time of writing, per this
+/// story's Task 5/Dev Notes. See this story's Completion Notes for the full
+/// captured transcript.
+const WRONG_PIN_STDERR_MARKER: &str = "PIN incorrect, please try again.";
+
+/// The literal stderr text once retries are exhausted and the token
+/// temporarily blocks further PIN attempts until physically reinserted —
+/// captured alongside `WRONG_PIN_STDERR_MARKER` from the same real spike.
+const PIN_BLOCKED_STDERR_MARKER: &str =
+    "Token PIN is currently blocked, please remove and reinsert token.";
+
+/// Which plain-language warning (if any) a single stderr `line` from
+/// `run_with_stderr_watch` should trigger. A separate, pure, directly
+/// unit-testable function rather than inline `if`s in the reader thread —
+/// this project's recurring review-pattern watchlist flags new stderr-line
+/// matching logic shipping without a direct test.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Fido2StderrSignal {
+    WrongPin,
+    PinBlocked,
+}
+
+impl Fido2StderrSignal {
+    fn classify(line: &str) -> Option<Self> {
+        if line.contains(WRONG_PIN_STDERR_MARKER) {
+            Some(Self::WrongPin)
+        } else if line.contains(PIN_BLOCKED_STDERR_MARKER) {
+            Some(Self::PinBlocked)
+        } else {
+            None
+        }
+    }
+
+    /// This signal's plain-language warning when no attempt count is
+    /// available at all (see `wrong_pin_attempt_text` for the normal,
+    /// count-aware `WrongPin` case — this is only its fallback).
+    fn warning(self) -> &'static str {
+        match self {
+            Self::WrongPin => "Heads up: that PIN was wrong — retries are limited.",
+            Self::PinBlocked => {
+                "Heads up: the security key's PIN is now locked — remove and reinsert it before \
+                 trying again."
+            }
+        }
+    }
+}
+
+/// Wraps `fido2_token_pin_retries` with a short bound so a slow/contended
+/// device query can never stall the caller for long. Only ever called
+/// **once, before the subprocess this device is about to authenticate
+/// starts** — never reactively mid-operation. Real hardware testing
+/// (2026-08-11, `LeReverandNox`) showed a query attempted *during* an
+/// active PIN retry loop reliably fails/times out:
+/// `systemd-cryptenroll`/`cryptsetup` appear to hold the device's CTAP HID
+/// channel open across the *entire* loop (not release/reacquire it per
+/// attempt), so a concurrent `fido2-token -I` query from a second process
+/// contends with it. Calling this once, upfront, while the device is
+/// still genuinely idle (nothing has touched it yet), avoids that
+/// contention entirely — see `run_with_stderr_watch`'s
+/// `max_pin_retries` parameter and `wrong_pin_attempt_text`, which track
+/// attempts *locally* from that single starting value instead of
+/// re-querying per attempt. The bound is kept regardless, as defense in
+/// depth — this helper still runs the query on its own thread rather than
+/// assuming the direct `Command::output()` call can never hang.
+fn fido2_token_pin_retries_bounded(path: &str) -> Option<u32> {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let path = path.to_string();
+    std::thread::spawn(move || {
+        let _ = tx.send(fido2_token_pin_retries(&path));
+    });
+    rx.recv_timeout(std::time::Duration::from_secs(1))
+        .ok()?
+        .ok()?
+}
+
+/// Builds the reactive, per-attempt wrong-PIN message — a pure function,
+/// directly unit-testable without a device or subprocess. `attempts_used`
+/// is this operation's own running count of wrong attempts seen so far
+/// (starts at 1 for the first). `max_retries`, when `Some`, was queried
+/// once *before* the subprocess started (see
+/// `fido2_token_pin_retries_bounded`'s doc comment for why); each wrong
+/// attempt decrements it by exactly one via plain local arithmetic — no
+/// further device query is ever needed, sidestepping the CTAP HID
+/// contention that made a live per-attempt query unreliable. `None`
+/// (no candidate device known, or the upfront query itself failed) falls
+/// back to `Fido2StderrSignal::WrongPin`'s static warning.
+fn wrong_pin_attempt_text(attempts_used: u32, max_retries: Option<u32>) -> String {
+    match max_retries {
+        Some(max) => {
+            let remaining = max.saturating_sub(attempts_used);
+            format!("Wrong PIN — attempt {attempts_used} of {max} ({remaining} remaining).")
+        }
+        None => Fido2StderrSignal::WrongPin.warning().to_string(),
+    }
+}
+
+/// Opens a fresh PTY pair via `posix_openpt`/`grantpt`/`unlockpt`/
+/// `ptsname_r`, returning the master end (as a `File`, for the caller to
+/// read from) and the slave device's path (e.g. `/dev/pts/7`) for the
+/// caller to open separately. `O_NOCTTY` keeps this process from
+/// accidentally acquiring the new pty as its own controlling terminal.
+fn open_pty_pair() -> Result<(File, PathBuf), DomainError> {
+    // SAFETY: these are the standard POSIX pty-allocation calls; every
+    // return value is checked before use, and `master_fd` is a freshly
+    // opened, exclusively-owned fd once `posix_openpt` returns non-negative.
+    unsafe {
+        let master_fd = libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY);
+        if master_fd < 0 {
+            return Err(DomainError::AdapterFailure(format!(
+                "failed to open a pty master (posix_openpt): {}",
+                io::Error::last_os_error()
+            )));
+        }
+
+        if libc::grantpt(master_fd) != 0 {
+            let err = io::Error::last_os_error();
+            libc::close(master_fd);
+            return Err(DomainError::AdapterFailure(format!(
+                "grantpt failed: {err}"
+            )));
+        }
+
+        if libc::unlockpt(master_fd) != 0 {
+            let err = io::Error::last_os_error();
+            libc::close(master_fd);
+            return Err(DomainError::AdapterFailure(format!(
+                "unlockpt failed: {err}"
+            )));
+        }
+
+        let mut name_buf = [0u8; 128];
+        if libc::ptsname_r(
+            master_fd,
+            name_buf.as_mut_ptr().cast::<libc::c_char>(),
+            name_buf.len(),
+        ) != 0
+        {
+            let err = io::Error::last_os_error();
+            libc::close(master_fd);
+            return Err(DomainError::AdapterFailure(format!(
+                "ptsname_r failed: {err}"
+            )));
+        }
+
+        let slave_path = CStr::from_ptr(name_buf.as_ptr().cast::<libc::c_char>())
+            .to_string_lossy()
+            .into_owned();
+
+        Ok((File::from_raw_fd(master_fd), PathBuf::from(slave_path)))
+    }
+}
+
+/// Runs `cmd` with stdin/stdout left inherited (`Command`'s default,
+/// deliberately not overridden — the actual touch/PIN exchange must reach
+/// the real terminal, AD-3) and stderr connected to a **pty**, read
+/// **concurrently on a background thread** while the main thread blocks in
+/// `child.wait()`. This avoids a pipe-buffer deadlock on a long touch/PIN-
+/// blocking call if the child writes enough stderr before it's drained
+/// (AD-3's Epic 6 amendment) — mirroring `run_piping_stdin`'s existing
+/// concurrent-thread precedent, used there for exactly this reason on a
+/// different pipe (stdin, not stderr).
+///
+/// **Why a pty and not a plain pipe** (found post-review, 2026-08-10,
+/// reported by `LeReverandNox` against `open()`'s live unlock output, with
+/// explicit sign-off to introduce `libc` as a direct dependency again for
+/// this fix — see this story's Completion Notes for the full diagnosis):
+/// `systemd-cryptenroll`/`cryptsetup`'s own FIDO2 touch/PIN status UI checks
+/// whether its stderr is a real terminal (`isatty`) and renders differently
+/// — still using `\r`-based in-place updates, but without the line-clearing
+/// it does for a real tty — when it isn't. A plain `Stdio::piped()` fails
+/// that check and produces visibly corrupted (staircased) output; this is
+/// true even with zero Rust code involved (confirmed via plain
+/// `2> >(cat >&2)` in bash), so no amount of care in how the pipe is *read*
+/// can fix it — the child itself emits different bytes. Connecting its
+/// stderr to a pty slave instead makes `isatty` succeed, so the child
+/// renders exactly as it would talking to a real terminal, while we still
+/// read the byte stream from the master end.
+///
+/// Every raw byte read from the master is forwarded to the real stderr
+/// **immediately and unmodified**, in the same chunks it arrived in — never
+/// reconstructed line-by-line via `\n`-splitting (an earlier version of this
+/// function did that via `BufRead::lines()` plus per-line `eprintln!`,
+/// which — independent of the pty-vs-pipe issue above — also risked adding
+/// a `\n` the original stream never had).
+///
+/// A separate accumulating buffer is scanned for `WRONG_PIN_STDERR_MARKER`/
+/// `PIN_BLOCKED_STDERR_MARKER`, using either a `\n` or `\r` byte as a soft
+/// boundary — good enough to isolate a complete-enough chunk of text to
+/// classify, without ever affecting what's forwarded above. This is safe
+/// against multi-byte UTF-8 splitting: `\n`/`\r` are single-byte ASCII
+/// values that never appear as a continuation/lead byte of a multi-byte
+/// sequence, so scanning for them byte-by-byte never mis-splits a
+/// multi-byte character (e.g. the 👆 emoji some prompts use). On each
+/// wrong-PIN match, a reactive per-attempt message is printed immediately
+/// (via `println!`, to stdout — a separate stream from the forwarded
+/// stderr, so it can never interleave with or corrupt the passthrough
+/// bytes above) — see `max_pin_retries` below for where its attempt count
+/// comes from.
+///
+/// The full raw bytes are also returned (lossily decoded to a `String` once,
+/// at the end) so a caller can fold the real subprocess's own diagnostic
+/// text into its own `AdapterFailure` message on a non-zero exit.
+///
+/// `max_pin_retries`, when `Some`, is the device's PIN retry count queried
+/// *before* this subprocess started (review feedback, 2026-08-11 — see
+/// `fido2_token_pin_retries_bounded`'s doc comment for why it must be
+/// queried upfront, never reactively mid-loop). Each wrong-PIN signal
+/// detected below decrements a local counter from this starting value —
+/// plain arithmetic, no further device query — so the message can show
+/// "attempt N of M (K remaining)" for every single attempt, not just a
+/// summary at the end. Pass `None` when no specific device is known at all
+/// to fall back to `Fido2StderrSignal::WrongPin`'s static, count-less
+/// wording.
+/// Prints `text` to stdout and flushes immediately — used for the reactive
+/// wrong-PIN/PIN-blocked warnings below, which must appear promptly relative
+/// to the raw stderr bytes forwarded alongside them (also explicitly
+/// flushed) rather than sitting in stdout's buffer until process exit
+/// whenever stdout isn't a live tty (redirected, piped, logged).
+fn print_flushed(text: &str) {
+    println!("{text}");
+    let _ = io::stdout().flush();
+}
+
+fn run_with_stderr_watch(
+    cmd: &mut Command,
+    max_pin_retries: Option<u32>,
+) -> Result<(ExitStatus, String), DomainError> {
+    let (mut master, slave_path) = open_pty_pair()?;
+
+    let slave = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&slave_path)
+        .map_err(|e| {
+            DomainError::AdapterFailure(format!(
+                "failed to open pty slave {}: {e}",
+                slave_path.display()
+            ))
+        })?;
+    let slave_fd: RawFd = slave.into_raw_fd();
+
+    // SAFETY: `pre_exec`'s closure runs in the forked child, before exec,
+    // and must only call async-signal-safe functions — `dup2`/`close` both
+    // qualify. `slave_fd` was opened in the parent before `fork()`, so the
+    // same fd number is valid (pointing at the same open file description)
+    // in the child immediately after `fork()`.
+    unsafe {
+        cmd.pre_exec(move || {
+            if libc::dup2(slave_fd, libc::STDERR_FILENO) < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if slave_fd != libc::STDERR_FILENO {
+                libc::close(slave_fd);
+            }
+            Ok(())
+        });
+    }
+
+    let spawn_result = cmd.spawn();
+    // The parent's own copy of the slave fd must be closed here, right
+    // after spawn, regardless of outcome — otherwise it lingers for as
+    // long as the caller keeps `cmd` alive (arbitrarily longer than this
+    // function), which would keep the pty's slave-side reference count
+    // above zero and prevent the master from ever seeing end-of-stream.
+    // SAFETY: `slave_fd` is a valid fd we own exclusively at this point;
+    // `pre_exec` (run in the child) never affects the parent's copy.
+    unsafe {
+        libc::close(slave_fd);
+    }
+    let mut child = spawn_result
+        .map_err(|e| DomainError::AdapterFailure(format!("failed to spawn {cmd:?}: {e}")))?;
+
+    let reader = std::thread::spawn(move || {
+        let mut captured = Vec::new();
+        let mut scan_buffer = Vec::new();
+        let mut chunk = [0u8; 4096];
+        let mut wrong_pin_attempts: u32 = 0;
+
+        loop {
+            let bytes_read = match io::Read::read(&mut master, &mut chunk) {
+                Ok(0) => break,
+                // Linux ptys report EIO (not a clean 0-byte read) once
+                // every slave-side fd has closed — the normal
+                // end-of-stream signal for this transport, not a real
+                // error.
+                Err(e) if e.raw_os_error() == Some(libc::EIO) => break,
+                // A transient interruption (e.g. a signal arriving during a
+                // multi-second touch/PIN wait) is not end-of-stream — retry
+                // the read instead of silently truncating capture and
+                // disabling wrong-PIN detection for the rest of this call.
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+                Ok(n) => n,
+            };
+            let bytes = &chunk[..bytes_read];
+
+            let _ = io::Write::write_all(&mut io::stderr(), bytes);
+            let _ = io::stderr().flush();
+
+            captured.extend_from_slice(bytes);
+            scan_buffer.extend_from_slice(bytes);
+
+            while let Some(boundary) = scan_buffer.iter().position(|&b| b == b'\n' || b == b'\r') {
+                let line = String::from_utf8_lossy(&scan_buffer[..boundary]).into_owned();
+                scan_buffer.drain(..=boundary);
+                match Fido2StderrSignal::classify(&line) {
+                    Some(Fido2StderrSignal::WrongPin) => {
+                        wrong_pin_attempts += 1;
+                        print_flushed(&wrong_pin_attempt_text(wrong_pin_attempts, max_pin_retries));
+                    }
+                    Some(Fido2StderrSignal::PinBlocked) => {
+                        print_flushed(Fido2StderrSignal::PinBlocked.warning());
+                    }
+                    None => {}
+                }
+            }
+        }
+
+        match Fido2StderrSignal::classify(&String::from_utf8_lossy(&scan_buffer)) {
+            Some(Fido2StderrSignal::WrongPin) => {
+                wrong_pin_attempts += 1;
+                print_flushed(&wrong_pin_attempt_text(wrong_pin_attempts, max_pin_retries));
+            }
+            Some(Fido2StderrSignal::PinBlocked) => {
+                print_flushed(Fido2StderrSignal::PinBlocked.warning());
+            }
+            None => {}
+        }
+
+        String::from_utf8_lossy(&captured).into_owned()
+    });
+
+    let status = child
+        .wait()
+        .map_err(|e| DomainError::AdapterFailure(format!("failed waiting for {cmd:?}: {e}")))?;
+    let captured = reader.join().map_err(|_| {
+        DomainError::AdapterFailure(format!(
+            "stderr reader thread panicked while watching {cmd:?}"
+        ))
+    })?;
+
+    Ok((status, captured))
+}
+
 /// Shared by `close` (an already-open mapper the caller knows exists) and
 /// `close_stale_mapping` (a name that may or may not currently be mapped —
 /// the caller checks presence first).
@@ -490,6 +842,12 @@ fn keyslots_for_token(metadata: &Value, token_id: &str) -> Vec<u32> {
 struct Fido2Device {
     path: String,
     description: String,
+    /// Whether this device currently has a FIDO2 PIN configured (CTAP2
+    /// `clientPin` option), per AD-21/CAP-25. Populated separately from
+    /// enumeration itself — see `fido2_token_has_pin` and Task 2's
+    /// "Avoid poll-loop spam" — so it defaults to `false` wherever a device
+    /// is constructed before that lookup runs.
+    client_pin: bool,
 }
 
 /// Every FIDO2 security key currently plugged in, per one `fido2-token -L`
@@ -518,10 +876,74 @@ fn list_fido2_devices() -> Result<Vec<Fido2Device>, DomainError> {
             line.split_once(':').map(|(path, description)| Fido2Device {
                 path: path.trim().to_string(),
                 description: description.trim().to_string(),
+                client_pin: false,
             })
         })
         .filter(|device| !device.path.is_empty())
         .collect())
+}
+
+/// Runs `fido2-token -I <path>` (no `-c` — never prompts for a PIN or
+/// touch, safe to call during plain enumeration) and parses whether the
+/// device currently has a PIN configured, per AD-21/CAP-25.
+fn fido2_token_has_pin(path: &str) -> Result<bool, DomainError> {
+    let output = Command::new("fido2-token")
+        .args(["-I", path])
+        .output()
+        .map_err(|e| DomainError::AdapterFailure(format!("failed to run fido2-token -I: {e}")))?;
+    if !output.status.success() {
+        return Err(DomainError::AdapterFailure(format!(
+            "fido2-token -I failed for {path}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(parse_client_pin_configured(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
+}
+
+/// Pure parser, unit-testable without a real device: `true` iff the
+/// `options:` line contains the bare token `clientPin` (CTAP2
+/// authenticatorGetInfo semantics: `clientPin` option `true` = a PIN is
+/// currently set). `fido2-token` renders a `false` boolean option with a
+/// `no` prefix instead of omitting it (e.g. `noplat`, `noalwaysUv`), so
+/// `noclientPin` (PIN capability present but not set) and no `clientPin`
+/// token at all (capability unsupported) both correctly parse as `false`.
+fn parse_client_pin_configured(fido2_token_info_output: &str) -> bool {
+    fido2_token_info_output
+        .lines()
+        .find_map(|line| line.strip_prefix("options: "))
+        .map(|options| options.split(", ").any(|opt| opt == "clientPin"))
+        .unwrap_or(false)
+}
+
+/// Runs `fido2-token -I <path>` (no `-c` — never prompts) and parses the
+/// device's *current* PIN retry count. Reactive-only: called right after a
+/// wrong-PIN signal is detected on stderr, never proactively — a query
+/// taken before the failed attempt would report the stale, pre-failure
+/// count (this is exactly why AC #3's Dev Notes rule out sourcing this from
+/// the same `-I` call Task 1/2 already make during enumeration).
+fn fido2_token_pin_retries(path: &str) -> Result<Option<u32>, DomainError> {
+    let output = Command::new("fido2-token")
+        .args(["-I", path])
+        .output()
+        .map_err(|e| DomainError::AdapterFailure(format!("failed to run fido2-token -I: {e}")))?;
+    if !output.status.success() {
+        return Err(DomainError::AdapterFailure(format!(
+            "fido2-token -I failed for {path}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(parse_pin_retries(&String::from_utf8_lossy(&output.stdout)))
+}
+
+/// Pure parser, unit-testable without a real device: extracts the integer
+/// from a `pin retries: N` line, if present and well-formed.
+fn parse_pin_retries(fido2_token_info_output: &str) -> Option<u32> {
+    fido2_token_info_output
+        .lines()
+        .find_map(|line| line.strip_prefix("pin retries: "))
+        .and_then(|n| n.trim().parse().ok())
 }
 
 /// Blocks, polling `fido2-token -L`, until at least `needed` devices are
@@ -530,12 +952,29 @@ fn list_fido2_devices() -> Result<Vec<Fido2Device>, DomainError> {
 /// needs at least one device present. Prints a friendly wait message only
 /// when the enumerated count changes, so it doesn't spam the terminal every
 /// poll tick.
+///
+/// `client_pin` is populated exactly once, on this final settled list, right
+/// before returning — never inside the poll loop itself, which would fire an
+/// extra `fido2-token -I` subprocess call per already-connected device on
+/// every 500ms tick (AD-21's literal wording doesn't say when to populate it;
+/// see Dev Notes' "Avoid poll-loop spam").
 fn wait_for_enough_fido2_devices(needed: usize) -> Result<Vec<Fido2Device>, DomainError> {
     let mut last_seen = usize::MAX;
     loop {
         let devices = list_fido2_devices()?;
         if devices.len() >= needed {
-            return Ok(devices);
+            // A failed `-I` query for one device (permission issue, a
+            // flaky/unrelated key, device mid-transaction) must not abort
+            // enumeration for every other device — this is an advisory
+            // enrichment, not a prerequisite for unlocking. Falls back to
+            // `false` (no warning) for that one device on query failure.
+            return Ok(devices
+                .into_iter()
+                .map(|device| Fido2Device {
+                    client_pin: fido2_token_has_pin(&device.path).unwrap_or(false),
+                    ..device
+                })
+                .collect());
         }
         if devices.len() != last_seen {
             let more = needed - devices.len();
@@ -596,7 +1035,9 @@ fn prompt_for_device_index(prompt: &str, devices: &[Fido2Device]) -> Result<usiz
     }
 }
 
-/// Resolves `Fido2DeviceSelection::Interactive` to concrete hidraw paths.
+/// Resolves `Fido2DeviceSelection::Interactive` to concrete devices —
+/// carrying each device's `client_pin` status along (already populated by
+/// `wait_for_enough_fido2_devices`), for Task 3's enroll-time PIN warning.
 /// `need_existing` is false for create's bootstrap-enroll call (single "new
 /// key" role only) and true for a standalone enroll authenticating against
 /// an already-enrolled key (both "existing" and "new" roles).
@@ -609,12 +1050,12 @@ fn prompt_for_device_index(prompt: &str, devices: &[Fido2Device]) -> Result<usiz
 /// elimination shortcut).
 fn resolve_interactive_selection(
     need_existing: bool,
-) -> Result<(String, Option<String>), DomainError> {
+) -> Result<(Fido2Device, Option<Fido2Device>), DomainError> {
     let needed = if need_existing { 2 } else { 1 };
     let devices = wait_for_enough_fido2_devices(needed)?;
 
     if !need_existing && devices.len() == 1 {
-        return Ok((devices[0].path.clone(), None));
+        return Ok((devices[0].clone(), None));
     }
 
     print_numbered_fido2_devices(&devices);
@@ -640,8 +1081,8 @@ fn resolve_interactive_selection(
     };
 
     Ok((
-        devices[new_index].path.clone(),
-        existing_index.map(|index| devices[index].path.clone()),
+        devices[new_index].clone(),
+        existing_index.map(|index| devices[index].clone()),
     ))
 }
 
@@ -697,20 +1138,113 @@ fn resolve_explicit_selection(
     Ok((new_path, existing_path))
 }
 
+/// Prints Task 3's device-specific enroll-time PIN warning for whichever of
+/// `new_device`/`existing_device` currently has `client_pin == true` —
+/// either, both, or neither may warrant one, since `existing_device`
+/// authenticates the enrollment operation itself while `new_device` is the
+/// key actually being enrolled.
+///
+/// `user_verification` changes the wording, not just whether it fires (AD-16
+/// — see Dev Notes' "Interaction with user_verification/AD-16"): when `true`,
+/// `fido2_verification_args` always disables `clientPin` for the resulting
+/// credential, so a PIN is never involved at all — neither for this
+/// enrollment ceremony nor for the credential's future unlocks. Confirmed
+/// live against real hardware (2026-08-10, see this story's Completion
+/// Notes): a `--fido2-with-client-pin=false` enrollment against a
+/// PIN-configured device completed with no PIN prompt whatsoever, only
+/// presence/fingerprint confirmation — this is no longer a hedge.
+fn print_enroll_pin_warning(
+    new_device: &Fido2Device,
+    existing_device: Option<&Fido2Device>,
+    user_verification: bool,
+) {
+    // `user_verification` only governs `fido2_verification_args` for
+    // `new_device` — the credential being created. `existing_device`, when
+    // present, authenticates the enrollment via `--unlock-fido2-device`
+    // using its own already-established PIN/UV settings, entirely
+    // unaffected by this call's `user_verification` flag: the hedge below
+    // must never apply to it.
+    if new_device.client_pin {
+        if user_verification {
+            println!(
+                "Heads up: {} has a PIN configured, but since you're enrolling with \
+                 user-verification, you won't be asked for it — this enrollment and future \
+                 unlocks with this key both use its fingerprint/on-device check instead.",
+                new_device.path
+            );
+        } else {
+            println!(
+                "Heads up: {} has a PIN configured — you'll be asked to enter it.",
+                new_device.path
+            );
+        }
+    }
+
+    if let Some(existing_device) = existing_device {
+        if existing_device.client_pin {
+            println!(
+                "Heads up: {} has a PIN configured — you'll be asked to enter it.",
+                existing_device.path
+            );
+        }
+    }
+}
+
 /// Resolves `selection` to the concrete `(new_device, existing_device)`
-/// hidraw paths `systemd-cryptenroll` needs — `existing_device` is `Some`
-/// exactly when `need_existing` is true.
+/// `systemd-cryptenroll` needs, each carrying its `client_pin` status —
+/// `existing_device` is `Some` exactly when `need_existing` is true. Prints
+/// Task 3's enroll-time PIN warning (see `print_enroll_pin_warning`) once
+/// both are known, centralizing the print call for both selection modes
+/// rather than duplicating it in each resolver.
+///
+/// The `Explicit` branch looks up `client_pin` only for the 1-2 resolved
+/// paths directly (cheaper than enriching the whole enumerated list, and
+/// matches AD-21's framing that the resolvers "know the specific device"
+/// once resolved) — unlike the `Interactive` branch, whose devices already
+/// carry `client_pin` from `wait_for_enough_fido2_devices`'s enrichment.
 fn resolve_device_selection(
     selection: &Fido2DeviceSelection,
     need_existing: bool,
-) -> Result<(String, Option<String>), DomainError> {
-    match selection {
-        Fido2DeviceSelection::Interactive => resolve_interactive_selection(need_existing),
+    user_verification: bool,
+) -> Result<(Fido2Device, Option<Fido2Device>), DomainError> {
+    let (new_device, existing_device) = match selection {
+        Fido2DeviceSelection::Interactive => resolve_interactive_selection(need_existing)?,
         Fido2DeviceSelection::Explicit { new, existing } => {
             let devices = list_fido2_devices()?;
-            resolve_explicit_selection(&devices, new, existing.as_deref(), need_existing)
+            let (new_path, existing_path) =
+                resolve_explicit_selection(&devices, new, existing.as_deref(), need_existing)?;
+
+            // Description is already known from `devices` (the same
+            // enumeration `resolve_explicit_selection` just validated
+            // against) — look it up instead of discarding it. `client_pin`
+            // query failure is advisory-only (see `wait_for_enough_fido2_devices`)
+            // and must not abort enrollment for an otherwise-valid device.
+            let description_for = |path: &str| {
+                devices
+                    .iter()
+                    .find(|device| device.path == path)
+                    .map(|device| device.description.clone())
+                    .unwrap_or_default()
+            };
+
+            let new_device = Fido2Device {
+                client_pin: fido2_token_has_pin(&new_path).unwrap_or(false),
+                description: description_for(&new_path),
+                path: new_path,
+            };
+            let existing_device = existing_path.map(|path| Fido2Device {
+                client_pin: fido2_token_has_pin(&path).unwrap_or(false),
+                description: description_for(&path),
+                path,
+            });
+
+            (new_device, existing_device)
         }
-    }
+    };
+
+    print_enroll_pin_warning(&new_device, existing_device.as_ref(), user_verification);
+
+    Ok((new_device, existing_device))
 }
 
 /// `--fido2-with-user-verification` is always passed explicitly (AD-16 — see
@@ -1226,23 +1760,51 @@ impl LuksBackend for ExecAdapter {
         // Cryptsetup's own credential-based `--token-only auto` already
         // disambiguates correctly once at least one device is present, so no
         // picker/explicit-device flag is needed here, unlike `enroll`.
-        wait_for_enough_fido2_devices(1)?;
+        let devices = wait_for_enough_fido2_devices(1)?;
+
+        // Blanket warning (AC #2): cryptsetup matches the stored token to
+        // whichever device answers, so — unlike enroll — there's no single
+        // "the" device to name. Fires regardless of `read_only`: a read-only
+        // unlock still authenticates against a real device. Devices are
+        // already enriched with `client_pin` by `wait_for_enough_fido2_devices`.
+        let pin_configured: Vec<String> = devices
+            .iter()
+            .filter(|device| device.client_pin)
+            .map(|device| device.path.clone())
+            .collect();
+        if !pin_configured.is_empty() {
+            println!(
+                "Heads up: the following currently-plugged-in security keys have a PIN \
+                 configured — you may be asked to enter one: {}.",
+                pin_configured.join(", ")
+            );
+        }
+
+        // Queried once here, before the blocking cryptsetup call below even
+        // starts — the device is still genuinely idle at this point, unlike
+        // mid-loop (see `fido2_token_pin_retries_bounded`'s doc comment).
+        // Only when exactly one PIN-configured device is plugged in: with
+        // several, cryptsetup's own invisible matching means we can't know
+        // in advance which one will actually answer.
+        let max_pin_retries = match pin_configured.as_slice() {
+            [path] => fido2_token_pin_retries_bounded(path),
+            _ => None,
+        };
 
         // `--token-only` is not optional: without it, `cryptsetup open` falls
         // back to an interactive passphrase prompt instead of the FIDO2
         // PIN/touch flow (confirmed empirically during Story 1.6's hardware
-        // run). Inherited stdio (`.status()`, not `.output()`) lets the
-        // systemd-fido2 plugin's own prompt reach the real terminal, the same
-        // pattern `enroll_fido2_key`'s `systemd-cryptenroll` call already
-        // uses.
+        // run). stdin/stdout stay inherited so the systemd-fido2 plugin's
+        // own prompt reaches the real terminal; stderr is piped and read
+        // concurrently (`run_with_stderr_watch`) for the wrong-PIN warning
+        // (AC #3/#4) without risking a pipe-buffer deadlock.
         let mut cmd = privileged("cryptsetup");
         cmd.args(["open", "--token-only"]);
         if read_only {
             cmd.arg("--readonly");
         }
-        let status = cmd.arg(path).arg(name).status().map_err(|e| {
-            DomainError::AdapterFailure(format!("failed to run cryptsetup open: {e}"))
-        })?;
+        cmd.arg(path).arg(name);
+        let (status, stderr) = run_with_stderr_watch(&mut cmd, max_pin_retries)?;
 
         if status.success() {
             Ok(MapperHandle {
@@ -1251,8 +1813,9 @@ impl LuksBackend for ExecAdapter {
             })
         } else {
             Err(DomainError::AdapterFailure(format!(
-                "cryptsetup open --token-only failed for {} as {name}",
-                path.display()
+                "cryptsetup open --token-only failed for {} as {name}: {}",
+                path.display(),
+                stderr.trim()
             )))
         }
     }
@@ -1268,23 +1831,57 @@ impl LuksBackend for ExecAdapter {
         // `open --token-only` populated — it falls back to an interactive
         // passphrase prompt, which this workflow has no passphrase to
         // satisfy. `--token-only` instead re-authenticates via the enrolled
-        // FIDO2 token, the same mechanism `open` already uses. Inherited
-        // stdio (`.status()`, not `.output()`) lets that touch/PIN prompt
-        // reach the real terminal, same pattern as `open`.
-        let status = privileged("cryptsetup")
-            .args(["resize", "--token-only"])
-            .arg(&mapper.name)
-            .status()
-            .map_err(|e| {
-                DomainError::AdapterFailure(format!("failed to run cryptsetup resize: {e}"))
-            })?;
+        // FIDO2 token, the same mechanism `open` already uses. stdin/stdout
+        // stay inherited so that touch/PIN prompt reaches the real terminal,
+        // same pattern as `open` — including `run_with_stderr_watch`'s
+        // wrong-PIN detection (AC #3): a `resize` re-authentication is just
+        // as likely to hit a wrong-PIN retry as `open`/`enroll`, and AD-3's
+        // amended Rule is written per-subprocess-call generically, not
+        // scoped to two named workflows (Task 5's scope-decision — applied
+        // here for consistency, not left as a documented gap).
+        //
+        // Blanket warning (AC #2, extended to `resize` per this story's own
+        // code review, 2026-08-11): `resize`'s re-authentication is the same
+        // invisible-device-matching shape as `open`'s presence-wait, so it
+        // warrants the same proactive warning before the blocking call.
+        // Unlike `open`, this does not block waiting for a device to
+        // appear — a single, immediate enumeration of whatever is currently
+        // plugged in, since `resize` never blocked on device presence
+        // before this fix and shouldn't start now. A per-device `-I` query
+        // failure is advisory-only and skips that one device rather than
+        // aborting (same reasoning as `wait_for_enough_fido2_devices`).
+        let pin_configured: Vec<String> = list_fido2_devices()?
+            .into_iter()
+            .filter(|device| fido2_token_has_pin(&device.path).unwrap_or(false))
+            .map(|device| device.path)
+            .collect();
+        if !pin_configured.is_empty() {
+            println!(
+                "Heads up: the following currently-plugged-in security keys have a PIN \
+                 configured — you may be asked to enter one: {}.",
+                pin_configured.join(", ")
+            );
+        }
+        // Queried upfront, before the blocking call, same reasoning as
+        // `open` — only when exactly one PIN-configured device is present,
+        // since cryptsetup's own invisible matching means we can't know in
+        // advance which one will actually answer otherwise.
+        let max_pin_retries = match pin_configured.as_slice() {
+            [path] => fido2_token_pin_retries_bounded(path),
+            _ => None,
+        };
+
+        let mut cmd = privileged("cryptsetup");
+        cmd.args(["resize", "--token-only"]).arg(&mapper.name);
+        let (status, stderr) = run_with_stderr_watch(&mut cmd, max_pin_retries)?;
 
         if status.success() {
             Ok(())
         } else {
             Err(DomainError::AdapterFailure(format!(
-                "cryptsetup resize --token-only failed for {}",
-                mapper.name
+                "cryptsetup resize --token-only failed for {}: {}",
+                mapper.name,
+                stderr.trim()
             )))
         }
     }
@@ -1483,7 +2080,7 @@ impl Fido2Backend for ExecAdapter {
         // bootstrap-enroll call); a standalone enroll also needs an
         // "existing key" role to authenticate against.
         let (new_device, existing_device) =
-            resolve_device_selection(&selection, !has_transient_passphrase)?;
+            resolve_device_selection(&selection, !has_transient_passphrase, user_verification)?;
 
         let passphrase = self.transient_passphrase.borrow_mut().take();
 
@@ -1494,12 +2091,35 @@ impl Fido2Backend for ExecAdapter {
         // the documented non-interactive path instead, so the passphrase is
         // written to a tightly-permissioned, promptly-deleted temp file.
         //
-        // stdin/stdout/stderr all stay inherited in both branches
-        // (`.status()`, never `.output()`): the unlock credential, when one
-        // exists, travels via `--unlock-key-file` rather than stdin, so the
-        // user's terminal is free to handle systemd-cryptenroll's own FIDO2
-        // touch/PIN prompt normally.
-        let status = match passphrase {
+        // stdin/stdout stay inherited in both branches: the unlock
+        // credential, when one exists, travels via `--unlock-key-file`
+        // rather than stdin, so the user's terminal is free to handle
+        // systemd-cryptenroll's own FIDO2 touch/PIN prompt normally. stderr
+        // is piped and read concurrently (`run_with_stderr_watch`) for the
+        // wrong-PIN warning (AC #3) without risking a pipe-buffer deadlock.
+        //
+        // Computed before the match below moves `existing_device` in its
+        // `None` arm — whichever of `new_device`/`existing_device` actually
+        // has a PIN configured is the candidate to query an upfront retry
+        // count for, before the blocking systemd-cryptenroll call below
+        // even starts (the device is still genuinely idle here — see
+        // `fido2_token_pin_retries_bounded`'s doc comment for why this must
+        // happen now, not reactively mid-loop).
+        let pin_configured_candidates: Vec<String> = std::iter::once(&new_device)
+            .chain(existing_device.as_ref())
+            .filter(|device| device.client_pin)
+            .map(|device| device.path.clone())
+            .collect();
+        let max_pin_retries = match pin_configured_candidates.as_slice() {
+            [path] => fido2_token_pin_retries_bounded(path),
+            _ => None,
+        };
+
+        // `key_file_guard` (when `Some`) must outlive the
+        // `run_with_stderr_watch` call below — its `Drop` impl wipes the
+        // on-disk temp file, which `systemd-cryptenroll` needs to still
+        // exist while it runs.
+        let (mut cmd, key_file_guard) = match passphrase {
             Some(passphrase) => {
                 let key_file = TempKeyFile::create(passphrase.as_bytes())
                     .map_err(DomainError::AdapterFailure)?;
@@ -1510,12 +2130,12 @@ impl Fido2Backend for ExecAdapter {
                 // own Drop impl once this function returns.
                 drop(passphrase);
 
-                Command::new("systemd-cryptenroll")
-                    .arg(format!("--fido2-device={new_device}"))
+                let mut cmd = Command::new("systemd-cryptenroll");
+                cmd.arg(format!("--fido2-device={}", new_device.path))
                     .arg(format!("--unlock-key-file={}", key_file.path.display()))
                     .args(fido2_verification_args(user_verification))
-                    .arg(path)
-                    .status()
+                    .arg(path);
+                (cmd, Some(key_file))
             }
             None => {
                 // No transient bootstrap passphrase exists (this story's
@@ -1542,22 +2162,23 @@ impl Fido2Backend for ExecAdapter {
                 let existing_device = existing_device
                     .expect("resolve_device_selection guarantees Some when need_existing is true");
 
-                Command::new("systemd-cryptenroll")
-                    .arg(format!("--fido2-device={new_device}"))
-                    .arg(format!("--unlock-fido2-device={existing_device}"))
+                let mut cmd = Command::new("systemd-cryptenroll");
+                cmd.arg(format!("--fido2-device={}", new_device.path))
+                    .arg(format!("--unlock-fido2-device={}", existing_device.path))
                     .args(fido2_verification_args(user_verification))
-                    .arg(path)
-                    .status()
+                    .arg(path);
+                (cmd, None)
             }
-        }
-        .map_err(|e| {
-            DomainError::AdapterFailure(format!("failed to run systemd-cryptenroll: {e}"))
-        })?;
+        };
+
+        let (status, stderr) = run_with_stderr_watch(&mut cmd, max_pin_retries)?;
+        drop(key_file_guard);
 
         if !status.success() {
-            return Err(DomainError::AdapterFailure(
-                "systemd-cryptenroll failed".to_string(),
-            ));
+            return Err(DomainError::AdapterFailure(format!(
+                "systemd-cryptenroll failed: {}",
+                stderr.trim()
+            )));
         }
 
         let new_token_ids = find_systemd_fido2_token_ids(path)?;
@@ -2682,6 +3303,7 @@ mod tests {
         Fido2Device {
             path: path.to_string(),
             description: "test key".to_string(),
+            client_pin: false,
         }
     }
 
@@ -2722,6 +3344,188 @@ mod tests {
             fido2_verification_args(false),
             vec!["--fido2-with-user-verification=no".to_string()]
         );
+    }
+
+    // Real sample captured from `fido2-token -I /dev/hidraw5` against a
+    // TOKEN2 FIDO2 Security Key with a PIN configured (2026-08-10, see this
+    // story's Dev Notes).
+    const REAL_INFO_OUTPUT_WITH_PIN: &str = "options: rk, up, uv, noplat, noalwaysUv, credMgmt, authnrCfg, bioEnroll, clientPin, largeBlobs, pinUvAuthToken, setMinPINLength, makeCredUvNotRqd, credentialMgmtPreview, userVerificationMgmtPreview\n...\npin retries: 8\npin change required: false\n";
+
+    #[test]
+    fn parse_client_pin_configured_true_for_real_captured_output_with_pin_set() {
+        assert!(parse_client_pin_configured(REAL_INFO_OUTPUT_WITH_PIN));
+    }
+
+    #[test]
+    fn parse_client_pin_configured_false_when_capability_present_but_no_pin_set() {
+        let output = REAL_INFO_OUTPUT_WITH_PIN.replace("clientPin", "noclientPin");
+        assert!(!parse_client_pin_configured(&output));
+    }
+
+    #[test]
+    fn parse_client_pin_configured_false_when_token_absent_entirely() {
+        let output = "options: rk, up, uv, noplat, noalwaysUv\npin retries: 8\n";
+        assert!(!parse_client_pin_configured(output));
+    }
+
+    #[test]
+    fn parse_client_pin_configured_false_for_empty_or_malformed_input() {
+        assert!(!parse_client_pin_configured(""));
+        assert!(!parse_client_pin_configured(
+            "not a real fido2-token -I output at all"
+        ));
+    }
+
+    #[test]
+    fn parse_pin_retries_from_real_captured_output() {
+        assert_eq!(parse_pin_retries(REAL_INFO_OUTPUT_WITH_PIN), Some(8));
+    }
+
+    #[test]
+    fn parse_pin_retries_none_when_line_absent_or_malformed() {
+        assert_eq!(parse_pin_retries(""), None);
+        assert_eq!(parse_pin_retries("pin retries: not-a-number"), None);
+        assert_eq!(parse_pin_retries("options: rk, up, uv, clientPin"), None);
+    }
+
+    #[test]
+    fn fido2_stderr_signal_wrong_pin_warning_is_count_less_and_static() {
+        assert_eq!(
+            Fido2StderrSignal::WrongPin.warning(),
+            "Heads up: that PIN was wrong — retries are limited."
+        );
+    }
+
+    #[test]
+    fn fido2_stderr_signal_pin_blocked_warning_is_static() {
+        assert_eq!(
+            Fido2StderrSignal::PinBlocked.warning(),
+            "Heads up: the security key's PIN is now locked — remove and reinsert it before \
+             trying again."
+        );
+    }
+
+    #[test]
+    fn wrong_pin_attempt_text_shows_attempt_number_and_remaining_count() {
+        assert_eq!(
+            wrong_pin_attempt_text(1, Some(8)),
+            "Wrong PIN — attempt 1 of 8 (7 remaining)."
+        );
+        assert_eq!(
+            wrong_pin_attempt_text(2, Some(8)),
+            "Wrong PIN — attempt 2 of 8 (6 remaining)."
+        );
+    }
+
+    #[test]
+    fn wrong_pin_attempt_text_reaches_zero_remaining_at_the_max() {
+        assert_eq!(
+            wrong_pin_attempt_text(8, Some(8)),
+            "Wrong PIN — attempt 8 of 8 (0 remaining)."
+        );
+    }
+
+    #[test]
+    fn wrong_pin_attempt_text_saturates_instead_of_underflowing_past_max() {
+        // Defensive: shouldn't happen in practice (each detected signal
+        // increments attempts_used by exactly one, starting from a real
+        // device's own max), but must never panic on subtraction overflow.
+        assert_eq!(
+            wrong_pin_attempt_text(9, Some(8)),
+            "Wrong PIN — attempt 9 of 8 (0 remaining)."
+        );
+    }
+
+    #[test]
+    fn wrong_pin_attempt_text_falls_back_without_an_upfront_max() {
+        assert_eq!(
+            wrong_pin_attempt_text(1, None),
+            "Heads up: that PIN was wrong — retries are limited."
+        );
+    }
+
+    // Real stderr transcript captured (2026-08-10) from a deliberate
+    // wrong-PIN attempt against physical hardware — see this story's
+    // Completion Notes.
+    const REAL_WRONG_PIN_STDERR: &str = "Initializing FIDO2 credential on security token.\n(Hint: This might require confirmation of user presence on security token.)\nPIN incorrect, please try again.\nPIN incorrect, please try again.\nToken PIN is currently blocked, please remove and reinsert token.\n";
+
+    #[test]
+    fn fido2_stderr_signal_classifies_wrong_pin_line_from_real_transcript() {
+        let wrong_pin_line = REAL_WRONG_PIN_STDERR
+            .lines()
+            .find(|line| line.contains("PIN incorrect"))
+            .expect("fixture must contain a wrong-PIN line");
+        assert_eq!(
+            Fido2StderrSignal::classify(wrong_pin_line),
+            Some(Fido2StderrSignal::WrongPin)
+        );
+    }
+
+    #[test]
+    fn fido2_stderr_signal_classifies_pin_blocked_line_from_real_transcript() {
+        let blocked_line = REAL_WRONG_PIN_STDERR
+            .lines()
+            .find(|line| line.contains("currently blocked"))
+            .expect("fixture must contain a PIN-blocked line");
+        assert_eq!(
+            Fido2StderrSignal::classify(blocked_line),
+            Some(Fido2StderrSignal::PinBlocked)
+        );
+    }
+
+    #[test]
+    fn fido2_stderr_signal_ignores_unrelated_lines() {
+        assert_eq!(
+            Fido2StderrSignal::classify("Initializing FIDO2 credential on security token."),
+            None
+        );
+        assert_eq!(Fido2StderrSignal::classify(""), None);
+    }
+
+    // Regression test for AD-3's Epic 6 amendment: reading stderr only
+    // after `child.wait()` (instead of concurrently, on a background
+    // thread) deadlocks once the child writes enough stderr to fill the
+    // pty's internal output buffer (much smaller than a plain pipe's,
+    // typically a few KiB) before anyone drains it. No FIDO2 hardware
+    // needed — any real child process writing to the pty reproduces the
+    // exact OS-level property `run_with_stderr_watch` must avoid. Mirrors
+    // Story 6.5's Task 12 precedent (a real, non-fake regression test for
+    // an OS-level concurrency property).
+    //
+    // `run_with_stderr_watch` itself is called on a background thread here
+    // too, with a bounded `recv_timeout` on the result — a real regression
+    // to post-exit-only stderr reading would otherwise hang this test
+    // forever instead of failing it.
+    #[test]
+    fn run_with_stderr_watch_does_not_deadlock_on_a_large_stderr_write() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut cmd = Command::new("sh");
+            // 200KiB comfortably exceeds any real pty/pipe buffer size.
+            cmd.arg("-c").arg("yes | head -c 200000 1>&2");
+            let _ = tx.send(run_with_stderr_watch(&mut cmd, None));
+        });
+
+        match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+            Ok(Ok((status, captured))) => {
+                assert!(status.success(), "expected the shell command to succeed");
+                // The pty's cooked-mode ONLCR translates each of the
+                // 100,000 "y\n" lines into "y\r\n" on output, so 200,000
+                // input bytes become 300,000 captured bytes — this is
+                // real, expected pty behavior (the same translation a
+                // real terminal would apply), not truncation or corruption.
+                assert_eq!(
+                    captured.len(),
+                    300_000,
+                    "expected all 200KiB (plus ONLCR's \\r per line) to be captured"
+                );
+            }
+            Ok(Err(e)) => panic!("run_with_stderr_watch returned an error: {e:?}"),
+            Err(_) => panic!(
+                "run_with_stderr_watch did not return within 10s — likely deadlocked reading \
+                 stderr only after child.wait()"
+            ),
+        }
     }
 
     #[test]
