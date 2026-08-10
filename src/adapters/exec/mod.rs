@@ -755,9 +755,50 @@ fn resolve_explicit_selection(
     Ok((new_path, existing_path))
 }
 
+/// Prints Task 3's device-specific enroll-time PIN warning for whichever of
+/// `new_device`/`existing_device` currently has `client_pin == true` —
+/// either, both, or neither may warrant one, since `existing_device`
+/// authenticates the enrollment operation itself while `new_device` is the
+/// key actually being enrolled.
+///
+/// `user_verification` changes the wording, not just whether it fires (AD-16
+/// — see Dev Notes' "Interaction with user_verification/AD-16"): when `true`,
+/// `fido2_verification_args` always disables `clientPin` for the resulting
+/// credential, so that credential's *future* unlocks will never prompt for a
+/// host-typed PIN — only this enrollment ceremony itself might still need
+/// one, which is why the wording is hedged rather than a flat assertion.
+fn print_enroll_pin_warning(
+    new_device: &Fido2Device,
+    existing_device: Option<&Fido2Device>,
+    user_verification: bool,
+) {
+    for device in std::iter::once(new_device).chain(existing_device) {
+        if !device.client_pin {
+            continue;
+        }
+        if user_verification {
+            println!(
+                "Heads up: {} has a PIN configured. Since you're enrolling with \
+                 user-verification, unlocking with this key later will use its \
+                 fingerprint/on-device check instead of a typed PIN — but you may still be \
+                 asked for the PIN once now, to authorize this enrollment.",
+                device.path
+            );
+        } else {
+            println!(
+                "Heads up: {} has a PIN configured — you'll be asked to enter it.",
+                device.path
+            );
+        }
+    }
+}
+
 /// Resolves `selection` to the concrete `(new_device, existing_device)`
 /// `systemd-cryptenroll` needs, each carrying its `client_pin` status —
-/// `existing_device` is `Some` exactly when `need_existing` is true.
+/// `existing_device` is `Some` exactly when `need_existing` is true. Prints
+/// Task 3's enroll-time PIN warning (see `print_enroll_pin_warning`) once
+/// both are known, centralizing the print call for both selection modes
+/// rather than duplicating it in each resolver.
 ///
 /// The `Explicit` branch looks up `client_pin` only for the 1-2 resolved
 /// paths directly (cheaper than enriching the whole enumerated list, and
@@ -767,9 +808,10 @@ fn resolve_explicit_selection(
 fn resolve_device_selection(
     selection: &Fido2DeviceSelection,
     need_existing: bool,
+    user_verification: bool,
 ) -> Result<(Fido2Device, Option<Fido2Device>), DomainError> {
-    match selection {
-        Fido2DeviceSelection::Interactive => resolve_interactive_selection(need_existing),
+    let (new_device, existing_device) = match selection {
+        Fido2DeviceSelection::Interactive => resolve_interactive_selection(need_existing)?,
         Fido2DeviceSelection::Explicit { new, existing } => {
             let devices = list_fido2_devices()?;
             let (new_path, existing_path) =
@@ -790,9 +832,13 @@ fn resolve_device_selection(
                 })
                 .transpose()?;
 
-            Ok((new_device, existing_device))
+            (new_device, existing_device)
         }
-    }
+    };
+
+    print_enroll_pin_warning(&new_device, existing_device.as_ref(), user_verification);
+
+    Ok((new_device, existing_device))
 }
 
 /// `--fido2-with-user-verification` is always passed explicitly (AD-16 — see
@@ -1565,7 +1611,7 @@ impl Fido2Backend for ExecAdapter {
         // bootstrap-enroll call); a standalone enroll also needs an
         // "existing key" role to authenticate against.
         let (new_device, existing_device) =
-            resolve_device_selection(&selection, !has_transient_passphrase)?;
+            resolve_device_selection(&selection, !has_transient_passphrase, user_verification)?;
 
         let passphrase = self.transient_passphrase.borrow_mut().take();
 
