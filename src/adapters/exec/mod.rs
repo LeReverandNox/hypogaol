@@ -1214,20 +1214,29 @@ fn resolve_device_selection(
             let (new_path, existing_path) =
                 resolve_explicit_selection(&devices, new, existing.as_deref(), need_existing)?;
 
+            // Description is already known from `devices` (the same
+            // enumeration `resolve_explicit_selection` just validated
+            // against) — look it up instead of discarding it. `client_pin`
+            // query failure is advisory-only (see `wait_for_enough_fido2_devices`)
+            // and must not abort enrollment for an otherwise-valid device.
+            let description_for = |path: &str| {
+                devices
+                    .iter()
+                    .find(|device| device.path == path)
+                    .map(|device| device.description.clone())
+                    .unwrap_or_default()
+            };
+
             let new_device = Fido2Device {
-                client_pin: fido2_token_has_pin(&new_path)?,
-                description: String::new(),
+                client_pin: fido2_token_has_pin(&new_path).unwrap_or(false),
+                description: description_for(&new_path),
                 path: new_path,
             };
-            let existing_device = existing_path
-                .map(|path| -> Result<Fido2Device, DomainError> {
-                    Ok(Fido2Device {
-                        client_pin: fido2_token_has_pin(&path)?,
-                        description: String::new(),
-                        path,
-                    })
-                })
-                .transpose()?;
+            let existing_device = existing_path.map(|path| Fido2Device {
+                client_pin: fido2_token_has_pin(&path).unwrap_or(false),
+                description: description_for(&path),
+                path,
+            });
 
             (new_device, existing_device)
         }
