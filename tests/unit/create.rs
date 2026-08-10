@@ -1621,7 +1621,7 @@ fn locks_the_target_path_as_the_second_statement_after_preflight() {
     let fido2 = FakeFido2Backend::passing();
     let fs = FakeFilesystemBackend::passing();
 
-    let fixture = RealFixtureFile::create("lock-target-happy-path");
+    let fixture = RealFixtureFile::create("create-lock-target-happy-path");
     let target = CreateTarget::File {
         path: fixture.0.clone(),
         size: MIN_VOLUME_SIZE_BYTES,
@@ -1653,7 +1653,7 @@ fn lock_contention_aborts_before_any_mutating_luks_or_fido2_call() {
         .with_log(log.clone())
         .with_lock_contention();
 
-    let fixture = RealFixtureFile::create("lock-contention");
+    let fixture = RealFixtureFile::create("create-lock-contention");
     let target = CreateTarget::File {
         path: fixture.0.clone(),
         size: MIN_VOLUME_SIZE_BYTES,
