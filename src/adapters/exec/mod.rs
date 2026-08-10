@@ -764,9 +764,12 @@ fn resolve_explicit_selection(
 /// `user_verification` changes the wording, not just whether it fires (AD-16
 /// — see Dev Notes' "Interaction with user_verification/AD-16"): when `true`,
 /// `fido2_verification_args` always disables `clientPin` for the resulting
-/// credential, so that credential's *future* unlocks will never prompt for a
-/// host-typed PIN — only this enrollment ceremony itself might still need
-/// one, which is why the wording is hedged rather than a flat assertion.
+/// credential, so a PIN is never involved at all — neither for this
+/// enrollment ceremony nor for the credential's future unlocks. Confirmed
+/// live against real hardware (2026-08-10, see this story's Completion
+/// Notes): a `--fido2-with-client-pin=false` enrollment against a
+/// PIN-configured device completed with no PIN prompt whatsoever, only
+/// presence/fingerprint confirmation — this is no longer a hedge.
 fn print_enroll_pin_warning(
     new_device: &Fido2Device,
     existing_device: Option<&Fido2Device>,
@@ -778,10 +781,9 @@ fn print_enroll_pin_warning(
         }
         if user_verification {
             println!(
-                "Heads up: {} has a PIN configured. Since you're enrolling with \
-                 user-verification, unlocking with this key later will use its \
-                 fingerprint/on-device check instead of a typed PIN — but you may still be \
-                 asked for the PIN once now, to authorize this enrollment.",
+                "Heads up: {} has a PIN configured, but since you're enrolling with \
+                 user-verification, you won't be asked for it — this enrollment and future \
+                 unlocks with this key both use its fingerprint/on-device check instead.",
                 device.path
             );
         } else {
