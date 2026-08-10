@@ -372,13 +372,9 @@ impl Fido2StderrSignal {
         }
     }
 
-    /// This signal's plain-language, per-attempt warning — printed the
-    /// moment the signal is detected, while the subprocess (and thus the
-    /// device) may still be mid-transaction. Deliberately static/count-less
-    /// (see `fido2_token_pin_retries_bounded`'s doc comment for why a live
-    /// query *during* the loop turned out to be unreliable): the real,
-    /// accurate count is instead shown once, as a summary, after the whole
-    /// subprocess exits — see `run_with_stderr_watch`'s post-exit summary.
+    /// This signal's plain-language warning when no attempt count is
+    /// available at all (see `wrong_pin_attempt_text` for the normal,
+    /// count-aware `WrongPin` case — this is only its fallback).
     fn warning(self) -> &'static str {
         match self {
             Self::WrongPin => "Heads up: that PIN was wrong — retries are limited.",
@@ -391,21 +387,22 @@ impl Fido2StderrSignal {
 }
 
 /// Wraps `fido2_token_pin_retries` with a short bound so a slow/contended
-/// device query can never stall the caller for long.
-///
-/// This was originally called reactively, mid-stream, the instant a
-/// wrong-PIN signal was detected — but real hardware testing (2026-08-11,
-/// `LeReverandNox`) showed it reliably fails/times out in that window:
+/// device query can never stall the caller for long. Only ever called
+/// **once, before the subprocess this device is about to authenticate
+/// starts** — never reactively mid-operation. Real hardware testing
+/// (2026-08-11, `LeReverandNox`) showed a query attempted *during* an
+/// active PIN retry loop reliably fails/times out:
 /// `systemd-cryptenroll`/`cryptsetup` appear to hold the device's CTAP HID
-/// channel open across the *entire* PIN retry loop (not release/reacquire
-/// it per attempt), so a concurrent `fido2-token -I` query from a second
-/// process contends with it and consistently falls back to the
-/// count-less generic warning. It's now only called **once, after the
-/// subprocess has fully exited** (see `run_with_stderr_watch`'s post-exit
-/// summary), when the device is reliably idle. The bound is kept
-/// regardless, as defense in depth — this helper still runs the query on
-/// its own thread rather than assuming the direct `Command::output()` call
-/// can never hang.
+/// channel open across the *entire* loop (not release/reacquire it per
+/// attempt), so a concurrent `fido2-token -I` query from a second process
+/// contends with it. Calling this once, upfront, while the device is
+/// still genuinely idle (nothing has touched it yet), avoids that
+/// contention entirely — see `run_with_stderr_watch`'s
+/// `max_pin_retries` parameter and `wrong_pin_attempt_text`, which track
+/// attempts *locally* from that single starting value instead of
+/// re-querying per attempt. The bound is kept regardless, as defense in
+/// depth — this helper still runs the query on its own thread rather than
+/// assuming the direct `Command::output()` call can never hang.
 fn fido2_token_pin_retries_bounded(path: &str) -> Option<u32> {
     let (tx, rx) = std::sync::mpsc::channel();
     let path = path.to_string();
@@ -417,41 +414,25 @@ fn fido2_token_pin_retries_bounded(path: &str) -> Option<u32> {
         .ok()?
 }
 
-/// Builds `run_with_stderr_watch`'s post-exit wrong-PIN summary text, if
-/// any — a pure function, separated out so the success/failure wording
-/// split is directly unit-testable without a real device or subprocess.
-///
-/// `succeeded` matters because CTAP2 resets a device's PIN retry counter
-/// back to its maximum on a *successful* verification (found live,
-/// 2026-08-11: a create/enroll with 2 wrong PINs followed by the correct
-/// one reported "8 attempts remain" — the device's true post-transaction
-/// state, but deeply misleading paired with "you entered 2 incorrect
-/// PINs", since it implies those attempts still count against something
-/// they no longer do). On success, this reports only the wrong-attempt
-/// count, with no retry-count claim; on failure, `retries` (when `Some`,
-/// from a query made only when the overall command failed) is genuine and
-/// safe to report, since no reset happened.
-fn wrong_pin_summary(
-    succeeded: bool,
-    wrong_pin_attempts: u32,
-    retries: Option<u32>,
-) -> Option<String> {
-    if wrong_pin_attempts == 0 {
-        return None;
+/// Builds the reactive, per-attempt wrong-PIN message — a pure function,
+/// directly unit-testable without a device or subprocess. `attempts_used`
+/// is this operation's own running count of wrong attempts seen so far
+/// (starts at 1 for the first). `max_retries`, when `Some`, was queried
+/// once *before* the subprocess started (see
+/// `fido2_token_pin_retries_bounded`'s doc comment for why); each wrong
+/// attempt decrements it by exactly one via plain local arithmetic — no
+/// further device query is ever needed, sidestepping the CTAP HID
+/// contention that made a live per-attempt query unreliable. `None`
+/// (no candidate device known, or the upfront query itself failed) falls
+/// back to `Fido2StderrSignal::WrongPin`'s static warning.
+fn wrong_pin_attempt_text(attempts_used: u32, max_retries: Option<u32>) -> String {
+    match max_retries {
+        Some(max) => {
+            let remaining = max.saturating_sub(attempts_used);
+            format!("Wrong PIN — attempt {attempts_used} of {max} ({remaining} remaining).")
+        }
+        None => Fido2StderrSignal::WrongPin.warning().to_string(),
     }
-    let plural = if wrong_pin_attempts == 1 { "" } else { "s" };
-    if succeeded {
-        return Some(format!(
-            "You entered {wrong_pin_attempts} incorrect PIN{plural} before succeeding."
-        ));
-    }
-    let retries = retries?;
-    Some(format!(
-        "You entered {wrong_pin_attempts} incorrect PIN{plural} — {retries} attempt{} \
-         remain{} on this security key.",
-        if retries == 1 { "" } else { "s" },
-        if retries == 1 { "s" } else { "" }
-    ))
 }
 
 /// Opens a fresh PTY pair via `posix_openpt`/`grantpt`/`unlockpt`/
@@ -550,33 +531,30 @@ fn open_pty_pair() -> Result<(File, PathBuf), DomainError> {
 /// against multi-byte UTF-8 splitting: `\n`/`\r` are single-byte ASCII
 /// values that never appear as a continuation/lead byte of a multi-byte
 /// sequence, so scanning for them byte-by-byte never mis-splits a
-/// multi-byte character (e.g. the 👆 emoji some prompts use). On a match, a
-/// plain-language warning is printed immediately (via `println!`, to
-/// stdout — a separate stream from the forwarded stderr, so it can never
-/// interleave with or corrupt the passthrough bytes above), and the signal
-/// is tallied (`wrong_pin_attempts`/`pin_blocked`) for the post-exit
-/// summary below.
+/// multi-byte character (e.g. the 👆 emoji some prompts use). On each
+/// wrong-PIN match, a reactive per-attempt message is printed immediately
+/// (via `println!`, to stdout — a separate stream from the forwarded
+/// stderr, so it can never interleave with or corrupt the passthrough
+/// bytes above) — see `max_pin_retries` below for where its attempt count
+/// comes from.
 ///
 /// The full raw bytes are also returned (lossily decoded to a `String` once,
 /// at the end) so a caller can fold the real subprocess's own diagnostic
 /// text into its own `AdapterFailure` message on a non-zero exit.
 ///
-/// **Post-exit retry-count summary** (review feedback, 2026-08-11): once
-/// `child.wait()` returns — meaning the device is reliably no longer
-/// mid-transaction — if any wrong-PIN attempts were tallied and the device
-/// wasn't ultimately blocked, `retry_query_devices` (when it names exactly
-/// one device) is re-queried once for the *current* retry count and a
-/// one-line summary is printed. This is deliberately **not** done
-/// reactively inside the loop above: real hardware testing showed
-/// `systemd-cryptenroll`/`cryptsetup` hold the device's CTAP HID channel
-/// open across the *entire* PIN retry loop, so a concurrent query attempted
-/// mid-loop reliably fails/times out (confirmed live — every reactive
-/// attempt fell back to the count-less generic wording). Pass an empty
-/// slice when no specific device is known at all (e.g. `resize()`, which
-/// has no prior device enumeration) to skip the summary entirely.
+/// `max_pin_retries`, when `Some`, is the device's PIN retry count queried
+/// *before* this subprocess started (review feedback, 2026-08-11 — see
+/// `fido2_token_pin_retries_bounded`'s doc comment for why it must be
+/// queried upfront, never reactively mid-loop). Each wrong-PIN signal
+/// detected below decrements a local counter from this starting value —
+/// plain arithmetic, no further device query — so the message can show
+/// "attempt N of M (K remaining)" for every single attempt, not just a
+/// summary at the end. Pass `None` when no specific device is known at all
+/// (e.g. `resize()`, which has no prior device enumeration) to fall back to
+/// `Fido2StderrSignal::WrongPin`'s static, count-less wording.
 fn run_with_stderr_watch(
     cmd: &mut Command,
-    retry_query_devices: &[String],
+    max_pin_retries: Option<u32>,
 ) -> Result<(ExitStatus, String), DomainError> {
     let (mut master, slave_path) = open_pty_pair()?;
 
@@ -628,7 +606,6 @@ fn run_with_stderr_watch(
         let mut scan_buffer = Vec::new();
         let mut chunk = [0u8; 4096];
         let mut wrong_pin_attempts: u32 = 0;
-        let mut pin_blocked = false;
 
         loop {
             let bytes_read = match io::Read::read(&mut master, &mut chunk) {
@@ -652,58 +629,43 @@ fn run_with_stderr_watch(
             while let Some(boundary) = scan_buffer.iter().position(|&b| b == b'\n' || b == b'\r') {
                 let line = String::from_utf8_lossy(&scan_buffer[..boundary]).into_owned();
                 scan_buffer.drain(..=boundary);
-                if let Some(signal) = Fido2StderrSignal::classify(&line) {
-                    match signal {
-                        Fido2StderrSignal::WrongPin => wrong_pin_attempts += 1,
-                        Fido2StderrSignal::PinBlocked => pin_blocked = true,
+                match Fido2StderrSignal::classify(&line) {
+                    Some(Fido2StderrSignal::WrongPin) => {
+                        wrong_pin_attempts += 1;
+                        println!(
+                            "{}",
+                            wrong_pin_attempt_text(wrong_pin_attempts, max_pin_retries)
+                        );
                     }
-                    println!("{}", signal.warning());
+                    Some(Fido2StderrSignal::PinBlocked) => {
+                        println!("{}", Fido2StderrSignal::PinBlocked.warning());
+                    }
+                    None => {}
                 }
             }
         }
 
-        if let Some(signal) = Fido2StderrSignal::classify(&String::from_utf8_lossy(&scan_buffer)) {
-            match signal {
-                Fido2StderrSignal::WrongPin => wrong_pin_attempts += 1,
-                Fido2StderrSignal::PinBlocked => pin_blocked = true,
+        match Fido2StderrSignal::classify(&String::from_utf8_lossy(&scan_buffer)) {
+            Some(Fido2StderrSignal::WrongPin) => {
+                wrong_pin_attempts += 1;
+                println!(
+                    "{}",
+                    wrong_pin_attempt_text(wrong_pin_attempts, max_pin_retries)
+                );
             }
-            println!("{}", signal.warning());
+            Some(Fido2StderrSignal::PinBlocked) => {
+                println!("{}", Fido2StderrSignal::PinBlocked.warning());
+            }
+            None => {}
         }
 
-        (
-            String::from_utf8_lossy(&captured).into_owned(),
-            wrong_pin_attempts,
-            pin_blocked,
-        )
+        String::from_utf8_lossy(&captured).into_owned()
     });
 
     let status = child
         .wait()
         .map_err(|e| DomainError::AdapterFailure(format!("failed waiting for {cmd:?}: {e}")))?;
-    let (captured, wrong_pin_attempts, pin_blocked) = reader.join().unwrap_or_default();
-
-    // Shown once, here, rather than reactively during the loop above: real
-    // hardware testing (2026-08-11) showed `systemd-cryptenroll`/
-    // `cryptsetup` hold the device's CTAP HID channel open across the
-    // *entire* PIN retry loop, so a concurrent query while the subprocess
-    // is still running reliably contends and fails. The device is
-    // guaranteed idle now that `child.wait()` has returned, making this the
-    // one point where a fresh query is safe. Only queried when the overall
-    // command failed — see `wrong_pin_summary`'s doc comment for why a
-    // successful outcome must never claim a retry count.
-    if !pin_blocked {
-        let retries = if status.success() {
-            None
-        } else {
-            match retry_query_devices {
-                [path] => fido2_token_pin_retries_bounded(path),
-                _ => None,
-            }
-        };
-        if let Some(summary) = wrong_pin_summary(status.success(), wrong_pin_attempts, retries) {
-            println!("{summary}");
-        }
-    }
+    let captured = reader.join().unwrap_or_default();
 
     Ok((status, captured))
 }
@@ -1782,6 +1744,17 @@ impl LuksBackend for ExecAdapter {
             );
         }
 
+        // Queried once here, before the blocking cryptsetup call below even
+        // starts — the device is still genuinely idle at this point, unlike
+        // mid-loop (see `fido2_token_pin_retries_bounded`'s doc comment).
+        // Only when exactly one PIN-configured device is plugged in: with
+        // several, cryptsetup's own invisible matching means we can't know
+        // in advance which one will actually answer.
+        let max_pin_retries = match pin_configured.as_slice() {
+            [path] => fido2_token_pin_retries_bounded(path),
+            _ => None,
+        };
+
         // `--token-only` is not optional: without it, `cryptsetup open` falls
         // back to an interactive passphrase prompt instead of the FIDO2
         // PIN/touch flow (confirmed empirically during Story 1.6's hardware
@@ -1795,7 +1768,7 @@ impl LuksBackend for ExecAdapter {
             cmd.arg("--readonly");
         }
         cmd.arg(path).arg(name);
-        let (status, stderr) = run_with_stderr_watch(&mut cmd, &pin_configured)?;
+        let (status, stderr) = run_with_stderr_watch(&mut cmd, max_pin_retries)?;
 
         if status.success() {
             Ok(MapperHandle {
@@ -1831,11 +1804,11 @@ impl LuksBackend for ExecAdapter {
         // scoped to two named workflows (Task 5's scope-decision — applied
         // here for consistency, not left as a documented gap).
         // No prior device enumeration exists here (unlike `open`), so no
-        // specific device is known to re-query a live retry count for on a
+        // specific device is known to query an upfront retry count for on a
         // wrong-PIN signal — falls back to the count-less generic wording.
         let mut cmd = privileged("cryptsetup");
         cmd.args(["resize", "--token-only"]).arg(&mapper.name);
-        let (status, stderr) = run_with_stderr_watch(&mut cmd, &[])?;
+        let (status, stderr) = run_with_stderr_watch(&mut cmd, None)?;
 
         if status.success() {
             Ok(())
@@ -2062,13 +2035,20 @@ impl Fido2Backend for ExecAdapter {
         //
         // Computed before the match below moves `existing_device` in its
         // `None` arm — whichever of `new_device`/`existing_device` actually
-        // has a PIN configured is the candidate to re-query a live retry
-        // count for on a wrong-PIN signal.
-        let retry_query_devices: Vec<String> = std::iter::once(&new_device)
+        // has a PIN configured is the candidate to query an upfront retry
+        // count for, before the blocking systemd-cryptenroll call below
+        // even starts (the device is still genuinely idle here — see
+        // `fido2_token_pin_retries_bounded`'s doc comment for why this must
+        // happen now, not reactively mid-loop).
+        let pin_configured_candidates: Vec<String> = std::iter::once(&new_device)
             .chain(existing_device.as_ref())
             .filter(|device| device.client_pin)
             .map(|device| device.path.clone())
             .collect();
+        let max_pin_retries = match pin_configured_candidates.as_slice() {
+            [path] => fido2_token_pin_retries_bounded(path),
+            _ => None,
+        };
 
         // `key_file_guard` (when `Some`) must outlive the
         // `run_with_stderr_watch` call below — its `Drop` impl wipes the
@@ -2126,7 +2106,7 @@ impl Fido2Backend for ExecAdapter {
             }
         };
 
-        let (status, stderr) = run_with_stderr_watch(&mut cmd, &retry_query_devices)?;
+        let (status, stderr) = run_with_stderr_watch(&mut cmd, max_pin_retries)?;
         drop(key_file_guard);
 
         if !status.success() {
@@ -3361,56 +3341,42 @@ mod tests {
     }
 
     #[test]
-    fn wrong_pin_summary_none_when_no_wrong_attempts() {
-        assert_eq!(wrong_pin_summary(true, 0, Some(8)), None);
-        assert_eq!(wrong_pin_summary(false, 0, Some(8)), None);
-    }
-
-    #[test]
-    fn wrong_pin_summary_on_success_never_claims_a_retry_count() {
-        // Real hardware finding (2026-08-11): CTAP2 resets the PIN retry
-        // counter to max on a successful verification, so even though
-        // `retries` here is `Some(8)` (what a query would show right
-        // after success), the summary must not imply those 2 wrong
-        // attempts still count against anything.
+    fn wrong_pin_attempt_text_shows_attempt_number_and_remaining_count() {
         assert_eq!(
-            wrong_pin_summary(true, 2, Some(8)),
-            Some("You entered 2 incorrect PINs before succeeding.".to_string())
+            wrong_pin_attempt_text(1, Some(8)),
+            "Wrong PIN — attempt 1 of 8 (7 remaining)."
+        );
+        assert_eq!(
+            wrong_pin_attempt_text(2, Some(8)),
+            "Wrong PIN — attempt 2 of 8 (6 remaining)."
         );
     }
 
     #[test]
-    fn wrong_pin_summary_on_success_singular_wording() {
+    fn wrong_pin_attempt_text_reaches_zero_remaining_at_the_max() {
         assert_eq!(
-            wrong_pin_summary(true, 1, Some(8)),
-            Some("You entered 1 incorrect PIN before succeeding.".to_string())
+            wrong_pin_attempt_text(8, Some(8)),
+            "Wrong PIN — attempt 8 of 8 (0 remaining)."
         );
     }
 
     #[test]
-    fn wrong_pin_summary_on_failure_reports_the_genuine_retry_count() {
+    fn wrong_pin_attempt_text_saturates_instead_of_underflowing_past_max() {
+        // Defensive: shouldn't happen in practice (each detected signal
+        // increments attempts_used by exactly one, starting from a real
+        // device's own max), but must never panic on subtraction overflow.
         assert_eq!(
-            wrong_pin_summary(false, 2, Some(6)),
-            Some(
-                "You entered 2 incorrect PINs — 6 attempts remain on this security key."
-                    .to_string()
-            )
+            wrong_pin_attempt_text(9, Some(8)),
+            "Wrong PIN — attempt 9 of 8 (0 remaining)."
         );
     }
 
     #[test]
-    fn wrong_pin_summary_on_failure_singular_wording_for_both_counts() {
+    fn wrong_pin_attempt_text_falls_back_without_an_upfront_max() {
         assert_eq!(
-            wrong_pin_summary(false, 1, Some(1)),
-            Some(
-                "You entered 1 incorrect PIN — 1 attempt remains on this security key.".to_string()
-            )
+            wrong_pin_attempt_text(1, None),
+            "Heads up: that PIN was wrong — retries are limited."
         );
-    }
-
-    #[test]
-    fn wrong_pin_summary_on_failure_none_when_retry_query_unavailable() {
-        assert_eq!(wrong_pin_summary(false, 2, None), None);
     }
 
     // Real stderr transcript captured (2026-08-10) from a deliberate
@@ -3472,7 +3438,7 @@ mod tests {
             let mut cmd = Command::new("sh");
             // 200KiB comfortably exceeds any real pty/pipe buffer size.
             cmd.arg("-c").arg("yes | head -c 200000 1>&2");
-            let _ = tx.send(run_with_stderr_watch(&mut cmd, &[]));
+            let _ = tx.send(run_with_stderr_watch(&mut cmd, None));
         });
 
         match rx.recv_timeout(std::time::Duration::from_secs(10)) {
