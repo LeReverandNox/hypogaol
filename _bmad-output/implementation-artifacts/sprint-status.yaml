@@ -1,5 +1,5 @@
 # generated: 2026-07-22
-# last_updated: 2026-08-10 (story 6.5 implemented, review)
+# last_updated: 2026-08-10 (story 6.5 code review complete, done)
 # project: hypogaol
 # project_key: NOKEY
 # tracking_system: file-system
@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-22
-last_updated: 2026-08-10 (story 6.5 implemented, review)
+last_updated: 2026-08-10 (story 6.5 code review complete, done)
 project: hypogaol
 project_key: NOKEY
 tracking_system: file-system
@@ -92,13 +92,17 @@ development_status:
   6-2-custom-key-label-at-create: done
   6-3-hook-template-scaffolding-at-create: done
   6-4-xfs-and-btrfs-filesystem-support: done
-  6-5-concurrent-invocation-guard: review
+  6-5-concurrent-invocation-guard: done
   6-6-proactive-fido2-pin-status-guidance: backlog
   6-7-one-letter-cli-flag-shorthand: backlog
   6-8-repository-hygiene-badges: backlog
   epic-6-retrospective: optional
 
 action_items:
+  - epic: 6
+    action: "Manually verify Story 6.5's concurrent-invocation guard (AC #1) against real hardware with two genuine OS processes — this dev/review session could not: no assert_cmd-style plumbing exists in tests/hardware/main.rs to spawn CARGO_BIN_EXE_hypogaol as a child process, and no interactive sudo/physical FIDO2 touch was available. tests/unit/lock_target.rs already proves the underlying flock-free abstract-socket lock mechanism contends/releases correctly within one process (two independently-opened file descriptors), but the literal two-real-process revoke scenario is unverified. Run two concurrent `revoke` invocations (or the in-process two-thread fallback Story 6.5's Task 13 describes) against a real volume with 2 valid FIDO2 keyslots and confirm exactly one succeeds while the other reports the lock-contention message."
+    owner: "LeReverandNox"
+    status: open
   - epic: 6
     action: "Manually crash-simulate Story 6.1's marker-verified resume against real hardware — a physical FIDO2 token was detected in the dev-story execution environment (fido2-token -L), but the crash-simulation scenario needs interactive touch/PIN confirmation mid-create, which the non-interactive dev-agent session could not provide. Verify both file-backed and device-backed: interrupt create between luksFormat and final cleanup (kill -9 or a temporary early-return), re-run create against the same destination, confirm it resumes to a fully working, unlockable volume."
     owner: "LeReverandNox"
