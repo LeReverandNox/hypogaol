@@ -23,14 +23,14 @@ use crate::ports::luks_backend::LuksBackend;
 
 // `name`/`version`/`about` are populated by clap from this crate's own
 // `CARGO_PKG_*` metadata (AD-13) — never a hardcoded product-name literal.
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 #[command(version, about)]
 pub struct Cli {
     #[command(subcommand)]
     command: Commands,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 enum Commands {
     /// Create a new volume
     Create {
@@ -46,11 +46,11 @@ enum Commands {
 
         /// Unlock read-only — refuses all writes at both the block-device
         /// and filesystem level
-        #[arg(long)]
+        #[arg(short = 'r', long)]
         read_only: bool,
 
         /// Skip bind-hooks and exec-hooks processing for this command.
-        #[arg(long)]
+        #[arg(short = 's', long)]
         skip_hooks: bool,
     },
 
@@ -61,24 +61,24 @@ enum Commands {
         path: PathBuf,
 
         /// Label for the new key, shown later when listing enrolled keys
-        #[arg(long, value_parser = parse_label)]
+        #[arg(short = 'l', long, value_parser = parse_label)]
         label: String,
 
         /// Hidraw path (e.g. /dev/hidraw1) of the new security key to enroll
         /// — for unattended/scripted use. Must be given together with
         /// --unlock-fido2-device; omit both to be prompted interactively.
-        #[arg(long, requires = "unlock_fido2_device")]
+        #[arg(short = 'f', long, requires = "unlock_fido2_device")]
         fido2_device: Option<PathBuf>,
 
         /// Hidraw path of the already-enrolled security key to authenticate
         /// this enrollment with. Must be given together with --fido2-device.
-        #[arg(long, requires = "fido2_device")]
+        #[arg(short = 'u', long, requires = "fido2_device")]
         unlock_fido2_device: Option<PathBuf>,
 
         /// Require the device's own fingerprint/PIN check at unlock time,
         /// not touch alone. Fails enrollment outright if the device has no
         /// on-device verification method (e.g. no fingerprint sensor)
-        #[arg(long)]
+        #[arg(short = 'v', long)]
         user_verification: bool,
     },
 
@@ -89,7 +89,7 @@ enum Commands {
         path: PathBuf,
 
         /// Label of the enrolled key to revoke
-        #[arg(long, value_parser = parse_label)]
+        #[arg(short = 'l', long, value_parser = parse_label)]
         label: String,
     },
 
@@ -100,14 +100,14 @@ enum Commands {
         path: PathBuf,
 
         /// Skip bind-hooks and exec-hooks processing for this command.
-        #[arg(long)]
+        #[arg(short = 's', long)]
         skip_hooks: bool,
     },
 
     /// Close every currently open/unlocked volume in one command
     CloseAll {
         /// Skip bind-hooks and exec-hooks processing for every volume closed in this batch.
-        #[arg(long)]
+        #[arg(short = 's', long)]
         skip_hooks: bool,
     },
 
@@ -119,7 +119,7 @@ enum Commands {
 
         /// New total size for the volume (e.g. 20G) — must be larger than its
         /// current size; resize is grow-only
-        #[arg(long, value_parser = parse_size)]
+        #[arg(short = 's', long, value_parser = parse_size)]
         size: u64,
     },
 
@@ -138,7 +138,7 @@ enum Commands {
 // AD-9 requires the CLI to resolve an explicit target mode, never inferred by
 // sniffing the path — hence two distinct subcommands rather than a single
 // flat `create` with an optional device flag.
-#[derive(Subcommand)]
+#[derive(Subcommand, Debug)]
 enum CreateMode {
     /// Create a new file-backed volume
     File {
@@ -148,33 +148,33 @@ enum CreateMode {
 
         /// Size to allocate for the backing file (e.g. 500M, 10G, or a plain
         /// byte count)
-        #[arg(long, value_parser = parse_size)]
+        #[arg(short = 's', long, value_parser = parse_size)]
         size: u64,
 
         /// Filesystem to create inside the volume
-        #[arg(long, value_enum, default_value = "ext4")]
+        #[arg(short = 'f', long, value_enum, default_value = "ext4")]
         filesystem: CliFilesystem,
 
         /// Scaffold a commented-out example bind-hooks file and a
         /// non-executable exec-hooks.example stub into the new volume, so
         /// you can discover the hooks format without consulting docs first.
-        #[arg(long)]
+        #[arg(short = 'c', long)]
         scaffold_hooks: bool,
 
         /// Label for the bootstrap key enrolled during create, shown later
         /// when listing enrolled keys. Defaults to "primary" when omitted.
-        #[arg(long, value_parser = parse_label)]
+        #[arg(short = 'l', long, value_parser = parse_label)]
         label: Option<String>,
 
         /// Hidraw path (e.g. /dev/hidraw1) of the security key to enroll —
         /// for unattended/scripted use. Omit to be prompted interactively.
-        #[arg(long)]
+        #[arg(short = 'd', long)]
         fido2_device: Option<PathBuf>,
 
         /// Require the device's own fingerprint/PIN check at unlock time,
         /// not touch alone. Fails enrollment outright if the device has no
         /// on-device verification method (e.g. no fingerprint sensor)
-        #[arg(long)]
+        #[arg(short = 'u', long)]
         user_verification: bool,
     },
 
@@ -187,33 +187,33 @@ enum CreateMode {
 
         /// Size to use (e.g. 500M, 10G, or a plain byte count); defaults to
         /// the device's full capacity when omitted
-        #[arg(long, value_parser = parse_size)]
+        #[arg(short = 's', long, value_parser = parse_size)]
         size: Option<u64>,
 
         /// Filesystem to create inside the volume
-        #[arg(long, value_enum, default_value = "ext4")]
+        #[arg(short = 'f', long, value_enum, default_value = "ext4")]
         filesystem: CliFilesystem,
 
         /// Scaffold a commented-out example bind-hooks file and a
         /// non-executable exec-hooks.example stub into the new volume, so
         /// you can discover the hooks format without consulting docs first.
-        #[arg(long)]
+        #[arg(short = 'c', long)]
         scaffold_hooks: bool,
 
         /// Label for the bootstrap key enrolled during create, shown later
         /// when listing enrolled keys. Defaults to "primary" when omitted.
-        #[arg(long, value_parser = parse_label)]
+        #[arg(short = 'l', long, value_parser = parse_label)]
         label: Option<String>,
 
         /// Hidraw path (e.g. /dev/hidraw1) of the security key to enroll —
         /// for unattended/scripted use. Omit to be prompted interactively.
-        #[arg(long)]
+        #[arg(short = 'd', long)]
         fido2_device: Option<PathBuf>,
 
         /// Require the device's own fingerprint/PIN check at unlock time,
         /// not touch alone. Fails enrollment outright if the device has no
         /// on-device verification method (e.g. no fingerprint sensor)
-        #[arg(long)]
+        #[arg(short = 'u', long)]
         user_verification: bool,
     },
 }
@@ -292,7 +292,7 @@ fn fido2_selection_for_enroll(
     }
 }
 
-#[derive(Clone, Copy, ValueEnum)]
+#[derive(Clone, Copy, ValueEnum, Debug)]
 enum CliFilesystem {
     Ext4,
     Xfs,
