@@ -372,43 +372,40 @@ impl Fido2StderrSignal {
         }
     }
 
-    /// Builds this signal's plain-language warning text. `retries`, when
-    /// `Some`, is the device's *live* PIN retry count re-queried right
-    /// after this signal was detected (never cached/proactive — see
-    /// `fido2_token_pin_retries`), folded in so the user sees a concrete
-    /// number instead of vague "retries are limited" text (review
-    /// feedback, 2026-08-11: the original static wording "felt
-    /// cumbersome" and never showed the actual count). `None` covers both
-    /// "couldn't determine which single device to query" (e.g. `resize()`,
-    /// which has no prior device enumeration, or multiple candidates) and
-    /// "the live query itself failed or timed out" — either way, falls
-    /// back to the original device-agnostic wording.
-    fn warning(self, retries: Option<u32>) -> String {
-        match (self, retries) {
-            (Self::WrongPin, Some(0)) => "Wrong PIN — no attempts left; the security key's PIN \
-                 is now locked until it's unplugged and reinserted."
-                .to_string(),
-            (Self::WrongPin, Some(n)) => format!(
-                "Wrong PIN — {n} attempt{} left before the security key's PIN locks.",
-                if n == 1 { "" } else { "s" }
-            ),
-            (Self::WrongPin, None) => {
-                "Heads up: that PIN was wrong — retries are limited.".to_string()
+    /// This signal's plain-language, per-attempt warning — printed the
+    /// moment the signal is detected, while the subprocess (and thus the
+    /// device) may still be mid-transaction. Deliberately static/count-less
+    /// (see `fido2_token_pin_retries_bounded`'s doc comment for why a live
+    /// query *during* the loop turned out to be unreliable): the real,
+    /// accurate count is instead shown once, as a summary, after the whole
+    /// subprocess exits — see `run_with_stderr_watch`'s post-exit summary.
+    fn warning(self) -> &'static str {
+        match self {
+            Self::WrongPin => "Heads up: that PIN was wrong — retries are limited.",
+            Self::PinBlocked => {
+                "Heads up: the security key's PIN is now locked — remove and reinsert it before \
+                 trying again."
             }
-            (Self::PinBlocked, _) => "Heads up: the security key's PIN is now locked — remove \
-                 and reinsert it before trying again."
-                .to_string(),
         }
     }
 }
 
 /// Wraps `fido2_token_pin_retries` with a short bound so a slow/contended
-/// device query can never stall the reader thread for long. The reader
-/// thread must keep draining the pty concurrently with the main thread's
-/// `child.wait()` (AD-3) — an unbounded call here, right in that hot loop,
-/// would reintroduce exactly the deadlock risk this story exists to
-/// prevent if the device happens to be mid-transaction with the very
-/// subprocess we're watching. Returns `None` on any failure or on timeout.
+/// device query can never stall the caller for long.
+///
+/// This was originally called reactively, mid-stream, the instant a
+/// wrong-PIN signal was detected — but real hardware testing (2026-08-11,
+/// `LeReverandNox`) showed it reliably fails/times out in that window:
+/// `systemd-cryptenroll`/`cryptsetup` appear to hold the device's CTAP HID
+/// channel open across the *entire* PIN retry loop (not release/reacquire
+/// it per attempt), so a concurrent `fido2-token -I` query from a second
+/// process contends with it and consistently falls back to the
+/// count-less generic warning. It's now only called **once, after the
+/// subprocess has fully exited** (see `run_with_stderr_watch`'s post-exit
+/// summary), when the device is reliably idle. The bound is kept
+/// regardless, as defense in depth — this helper still runs the query on
+/// its own thread rather than assuming the direct `Command::output()` call
+/// can never hang.
 fn fido2_token_pin_retries_bounded(path: &str) -> Option<u32> {
     let (tx, rx) = std::sync::mpsc::channel();
     let path = path.to_string();
@@ -517,20 +514,29 @@ fn open_pty_pair() -> Result<(File, PathBuf), DomainError> {
 /// values that never appear as a continuation/lead byte of a multi-byte
 /// sequence, so scanning for them byte-by-byte never mis-splits a
 /// multi-byte character (e.g. the 👆 emoji some prompts use). On a match, a
-/// plain-language warning is printed (via `println!`, to stdout — a
-/// separate stream from the forwarded stderr, so it can never interleave
-/// with or corrupt the passthrough bytes above).
+/// plain-language warning is printed immediately (via `println!`, to
+/// stdout — a separate stream from the forwarded stderr, so it can never
+/// interleave with or corrupt the passthrough bytes above), and the signal
+/// is tallied (`wrong_pin_attempts`/`pin_blocked`) for the post-exit
+/// summary below.
 ///
 /// The full raw bytes are also returned (lossily decoded to a `String` once,
 /// at the end) so a caller can fold the real subprocess's own diagnostic
 /// text into its own `AdapterFailure` message on a non-zero exit.
 ///
-/// `retry_query_devices` names the device path(s) that might be the one a
-/// wrong-PIN signal came from — when there's exactly one, its live PIN
-/// retry count is re-queried (bounded, see `fido2_token_pin_retries_bounded`)
-/// and folded into the printed warning. Pass an empty slice when no
-/// specific device is known (e.g. `resize()`, which has no prior device
-/// enumeration) to fall back to the original device-agnostic wording.
+/// **Post-exit retry-count summary** (review feedback, 2026-08-11): once
+/// `child.wait()` returns — meaning the device is reliably no longer
+/// mid-transaction — if any wrong-PIN attempts were tallied and the device
+/// wasn't ultimately blocked, `retry_query_devices` (when it names exactly
+/// one device) is re-queried once for the *current* retry count and a
+/// one-line summary is printed. This is deliberately **not** done
+/// reactively inside the loop above: real hardware testing showed
+/// `systemd-cryptenroll`/`cryptsetup` hold the device's CTAP HID channel
+/// open across the *entire* PIN retry loop, so a concurrent query attempted
+/// mid-loop reliably fails/times out (confirmed live — every reactive
+/// attempt fell back to the count-less generic wording). Pass an empty
+/// slice when no specific device is known at all (e.g. `resize()`, which
+/// has no prior device enumeration) to skip the summary entirely.
 fn run_with_stderr_watch(
     cmd: &mut Command,
     retry_query_devices: &[String],
@@ -580,11 +586,12 @@ fn run_with_stderr_watch(
     let mut child = spawn_result
         .map_err(|e| DomainError::AdapterFailure(format!("failed to spawn {cmd:?}: {e}")))?;
 
-    let retry_query_devices = retry_query_devices.to_vec();
     let reader = std::thread::spawn(move || {
         let mut captured = Vec::new();
         let mut scan_buffer = Vec::new();
         let mut chunk = [0u8; 4096];
+        let mut wrong_pin_attempts: u32 = 0;
+        let mut pin_blocked = false;
 
         loop {
             let bytes_read = match io::Read::read(&mut master, &mut chunk) {
@@ -609,30 +616,55 @@ fn run_with_stderr_watch(
                 let line = String::from_utf8_lossy(&scan_buffer[..boundary]).into_owned();
                 scan_buffer.drain(..=boundary);
                 if let Some(signal) = Fido2StderrSignal::classify(&line) {
-                    let retries = match retry_query_devices.as_slice() {
-                        [path] => fido2_token_pin_retries_bounded(path),
-                        _ => None,
-                    };
-                    println!("{}", signal.warning(retries));
+                    match signal {
+                        Fido2StderrSignal::WrongPin => wrong_pin_attempts += 1,
+                        Fido2StderrSignal::PinBlocked => pin_blocked = true,
+                    }
+                    println!("{}", signal.warning());
                 }
             }
         }
 
         if let Some(signal) = Fido2StderrSignal::classify(&String::from_utf8_lossy(&scan_buffer)) {
-            let retries = match retry_query_devices.as_slice() {
-                [path] => fido2_token_pin_retries_bounded(path),
-                _ => None,
-            };
-            println!("{}", signal.warning(retries));
+            match signal {
+                Fido2StderrSignal::WrongPin => wrong_pin_attempts += 1,
+                Fido2StderrSignal::PinBlocked => pin_blocked = true,
+            }
+            println!("{}", signal.warning());
         }
 
-        String::from_utf8_lossy(&captured).into_owned()
+        (
+            String::from_utf8_lossy(&captured).into_owned(),
+            wrong_pin_attempts,
+            pin_blocked,
+        )
     });
 
     let status = child
         .wait()
         .map_err(|e| DomainError::AdapterFailure(format!("failed waiting for {cmd:?}: {e}")))?;
-    let captured = reader.join().unwrap_or_default();
+    let (captured, wrong_pin_attempts, pin_blocked) = reader.join().unwrap_or_default();
+
+    // Shown once, here, rather than reactively during the loop above: real
+    // hardware testing (2026-08-11) showed `systemd-cryptenroll`/
+    // `cryptsetup` hold the device's CTAP HID channel open across the
+    // *entire* PIN retry loop, so a concurrent query while the subprocess
+    // is still running reliably contends and fails. The device is
+    // guaranteed idle now that `child.wait()` has returned, making this the
+    // one point where a fresh query is both accurate and safe.
+    if wrong_pin_attempts > 0 && !pin_blocked {
+        if let [path] = retry_query_devices {
+            if let Some(retries) = fido2_token_pin_retries_bounded(path) {
+                println!(
+                    "You entered {wrong_pin_attempts} incorrect PIN{} — {retries} attempt{} \
+                     remain{} on this security key.",
+                    if wrong_pin_attempts == 1 { "" } else { "s" },
+                    if retries == 1 { "" } else { "s" },
+                    if retries == 1 { "s" } else { "" }
+                );
+            }
+        }
+    }
 
     Ok((status, captured))
 }
@@ -3273,43 +3305,19 @@ mod tests {
     }
 
     #[test]
-    fn fido2_stderr_signal_wrong_pin_warning_includes_live_retry_count() {
+    fn fido2_stderr_signal_wrong_pin_warning_is_count_less_and_static() {
         assert_eq!(
-            Fido2StderrSignal::WrongPin.warning(Some(5)),
-            "Wrong PIN — 5 attempts left before the security key's PIN locks."
-        );
-    }
-
-    #[test]
-    fn fido2_stderr_signal_wrong_pin_warning_singular_for_one_retry_left() {
-        assert_eq!(
-            Fido2StderrSignal::WrongPin.warning(Some(1)),
-            "Wrong PIN — 1 attempt left before the security key's PIN locks."
-        );
-    }
-
-    #[test]
-    fn fido2_stderr_signal_wrong_pin_warning_zero_retries_reads_as_locked() {
-        assert_eq!(
-            Fido2StderrSignal::WrongPin.warning(Some(0)),
-            "Wrong PIN — no attempts left; the security key's PIN is now locked until it's \
-             unplugged and reinserted."
-        );
-    }
-
-    #[test]
-    fn fido2_stderr_signal_wrong_pin_warning_falls_back_without_a_live_count() {
-        assert_eq!(
-            Fido2StderrSignal::WrongPin.warning(None),
+            Fido2StderrSignal::WrongPin.warning(),
             "Heads up: that PIN was wrong — retries are limited."
         );
     }
 
     #[test]
-    fn fido2_stderr_signal_pin_blocked_warning_ignores_retries() {
+    fn fido2_stderr_signal_pin_blocked_warning_is_static() {
         assert_eq!(
-            Fido2StderrSignal::PinBlocked.warning(Some(0)),
-            Fido2StderrSignal::PinBlocked.warning(None)
+            Fido2StderrSignal::PinBlocked.warning(),
+            "Heads up: the security key's PIN is now locked — remove and reinsert it before \
+             trying again."
         );
     }
 
