@@ -571,12 +571,27 @@ fn parse_client_pin_configured(fido2_token_info_output: &str) -> bool {
 /// needs at least one device present. Prints a friendly wait message only
 /// when the enumerated count changes, so it doesn't spam the terminal every
 /// poll tick.
+///
+/// `client_pin` is populated exactly once, on this final settled list, right
+/// before returning — never inside the poll loop itself, which would fire an
+/// extra `fido2-token -I` subprocess call per already-connected device on
+/// every 500ms tick (AD-21's literal wording doesn't say when to populate it;
+/// see Dev Notes' "Avoid poll-loop spam").
 fn wait_for_enough_fido2_devices(needed: usize) -> Result<Vec<Fido2Device>, DomainError> {
     let mut last_seen = usize::MAX;
     loop {
         let devices = list_fido2_devices()?;
         if devices.len() >= needed {
-            return Ok(devices);
+            return devices
+                .into_iter()
+                .map(|device| {
+                    let client_pin = fido2_token_has_pin(&device.path)?;
+                    Ok(Fido2Device {
+                        client_pin,
+                        ..device
+                    })
+                })
+                .collect();
         }
         if devices.len() != last_seen {
             let more = needed - devices.len();
@@ -637,7 +652,9 @@ fn prompt_for_device_index(prompt: &str, devices: &[Fido2Device]) -> Result<usiz
     }
 }
 
-/// Resolves `Fido2DeviceSelection::Interactive` to concrete hidraw paths.
+/// Resolves `Fido2DeviceSelection::Interactive` to concrete devices —
+/// carrying each device's `client_pin` status along (already populated by
+/// `wait_for_enough_fido2_devices`), for Task 3's enroll-time PIN warning.
 /// `need_existing` is false for create's bootstrap-enroll call (single "new
 /// key" role only) and true for a standalone enroll authenticating against
 /// an already-enrolled key (both "existing" and "new" roles).
@@ -650,12 +667,12 @@ fn prompt_for_device_index(prompt: &str, devices: &[Fido2Device]) -> Result<usiz
 /// elimination shortcut).
 fn resolve_interactive_selection(
     need_existing: bool,
-) -> Result<(String, Option<String>), DomainError> {
+) -> Result<(Fido2Device, Option<Fido2Device>), DomainError> {
     let needed = if need_existing { 2 } else { 1 };
     let devices = wait_for_enough_fido2_devices(needed)?;
 
     if !need_existing && devices.len() == 1 {
-        return Ok((devices[0].path.clone(), None));
+        return Ok((devices[0].clone(), None));
     }
 
     print_numbered_fido2_devices(&devices);
@@ -681,8 +698,8 @@ fn resolve_interactive_selection(
     };
 
     Ok((
-        devices[new_index].path.clone(),
-        existing_index.map(|index| devices[index].path.clone()),
+        devices[new_index].clone(),
+        existing_index.map(|index| devices[index].clone()),
     ))
 }
 
@@ -739,17 +756,41 @@ fn resolve_explicit_selection(
 }
 
 /// Resolves `selection` to the concrete `(new_device, existing_device)`
-/// hidraw paths `systemd-cryptenroll` needs — `existing_device` is `Some`
-/// exactly when `need_existing` is true.
+/// `systemd-cryptenroll` needs, each carrying its `client_pin` status —
+/// `existing_device` is `Some` exactly when `need_existing` is true.
+///
+/// The `Explicit` branch looks up `client_pin` only for the 1-2 resolved
+/// paths directly (cheaper than enriching the whole enumerated list, and
+/// matches AD-21's framing that the resolvers "know the specific device"
+/// once resolved) — unlike the `Interactive` branch, whose devices already
+/// carry `client_pin` from `wait_for_enough_fido2_devices`'s enrichment.
 fn resolve_device_selection(
     selection: &Fido2DeviceSelection,
     need_existing: bool,
-) -> Result<(String, Option<String>), DomainError> {
+) -> Result<(Fido2Device, Option<Fido2Device>), DomainError> {
     match selection {
         Fido2DeviceSelection::Interactive => resolve_interactive_selection(need_existing),
         Fido2DeviceSelection::Explicit { new, existing } => {
             let devices = list_fido2_devices()?;
-            resolve_explicit_selection(&devices, new, existing.as_deref(), need_existing)
+            let (new_path, existing_path) =
+                resolve_explicit_selection(&devices, new, existing.as_deref(), need_existing)?;
+
+            let new_device = Fido2Device {
+                client_pin: fido2_token_has_pin(&new_path)?,
+                description: String::new(),
+                path: new_path,
+            };
+            let existing_device = existing_path
+                .map(|path| -> Result<Fido2Device, DomainError> {
+                    Ok(Fido2Device {
+                        client_pin: fido2_token_has_pin(&path)?,
+                        description: String::new(),
+                        path,
+                    })
+                })
+                .transpose()?;
+
+            Ok((new_device, existing_device))
         }
     }
 }
@@ -1552,7 +1593,7 @@ impl Fido2Backend for ExecAdapter {
                 drop(passphrase);
 
                 Command::new("systemd-cryptenroll")
-                    .arg(format!("--fido2-device={new_device}"))
+                    .arg(format!("--fido2-device={}", new_device.path))
                     .arg(format!("--unlock-key-file={}", key_file.path.display()))
                     .args(fido2_verification_args(user_verification))
                     .arg(path)
@@ -1584,8 +1625,8 @@ impl Fido2Backend for ExecAdapter {
                     .expect("resolve_device_selection guarantees Some when need_existing is true");
 
                 Command::new("systemd-cryptenroll")
-                    .arg(format!("--fido2-device={new_device}"))
-                    .arg(format!("--unlock-fido2-device={existing_device}"))
+                    .arg(format!("--fido2-device={}", new_device.path))
+                    .arg(format!("--unlock-fido2-device={}", existing_device.path))
                     .args(fido2_verification_args(user_verification))
                     .arg(path)
                     .status()
