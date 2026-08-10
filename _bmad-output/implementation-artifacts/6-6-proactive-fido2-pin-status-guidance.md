@@ -4,7 +4,7 @@ baseline_commit: f867364ad071992bdd0a48efcff2fd5eb79e7e98
 
 # Story 6.6: Proactive FIDO2 PIN-Status Guidance
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
