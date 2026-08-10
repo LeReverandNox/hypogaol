@@ -20,6 +20,7 @@ pub fn run(
     fs: &dyn FilesystemBackend,
 ) -> Result<(), DomainError> {
     preflight::check(luks, fido2, fs, None)?;
+    let _lock = fs.lock_target(path)?;
 
     let target = luks
         .list_fido2_keyslots(path)?

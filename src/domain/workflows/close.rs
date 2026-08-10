@@ -34,6 +34,7 @@ pub fn run(
     fs: &dyn FilesystemBackend,
 ) -> Result<(), DomainError> {
     preflight::check(luks, fido2, fs, None)?;
+    let _lock = fs.lock_target(path)?;
 
     let name = mapping_name::mapping_name(path)?;
     let mapper = MapperHandle {

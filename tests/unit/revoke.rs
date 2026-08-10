@@ -185,3 +185,51 @@ fn remove_key_failure_propagates_as_adapter_failure_untouched() {
         other => panic!("expected DomainError::AdapterFailure, got {other:?}"),
     }
 }
+
+#[test]
+fn locks_the_target_path_as_the_second_statement_after_preflight() {
+    let luks = FakeLuksBackend::passing().with_keyslots(vec![
+        KeyslotInfo {
+            keyslot: KeyslotRef(0),
+            key_label: "primary".to_string(),
+        },
+        KeyslotInfo {
+            keyslot: KeyslotRef(1),
+            key_label: "backup".to_string(),
+        },
+    ]);
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let result = revoke::run(Path::new("/tmp/volume"), "backup", &luks, &fido2, &fs);
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(
+        fs.lock_target_calls(),
+        vec![std::path::PathBuf::from("/tmp/volume")]
+    );
+}
+
+#[test]
+fn lock_contention_aborts_before_list_fido2_keyslots_is_called() {
+    let log = new_call_log();
+    let luks = FakeLuksBackend::passing().with_log(log.clone());
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing()
+        .with_log(log.clone())
+        .with_lock_contention();
+
+    let result = revoke::run(Path::new("/tmp/volume"), "primary", &luks, &fido2, &fs);
+
+    assert!(matches!(result, Err(DomainError::LockContention(_))));
+    assert!(
+        !log.borrow().contains(&"list_fido2_keyslots".to_string()),
+        "lock contention must abort before any mutating call, log: {:?}",
+        log.borrow()
+    );
+    assert!(
+        !log.borrow().contains(&"remove_key".to_string()),
+        "lock contention must abort before any mutating call, log: {:?}",
+        log.borrow()
+    );
+}

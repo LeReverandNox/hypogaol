@@ -7,6 +7,7 @@ mod fakes;
 mod hooks;
 mod info;
 mod keyslot_guard;
+mod lock_target;
 mod mapping_name;
 mod preflight;
 mod progress;
