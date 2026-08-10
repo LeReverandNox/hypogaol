@@ -1,7 +1,11 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
+use std::ffi::CStr;
+use std::fs::File;
 use std::io::{self, Write};
+use std::os::fd::{FromRawFd, IntoRawFd, RawFd};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -382,45 +386,194 @@ impl Fido2StderrSignal {
     }
 }
 
+/// Opens a fresh PTY pair via `posix_openpt`/`grantpt`/`unlockpt`/
+/// `ptsname_r`, returning the master end (as a `File`, for the caller to
+/// read from) and the slave device's path (e.g. `/dev/pts/7`) for the
+/// caller to open separately. `O_NOCTTY` keeps this process from
+/// accidentally acquiring the new pty as its own controlling terminal.
+fn open_pty_pair() -> Result<(File, PathBuf), DomainError> {
+    // SAFETY: these are the standard POSIX pty-allocation calls; every
+    // return value is checked before use, and `master_fd` is a freshly
+    // opened, exclusively-owned fd once `posix_openpt` returns non-negative.
+    unsafe {
+        let master_fd = libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY);
+        if master_fd < 0 {
+            return Err(DomainError::AdapterFailure(format!(
+                "failed to open a pty master (posix_openpt): {}",
+                io::Error::last_os_error()
+            )));
+        }
+
+        if libc::grantpt(master_fd) != 0 {
+            let err = io::Error::last_os_error();
+            libc::close(master_fd);
+            return Err(DomainError::AdapterFailure(format!(
+                "grantpt failed: {err}"
+            )));
+        }
+
+        if libc::unlockpt(master_fd) != 0 {
+            let err = io::Error::last_os_error();
+            libc::close(master_fd);
+            return Err(DomainError::AdapterFailure(format!(
+                "unlockpt failed: {err}"
+            )));
+        }
+
+        let mut name_buf = [0u8; 128];
+        if libc::ptsname_r(
+            master_fd,
+            name_buf.as_mut_ptr().cast::<libc::c_char>(),
+            name_buf.len(),
+        ) != 0
+        {
+            let err = io::Error::last_os_error();
+            libc::close(master_fd);
+            return Err(DomainError::AdapterFailure(format!(
+                "ptsname_r failed: {err}"
+            )));
+        }
+
+        let slave_path = CStr::from_ptr(name_buf.as_ptr().cast::<libc::c_char>())
+            .to_string_lossy()
+            .into_owned();
+
+        Ok((File::from_raw_fd(master_fd), PathBuf::from(slave_path)))
+    }
+}
+
 /// Runs `cmd` with stdin/stdout left inherited (`Command`'s default,
 /// deliberately not overridden — the actual touch/PIN exchange must reach
-/// the real terminal, AD-3) and only stderr piped, read **concurrently on a
-/// background thread** while the main thread blocks in `child.wait()`. This
-/// avoids a pipe-buffer deadlock on a long touch/PIN-blocking call if the
-/// child writes enough stderr before it's drained (AD-3's Epic 6 amendment)
-/// — mirroring `run_piping_stdin`'s existing concurrent-thread precedent,
-/// used there for exactly this reason on a different pipe (stdin, not
-/// stderr).
+/// the real terminal, AD-3) and stderr connected to a **pty**, read
+/// **concurrently on a background thread** while the main thread blocks in
+/// `child.wait()`. This avoids a pipe-buffer deadlock on a long touch/PIN-
+/// blocking call if the child writes enough stderr before it's drained
+/// (AD-3's Epic 6 amendment) — mirroring `run_piping_stdin`'s existing
+/// concurrent-thread precedent, used there for exactly this reason on a
+/// different pipe (stdin, not stderr).
 ///
-/// Each stderr line is checked against `WRONG_PIN_STDERR_MARKER`/
-/// `PIN_BLOCKED_STDERR_MARKER` and, on a match, a plain-language warning is
-/// printed as soon as it's seen (never batched until the child exits, per
-/// AC #3/#4). Every line — matched or not — is also forwarded to the real
-/// stderr unchanged and appended to the returned `String`, so a caller can
-/// fold the real subprocess's own diagnostic text into its own
-/// `AdapterFailure` message on a non-zero exit (a real improvement over
-/// this file's previous generic-message-only failure paths for these
-/// calls — a deliberate decision, not an oversight; see this story's
-/// Completion Notes).
+/// **Why a pty and not a plain pipe** (found post-review, 2026-08-10,
+/// reported by `LeReverandNox` against `open()`'s live unlock output, with
+/// explicit sign-off to introduce `libc` as a direct dependency again for
+/// this fix — see this story's Completion Notes for the full diagnosis):
+/// `systemd-cryptenroll`/`cryptsetup`'s own FIDO2 touch/PIN status UI checks
+/// whether its stderr is a real terminal (`isatty`) and renders differently
+/// — still using `\r`-based in-place updates, but without the line-clearing
+/// it does for a real tty — when it isn't. A plain `Stdio::piped()` fails
+/// that check and produces visibly corrupted (staircased) output; this is
+/// true even with zero Rust code involved (confirmed via plain
+/// `2> >(cat >&2)` in bash), so no amount of care in how the pipe is *read*
+/// can fix it — the child itself emits different bytes. Connecting its
+/// stderr to a pty slave instead makes `isatty` succeed, so the child
+/// renders exactly as it would talking to a real terminal, while we still
+/// read the byte stream from the master end.
+///
+/// Every raw byte read from the master is forwarded to the real stderr
+/// **immediately and unmodified**, in the same chunks it arrived in — never
+/// reconstructed line-by-line via `\n`-splitting (an earlier version of this
+/// function did that via `BufRead::lines()` plus per-line `eprintln!`,
+/// which — independent of the pty-vs-pipe issue above — also risked adding
+/// a `\n` the original stream never had).
+///
+/// A separate accumulating buffer is scanned for `WRONG_PIN_STDERR_MARKER`/
+/// `PIN_BLOCKED_STDERR_MARKER`, using either a `\n` or `\r` byte as a soft
+/// boundary — good enough to isolate a complete-enough chunk of text to
+/// classify, without ever affecting what's forwarded above. This is safe
+/// against multi-byte UTF-8 splitting: `\n`/`\r` are single-byte ASCII
+/// values that never appear as a continuation/lead byte of a multi-byte
+/// sequence, so scanning for them byte-by-byte never mis-splits a
+/// multi-byte character (e.g. the 👆 emoji some prompts use). On a match, a
+/// plain-language warning is printed (via `println!`, to stdout — a
+/// separate stream from the forwarded stderr, so it can never interleave
+/// with or corrupt the passthrough bytes above).
+///
+/// The full raw bytes are also returned (lossily decoded to a `String` once,
+/// at the end) so a caller can fold the real subprocess's own diagnostic
+/// text into its own `AdapterFailure` message on a non-zero exit.
 fn run_with_stderr_watch(cmd: &mut Command) -> Result<(ExitStatus, String), DomainError> {
-    cmd.stderr(Stdio::piped());
+    let (mut master, slave_path) = open_pty_pair()?;
 
-    let mut child = cmd
-        .spawn()
+    let slave = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&slave_path)
+        .map_err(|e| {
+            DomainError::AdapterFailure(format!(
+                "failed to open pty slave {}: {e}",
+                slave_path.display()
+            ))
+        })?;
+    let slave_fd: RawFd = slave.into_raw_fd();
+
+    // SAFETY: `pre_exec`'s closure runs in the forked child, before exec,
+    // and must only call async-signal-safe functions — `dup2`/`close` both
+    // qualify. `slave_fd` was opened in the parent before `fork()`, so the
+    // same fd number is valid (pointing at the same open file description)
+    // in the child immediately after `fork()`.
+    unsafe {
+        cmd.pre_exec(move || {
+            if libc::dup2(slave_fd, libc::STDERR_FILENO) < 0 {
+                return Err(io::Error::last_os_error());
+            }
+            if slave_fd != libc::STDERR_FILENO {
+                libc::close(slave_fd);
+            }
+            Ok(())
+        });
+    }
+
+    let spawn_result = cmd.spawn();
+    // The parent's own copy of the slave fd must be closed here, right
+    // after spawn, regardless of outcome — otherwise it lingers for as
+    // long as the caller keeps `cmd` alive (arbitrarily longer than this
+    // function), which would keep the pty's slave-side reference count
+    // above zero and prevent the master from ever seeing end-of-stream.
+    // SAFETY: `slave_fd` is a valid fd we own exclusively at this point;
+    // `pre_exec` (run in the child) never affects the parent's copy.
+    unsafe {
+        libc::close(slave_fd);
+    }
+    let mut child = spawn_result
         .map_err(|e| DomainError::AdapterFailure(format!("failed to spawn {cmd:?}: {e}")))?;
 
-    let stderr = child.stderr.take().expect("stderr was requested as piped");
     let reader = std::thread::spawn(move || {
-        let mut captured = String::new();
-        for line in io::BufRead::lines(io::BufReader::new(stderr)).map_while(Result::ok) {
-            match Fido2StderrSignal::classify(&line) {
-                Some(signal) => println!("{}", signal.warning()),
-                None => eprintln!("{line}"),
+        let mut captured = Vec::new();
+        let mut scan_buffer = Vec::new();
+        let mut chunk = [0u8; 4096];
+
+        loop {
+            let bytes_read = match io::Read::read(&mut master, &mut chunk) {
+                Ok(0) => break,
+                // Linux ptys report EIO (not a clean 0-byte read) once
+                // every slave-side fd has closed — the normal
+                // end-of-stream signal for this transport, not a real
+                // error.
+                Err(e) if e.raw_os_error() == Some(libc::EIO) => break,
+                Err(_) => break,
+                Ok(n) => n,
+            };
+            let bytes = &chunk[..bytes_read];
+
+            let _ = io::Write::write_all(&mut io::stderr(), bytes);
+            let _ = io::stderr().flush();
+
+            captured.extend_from_slice(bytes);
+            scan_buffer.extend_from_slice(bytes);
+
+            while let Some(boundary) = scan_buffer.iter().position(|&b| b == b'\n' || b == b'\r') {
+                let line = String::from_utf8_lossy(&scan_buffer[..boundary]).into_owned();
+                scan_buffer.drain(..=boundary);
+                if let Some(signal) = Fido2StderrSignal::classify(&line) {
+                    println!("{}", signal.warning());
+                }
             }
-            captured.push_str(&line);
-            captured.push('\n');
         }
-        captured
+
+        if let Some(signal) = Fido2StderrSignal::classify(&String::from_utf8_lossy(&scan_buffer)) {
+            println!("{}", signal.warning());
+        }
+
+        String::from_utf8_lossy(&captured).into_owned()
     });
 
     let status = child
@@ -3053,11 +3206,12 @@ mod tests {
     // Regression test for AD-3's Epic 6 amendment: reading stderr only
     // after `child.wait()` (instead of concurrently, on a background
     // thread) deadlocks once the child writes enough stderr to fill the
-    // pipe buffer (typically 64KiB on Linux) before anyone drains it. No
-    // FIDO2 hardware needed — any real child process writing to a real
-    // pipe reproduces the exact OS-level property `run_with_stderr_watch`
-    // must avoid. Mirrors Story 6.5's Task 12 precedent (a real,
-    // non-fake regression test for an OS-level concurrency property).
+    // pty's internal output buffer (much smaller than a plain pipe's,
+    // typically a few KiB) before anyone drains it. No FIDO2 hardware
+    // needed — any real child process writing to the pty reproduces the
+    // exact OS-level property `run_with_stderr_watch` must avoid. Mirrors
+    // Story 6.5's Task 12 precedent (a real, non-fake regression test for
+    // an OS-level concurrency property).
     //
     // `run_with_stderr_watch` itself is called on a background thread here
     // too, with a bounded `recv_timeout` on the result — a real regression
@@ -3068,7 +3222,7 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::spawn(move || {
             let mut cmd = Command::new("sh");
-            // 200KiB comfortably exceeds any real pipe buffer size.
+            // 200KiB comfortably exceeds any real pty/pipe buffer size.
             cmd.arg("-c").arg("yes | head -c 200000 1>&2");
             let _ = tx.send(run_with_stderr_watch(&mut cmd));
         });
@@ -3076,10 +3230,15 @@ mod tests {
         match rx.recv_timeout(std::time::Duration::from_secs(10)) {
             Ok(Ok((status, captured))) => {
                 assert!(status.success(), "expected the shell command to succeed");
+                // The pty's cooked-mode ONLCR translates each of the
+                // 100,000 "y\n" lines into "y\r\n" on output, so 200,000
+                // input bytes become 300,000 captured bytes — this is
+                // real, expected pty behavior (the same translation a
+                // real terminal would apply), not truncation or corruption.
                 assert_eq!(
                     captured.len(),
-                    200_000,
-                    "expected all 200KiB to be captured"
+                    300_000,
+                    "expected all 200KiB (plus ONLCR's \\r per line) to be captured"
                 );
             }
             Ok(Err(e)) => panic!("run_with_stderr_watch returned an error: {e:?}"),
