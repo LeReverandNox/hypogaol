@@ -1839,12 +1839,41 @@ impl LuksBackend for ExecAdapter {
         // amended Rule is written per-subprocess-call generically, not
         // scoped to two named workflows (Task 5's scope-decision — applied
         // here for consistency, not left as a documented gap).
-        // No prior device enumeration exists here (unlike `open`), so no
-        // specific device is known to query an upfront retry count for on a
-        // wrong-PIN signal — falls back to the count-less generic wording.
+        //
+        // Blanket warning (AC #2, extended to `resize` per this story's own
+        // code review, 2026-08-11): `resize`'s re-authentication is the same
+        // invisible-device-matching shape as `open`'s presence-wait, so it
+        // warrants the same proactive warning before the blocking call.
+        // Unlike `open`, this does not block waiting for a device to
+        // appear — a single, immediate enumeration of whatever is currently
+        // plugged in, since `resize` never blocked on device presence
+        // before this fix and shouldn't start now. A per-device `-I` query
+        // failure is advisory-only and skips that one device rather than
+        // aborting (same reasoning as `wait_for_enough_fido2_devices`).
+        let pin_configured: Vec<String> = list_fido2_devices()?
+            .into_iter()
+            .filter(|device| fido2_token_has_pin(&device.path).unwrap_or(false))
+            .map(|device| device.path)
+            .collect();
+        if !pin_configured.is_empty() {
+            println!(
+                "Heads up: the following currently-plugged-in security keys have a PIN \
+                 configured — you may be asked to enter one: {}.",
+                pin_configured.join(", ")
+            );
+        }
+        // Queried upfront, before the blocking call, same reasoning as
+        // `open` — only when exactly one PIN-configured device is present,
+        // since cryptsetup's own invisible matching means we can't know in
+        // advance which one will actually answer otherwise.
+        let max_pin_retries = match pin_configured.as_slice() {
+            [path] => fido2_token_pin_retries_bounded(path),
+            _ => None,
+        };
+
         let mut cmd = privileged("cryptsetup");
         cmd.args(["resize", "--token-only"]).arg(&mapper.name);
-        let (status, stderr) = run_with_stderr_watch(&mut cmd, None)?;
+        let (status, stderr) = run_with_stderr_watch(&mut cmd, max_pin_retries)?;
 
         if status.success() {
             Ok(())
