@@ -550,8 +550,18 @@ fn open_pty_pair() -> Result<(File, PathBuf), DomainError> {
 /// plain arithmetic, no further device query — so the message can show
 /// "attempt N of M (K remaining)" for every single attempt, not just a
 /// summary at the end. Pass `None` when no specific device is known at all
-/// (e.g. `resize()`, which has no prior device enumeration) to fall back to
-/// `Fido2StderrSignal::WrongPin`'s static, count-less wording.
+/// to fall back to `Fido2StderrSignal::WrongPin`'s static, count-less
+/// wording.
+/// Prints `text` to stdout and flushes immediately — used for the reactive
+/// wrong-PIN/PIN-blocked warnings below, which must appear promptly relative
+/// to the raw stderr bytes forwarded alongside them (also explicitly
+/// flushed) rather than sitting in stdout's buffer until process exit
+/// whenever stdout isn't a live tty (redirected, piped, logged).
+fn print_flushed(text: &str) {
+    println!("{text}");
+    let _ = io::stdout().flush();
+}
+
 fn run_with_stderr_watch(
     cmd: &mut Command,
     max_pin_retries: Option<u32>,
@@ -632,13 +642,10 @@ fn run_with_stderr_watch(
                 match Fido2StderrSignal::classify(&line) {
                     Some(Fido2StderrSignal::WrongPin) => {
                         wrong_pin_attempts += 1;
-                        println!(
-                            "{}",
-                            wrong_pin_attempt_text(wrong_pin_attempts, max_pin_retries)
-                        );
+                        print_flushed(&wrong_pin_attempt_text(wrong_pin_attempts, max_pin_retries));
                     }
                     Some(Fido2StderrSignal::PinBlocked) => {
-                        println!("{}", Fido2StderrSignal::PinBlocked.warning());
+                        print_flushed(Fido2StderrSignal::PinBlocked.warning());
                     }
                     None => {}
                 }
@@ -648,13 +655,10 @@ fn run_with_stderr_watch(
         match Fido2StderrSignal::classify(&String::from_utf8_lossy(&scan_buffer)) {
             Some(Fido2StderrSignal::WrongPin) => {
                 wrong_pin_attempts += 1;
-                println!(
-                    "{}",
-                    wrong_pin_attempt_text(wrong_pin_attempts, max_pin_retries)
-                );
+                print_flushed(&wrong_pin_attempt_text(wrong_pin_attempts, max_pin_retries));
             }
             Some(Fido2StderrSignal::PinBlocked) => {
-                println!("{}", Fido2StderrSignal::PinBlocked.warning());
+                print_flushed(Fido2StderrSignal::PinBlocked.warning());
             }
             None => {}
         }
