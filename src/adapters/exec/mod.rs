@@ -1700,6 +1700,59 @@ fn with_transient_mount<T>(
     }
 }
 
+/// Binds a Linux abstract-namespace `AF_UNIX` socket named after `name`'s
+/// hash (shared derivation for `lock_target`'s path-keyed case and
+/// `lock_mapping`'s mapping-name-keyed case, AD-20) — not a real filesystem
+/// path, so binding it takes no lock on (and makes no write to) the volume
+/// itself or anywhere else on disk. The kernel releases the name the
+/// instant the socket closes, including on process exit or crash, the same
+/// no-stale-state guarantee a real `flock` would give (AD-20, AC #5) — but
+/// on a resource that can never collide with `cryptsetup`/
+/// `systemd-cryptenroll`'s own internal LUKS2 metadata locking, which both
+/// take on the container file/device itself for nearly every operation
+/// (including read-only ones). An earlier version of this locked `path`
+/// directly via `flock(2)`, which self-deadlocked: once held for a whole
+/// workflow, any subsequent `cryptsetup`/`systemd-cryptenroll` subprocess
+/// call against that same target blocked forever on a lock this process
+/// would never release until that subprocess finished (found post-review,
+/// 2026-08-10 — `systemd-cryptenroll` has no equivalent of `cryptsetup
+/// --disable-locks` to opt out with). This mechanism assumes every
+/// concurrent `hypogaol` invocation runs in the same Linux network
+/// namespace — an abstract socket name is scoped per network namespace, so
+/// two invocations under different namespaces (containers, a systemd unit
+/// with `PrivateNetwork=yes`, `unshare --net`) would each bind their own
+/// copy of the same name and never contend (review finding, 2026-08-10,
+/// accepted as a documented limitation rather than reintroducing a
+/// disk-based lock file). `display_path` is used only for the contention
+/// error's human-facing text — it is not part of the lock name derivation,
+/// so it may legitimately differ from the exact resource being locked (e.g.
+/// `lock_mapping`'s caller passes a possibly-stale `source_path` as the
+/// most recognizable label for an already-open mapping, even if that path
+/// no longer exists on disk).
+fn bind_abstract_lock(name: &str, display_path: &Path) -> Result<LockGuard, DomainError> {
+    use std::os::linux::net::SocketAddrExt;
+    use std::os::unix::net::{SocketAddr, UnixListener};
+
+    let socket_name = format!(
+        "hypogaol-lock-{:016x}",
+        mapping_name::fnv1a_hash(name.as_bytes())
+    );
+    let addr = SocketAddr::from_abstract_name(socket_name.as_bytes()).map_err(|e| {
+        DomainError::AdapterFailure(format!("failed to build lock socket address: {e}"))
+    })?;
+
+    match UnixListener::bind_addr(&addr) {
+        Ok(listener) => Ok(LockGuard(Some(listener.into()))),
+        Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
+            Err(DomainError::LockContention(display_path.to_path_buf()))
+        }
+        Err(e) => Err(DomainError::AdapterFailure(format!(
+            "failed to acquire lock for {}: {e}",
+            display_path.display()
+        ))),
+    }
+}
+
 impl FilesystemBackend for ExecAdapter {
     fn check_prerequisites(&self, filesystem: Option<Filesystem>) -> Result<(), Vec<String>> {
         let mut missing = Vec::new();
@@ -2549,44 +2602,50 @@ impl FilesystemBackend for ExecAdapter {
     }
 
     fn lock_target(&self, path: &Path) -> Result<LockGuard, DomainError> {
-        use std::os::linux::net::SocketAddrExt;
-        use std::os::unix::net::{SocketAddr, UnixListener};
-
-        // A Linux abstract-namespace socket name, not a real filesystem path
-        // — binding it takes no lock on (and makes no write to) the volume
-        // itself or anywhere else on disk. The kernel releases the name the
-        // instant the socket closes, including on process exit or crash, the
-        // same no-stale-state guarantee a real `flock` would give (AD-20,
-        // AC #5) — but on a resource that can never collide with
-        // `cryptsetup`/`systemd-cryptenroll`'s own internal LUKS2 metadata
-        // locking, which both take on the container file/device itself for
-        // nearly every operation (including read-only ones). An earlier
-        // version of this method locked `path` directly via `flock(2)`,
-        // which self-deadlocked: once held for a whole workflow, any
-        // subsequent `cryptsetup`/`systemd-cryptenroll` subprocess call
-        // against that same target blocked forever on a lock this process
-        // would never release until that subprocess finished (found
-        // post-review, 2026-08-10 — `systemd-cryptenroll` has no equivalent
-        // of `cryptsetup --disable-locks` to opt out with).
-        let target = mapping_name::lock_target_path(path)?;
-        let name = format!(
-            "hypogaol-lock-{:016x}",
-            mapping_name::fnv1a_hash(target.to_string_lossy().as_bytes())
-        );
-        let addr = SocketAddr::from_abstract_name(name.as_bytes()).map_err(|e| {
-            DomainError::AdapterFailure(format!("failed to build lock socket address: {e}"))
-        })?;
-
-        match UnixListener::bind_addr(&addr) {
-            Ok(listener) => Ok(LockGuard(Some(listener.into()))),
-            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
-                Err(DomainError::LockContention(path.to_path_buf()))
+        // `mapping_name::mapping_name(path)` succeeds for every workflow
+        // except a fresh file-backed `create`, whose target doesn't exist on
+        // disk yet — that one case falls back to `lock_target_path`'s own
+        // canonicalize-or-parent-directory logic. Deriving the lock name
+        // from the *mapping name* (not the raw canonicalized path) whenever
+        // possible means this produces the exact same lock name
+        // `lock_mapping` derives for the same volume via its already-known
+        // `MapperHandle::name` (review finding, 2026-08-10) — required so a
+        // path-keyed lock (`create`/`enroll`/`revoke`/`close`/`resize`) and
+        // a name-keyed lock (`close_all`/`slam`) against the same volume
+        // still contend with each other. In the fallback branch, the
+        // contention error reports the resolved parent-directory target,
+        // not `path` itself — `path` may not even exist yet (a fresh
+        // file-backed `create`), and the resource genuinely contended in
+        // that branch is the directory, not the not-yet-created file
+        // (review finding, 2026-08-10: the error previously named the
+        // wrong resource here).
+        match mapping_name::mapping_name(path) {
+            Ok(name) => bind_abstract_lock(&name, path),
+            Err(_) => {
+                let target = mapping_name::lock_target_path(path)?;
+                let name = target.to_string_lossy().into_owned();
+                bind_abstract_lock(&name, &target)
             }
-            Err(e) => Err(DomainError::AdapterFailure(format!(
-                "failed to acquire lock for {}: {e}",
-                path.display()
-            ))),
         }
+    }
+
+    /// Same locking mechanism as `lock_target`, keyed directly by an
+    /// already-known dm-crypt mapping name (`MapperHandle::name`) instead of
+    /// re-deriving it from a filesystem path — used by `close_all`/`slam`,
+    /// whose discovered mappings' backing storage may no longer exist on
+    /// disk (review finding, 2026-08-10: `lock_target(&mapper.source_path)`
+    /// hard-failed there instead of contending, since `lock_target_path`'s
+    /// canonicalize-or-parent-fallback has nothing left to fall back to once
+    /// both the source path and its parent directory are gone). `name` is
+    /// exactly what `mapping_name::mapping_name` would derive from that same
+    /// volume's path were it still resolvable — same string `lock_target`
+    /// hashes internally for an already-existing path — so this contends
+    /// correctly with a concurrent path-keyed `lock_target` call against the
+    /// same volume. `display_path` is used only for the contention error's
+    /// human-facing text (`mapper.source_path`, even if stale) — the most
+    /// recognizable label for the volume, not part of the lock derivation.
+    fn lock_mapping(&self, name: &str, display_path: &Path) -> Result<LockGuard, DomainError> {
+        bind_abstract_lock(name, display_path)
     }
 
     fn scaffold_hook_templates(&self, mountpoint: &Path) -> Result<(), DomainError> {

@@ -43,13 +43,13 @@ fn closes_every_discovered_mapping_using_the_full_close_sequence() {
         vec![
             "check_prerequisites".to_string(),
             "list_open_mappings".to_string(),
-            "lock_target".to_string(),
+            "lock_mapping".to_string(),
             "mount_point_of".to_string(),
             "path_exists".to_string(),
             "path_exists".to_string(),
             "umount".to_string(),
             "close".to_string(),
-            "lock_target".to_string(),
+            "lock_mapping".to_string(),
             "mount_point_of".to_string(),
             "path_exists".to_string(),
             "path_exists".to_string(),
@@ -216,10 +216,10 @@ fn skip_hooks_true_skips_hooks_for_every_mapping_in_the_batch() {
         vec![
             "check_prerequisites".to_string(),
             "list_open_mappings".to_string(),
-            "lock_target".to_string(),
+            "lock_mapping".to_string(),
             "umount".to_string(),
             "close".to_string(),
-            "lock_target".to_string(),
+            "lock_mapping".to_string(),
             "umount".to_string(),
             "close".to_string(),
         ]
@@ -281,7 +281,7 @@ fn lock_contention_on_every_mapping_reports_each_mappings_own_failure_without_st
 }
 
 #[test]
-fn acquires_one_lock_per_mapping_using_each_mappings_own_source_path() {
+fn acquires_one_lock_per_mapping_using_each_mappings_own_name_and_source_path() {
     let log = new_call_log();
     let mapper_a = mapper("vault-aaaa", "/volume/a.img");
     let mapper_b = mapper("vault-bbbb", "/volume/b.img");
@@ -296,8 +296,45 @@ fn acquires_one_lock_per_mapping_using_each_mappings_own_source_path() {
 
     assert!(results.iter().all(|(_, r)| r.is_ok()));
     assert_eq!(
-        fs.lock_target_calls(),
-        vec![mapper_a.source_path.clone(), mapper_b.source_path.clone()],
-        "expected one lock per mapping, using that mapping's own source_path, not one shared lock for the batch"
+        fs.lock_mapping_calls(),
+        vec![
+            (mapper_a.name.clone(), mapper_a.source_path.clone()),
+            (mapper_b.name.clone(), mapper_b.source_path.clone())
+        ],
+        "expected one lock per mapping, using that mapping's own name/source_path, not one shared lock for the batch"
+    );
+}
+
+/// Review finding (2026-08-10): `close_all` used to lock via `lock_target`,
+/// which internally canonicalizes `mapper.source_path` (falling back to its
+/// parent directory) and would hard-fail if a mapping's backing storage and
+/// parent directory had both vanished from disk. `lock_mapping` locks by
+/// `mapper.name` instead, with no filesystem dependency at all — this proves
+/// `close_all::run` calls `lock_mapping`, not `lock_target`, for exactly the
+/// path this fake models as unresolvable-looking (a nonexistent path); the
+/// real `ExecAdapter`'s equivalent guarantee (`lock_mapping` never touches
+/// the filesystem) is proven separately in `tests/unit/lock_target.rs`.
+#[test]
+fn locks_and_closes_a_mapping_whose_backing_path_no_longer_resolves() {
+    let log = new_call_log();
+    let mapper_a = mapper("vault-aaaa", "/volume/does-not-exist-anymore.img");
+
+    let luks = FakeLuksBackend::passing()
+        .with_log(log.clone())
+        .with_open_mappings(vec![mapper_a.clone()]);
+    let fido2 = FakeFido2Backend::passing().with_log(log.clone());
+    let fs = FakeFilesystemBackend::passing().with_log(log.clone());
+
+    let results = close_all::run(false, &|_| {}, &luks, &fido2, &fs).expect("expected Ok");
+
+    assert_eq!(results.len(), 1);
+    assert!(
+        results[0].1.is_ok(),
+        "expected the mapping to close successfully, got {:?}",
+        results[0].1
+    );
+    assert_eq!(
+        fs.lock_mapping_calls(),
+        vec![(mapper_a.name.clone(), mapper_a.source_path.clone())]
     );
 }

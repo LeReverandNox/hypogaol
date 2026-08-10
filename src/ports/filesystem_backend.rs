@@ -139,16 +139,34 @@ pub trait FilesystemBackend {
     /// Acquires a non-blocking, exclusive, process-scoped lock keyed by
     /// `path` (AD-20, CAP-24) — the second statement of every mutating
     /// workflow (`create`/`enroll`/`revoke`/`close`/`resize`), immediately
-    /// after `preflight` passes, and per-mapping inside `close_all`/`slam`'s
-    /// existing loops. Returns `DomainError::LockContention` immediately
-    /// (never blocks) if another invocation already holds it. The real
-    /// implementation is a Linux abstract-namespace socket — a kernel-only
-    /// resource, never written to any filesystem — so it can never collide
-    /// with `cryptsetup`/`systemd-cryptenroll`'s own internal LUKS2
-    /// metadata locking on the target itself. The returned `LockGuard`
-    /// releases the lock when dropped — hold it for the remainder of the
-    /// caller's work; dropping it early re-opens the race window this
-    /// method exists to close. `info` and `unlock` (including read-only
-    /// unlock) never call this — excluded from the guard by design (AC #4).
+    /// after `preflight` passes. Returns `DomainError::LockContention`
+    /// immediately (never blocks) if another invocation already holds it.
+    /// The real implementation is a Linux abstract-namespace socket — a
+    /// kernel-only resource, never written to any filesystem — so it can
+    /// never collide with `cryptsetup`/`systemd-cryptenroll`'s own internal
+    /// LUKS2 metadata locking on the target itself. This assumes every
+    /// concurrent invocation runs in the same network namespace — an
+    /// abstract socket name is scoped per network namespace, so two
+    /// invocations under different namespaces would each bind their own
+    /// copy of the same name and never contend (accepted, documented
+    /// limitation, 2026-08-10 — see `lock_mapping` for why `close_all`/
+    /// `slam` use a separate method). The returned `LockGuard` releases the
+    /// lock when dropped — hold it for the remainder of the caller's work;
+    /// dropping it early re-opens the race window this method exists to
+    /// close. `info` and `unlock` (including read-only unlock) never call
+    /// this — excluded from the guard by design (AC #4).
     fn lock_target(&self, path: &Path) -> Result<LockGuard, DomainError>;
+
+    /// Same lock as `lock_target`, keyed directly by an already-known
+    /// dm-crypt mapping name (`MapperHandle::name`) rather than re-derived
+    /// from a filesystem path — used by `close_all`/`slam`, once per
+    /// mapping inside their existing discovery loops, since a discovered
+    /// mapping's backing storage may no longer exist on disk (`lock_target`
+    /// would otherwise hard-fail there instead of contending correctly,
+    /// review finding 2026-08-10). The real implementation derives an
+    /// identical final lock name to `lock_target`'s for the same volume, so
+    /// a concurrent path-keyed `lock_target` call against that volume still
+    /// contends with this one. `display_path` is used only for the
+    /// contention error's human-facing text, not the lock derivation.
+    fn lock_mapping(&self, name: &str, display_path: &Path) -> Result<LockGuard, DomainError>;
 }

@@ -483,7 +483,12 @@ pub struct FakeFilesystemBackend {
     // Story 6.5 (concurrent-invocation guard): every `path` passed to
     // `lock_target`, in call order.
     lock_target_calls: RefCell<Vec<PathBuf>>,
-    // Story 6.5: makes every `lock_target` call return
+    // Story 6.5 (review finding, 2026-08-10): every `(name, display_path)`
+    // passed to `lock_mapping`, in call order — `close_all`/`slam`'s own
+    // per-mapping lock, kept separate from `lock_target_calls` since the
+    // two methods key locks differently.
+    lock_mapping_calls: RefCell<Vec<(String, PathBuf)>>,
+    // Story 6.5: makes every `lock_target`/`lock_mapping` call return
     // `DomainError::LockContention` instead of succeeding.
     lock_contention: bool,
 }
@@ -531,6 +536,7 @@ impl FakeFilesystemBackend {
             check_prerequisites_filesystem_calls: RefCell::new(Vec::new()),
             fail_for_filesystem: RefCell::new(None),
             lock_target_calls: RefCell::new(Vec::new()),
+            lock_mapping_calls: RefCell::new(Vec::new()),
             lock_contention: false,
         }
     }
@@ -564,6 +570,7 @@ impl FakeFilesystemBackend {
             check_prerequisites_filesystem_calls: RefCell::new(Vec::new()),
             fail_for_filesystem: RefCell::new(None),
             lock_target_calls: RefCell::new(Vec::new()),
+            lock_mapping_calls: RefCell::new(Vec::new()),
             lock_contention: false,
         }
     }
@@ -758,18 +765,26 @@ impl FakeFilesystemBackend {
     }
 
     /// Every `path` passed to `lock_target`, in call order — lets a test
-    /// prove which target each workflow locked, and (for close_all/slam)
-    /// that a lock was acquired once per mapping, interleaved with each
-    /// mapping's own close/slam calls in the shared `CallLog`, not all
-    /// acquired up front.
+    /// prove which target `create`/`enroll`/`revoke`/`close`/`resize`
+    /// locked.
     pub fn lock_target_calls(&self) -> Vec<PathBuf> {
         self.lock_target_calls.borrow().clone()
     }
 
-    /// Makes every `lock_target` call return `DomainError::LockContention`
-    /// — distinct from `with_failure_at("lock_target")`'s generic
-    /// `AdapterFailure`, since a test needs to assert the *specific*
-    /// variant `ux::translate` and callers pattern-match on.
+    /// Every `(name, display_path)` passed to `lock_mapping`, in call order
+    /// — lets a test prove `close_all`/`slam` acquired one lock per
+    /// mapping, using that mapping's own name/source_path, interleaved with
+    /// each mapping's own close/slam calls in the shared `CallLog`, not all
+    /// acquired up front.
+    pub fn lock_mapping_calls(&self) -> Vec<(String, PathBuf)> {
+        self.lock_mapping_calls.borrow().clone()
+    }
+
+    /// Makes every `lock_target`/`lock_mapping` call return
+    /// `DomainError::LockContention` — distinct from
+    /// `with_failure_at("lock_target")`'s generic `AdapterFailure`, since a
+    /// test needs to assert the *specific* variant `ux::translate` and
+    /// callers pattern-match on.
     pub fn with_lock_contention(mut self) -> Self {
         self.lock_contention = true;
         self
@@ -971,6 +986,18 @@ impl FilesystemBackend for FakeFilesystemBackend {
             return Err(DomainError::LockContention(path.to_path_buf()));
         }
         self.fail_if("lock_target")?;
+        Ok(LockGuard(None))
+    }
+
+    fn lock_mapping(&self, name: &str, display_path: &Path) -> Result<LockGuard, DomainError> {
+        self.log.borrow_mut().push("lock_mapping".to_string());
+        self.lock_mapping_calls
+            .borrow_mut()
+            .push((name.to_string(), display_path.to_path_buf()));
+        if self.lock_contention {
+            return Err(DomainError::LockContention(display_path.to_path_buf()));
+        }
+        self.fail_if("lock_mapping")?;
         Ok(LockGuard(None))
     }
 }

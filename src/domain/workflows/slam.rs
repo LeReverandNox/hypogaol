@@ -42,7 +42,7 @@ pub fn run(
     Ok(mappings
         .into_iter()
         .map(|mapper| {
-            let result = match fs.lock_target(&mapper.source_path) {
+            let result = match fs.lock_mapping(&mapper.name, &mapper.source_path) {
                 Ok(_lock) => slam_mapping(&mapper, warn, luks, fs),
                 Err(err) => Err(err),
             };

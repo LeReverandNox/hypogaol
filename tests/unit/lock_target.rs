@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use hypogaol::adapters::exec::ExecAdapter;
 use hypogaol::domain::errors::DomainError;
+use hypogaol::domain::mapping_name;
 use hypogaol::ports::filesystem_backend::FilesystemBackend;
 use hypogaol::ports::luks_backend::LuksBackend;
 
@@ -159,5 +160,96 @@ fn real_lock_does_not_deadlock_a_subsequent_cryptsetup_metadata_read() {
     assert!(
         !result.expect("has_marker_token should succeed"),
         "a freshly-formatted volume with no marker token should report false"
+    );
+}
+
+/// Review finding (2026-08-10): the contention error for `lock_target`'s
+/// parent-directory fallback branch (a fresh file-backed `create`, whose
+/// target doesn't exist on disk yet) used to name the caller's own
+/// not-yet-created file path, even though the resource actually locked in
+/// that branch is the shared parent directory — misleading when two
+/// concurrent creates target *different* filenames in the same directory.
+/// Proves the fix: the reported path is the shared parent directory, not
+/// either file's own path.
+#[test]
+fn real_lock_target_contention_error_names_the_locked_directory_not_either_uncreated_files_own_path(
+) {
+    let adapter = ExecAdapter::default();
+    let dir = std::env::temp_dir();
+    let file_a = dir.join("hypogaol-unit-test-lock-target-contention-fallback-a.img");
+    let file_b = dir.join("hypogaol-unit-test-lock-target-contention-fallback-b.img");
+    assert!(
+        !file_a.exists() && !file_b.exists(),
+        "test fixture assumption violated: {file_a:?}/{file_b:?} unexpectedly exist"
+    );
+
+    let _guard = adapter
+        .lock_target(&file_a)
+        .expect("lock_target should succeed via the parent-directory fallback");
+
+    let contended = adapter.lock_target(&file_b);
+    let canonical_dir = std::fs::canonicalize(&dir).expect("temp dir should canonicalize");
+    match contended {
+        Err(DomainError::LockContention(reported_path)) => {
+            assert_eq!(
+                reported_path, canonical_dir,
+                "the fallback branch locks the parent directory, so the contention error must \
+                 name that directory, not file_b's own (never-created) path"
+            );
+        }
+        other => {
+            panic!("expected LockContention naming the shared parent directory, got {other:?}")
+        }
+    }
+}
+
+/// Review finding (2026-08-10): `close_all`/`slam` now lock via
+/// `lock_mapping(&mapper.name, ...)` instead of `lock_target(&mapper.source_path,
+/// ...)`. For these to actually serialize against a concurrent path-keyed
+/// workflow (`create`/`enroll`/`revoke`/`close`/`resize`) targeting the same
+/// volume, both methods must derive the *same* final lock name for that
+/// volume. Proven here against the real `ExecAdapter`, not a fake: holding a
+/// `lock_target` guard on an existing path, then calling `lock_mapping` with
+/// that same path's own mapping name, must contend — not silently succeed
+/// with an independent lock.
+#[test]
+fn real_lock_mapping_contends_with_lock_target_for_the_same_volume() {
+    let adapter = ExecAdapter::default();
+    let fixture = RealFixtureFile::create("real-lock-mapping-matches-lock-target");
+    let name = mapping_name::mapping_name(&fixture.0)
+        .expect("mapping_name should succeed against an existing file");
+
+    let _guard = adapter
+        .lock_target(&fixture.0)
+        .expect("lock_target should succeed on the existing file");
+
+    let contended = adapter.lock_mapping(&name, &fixture.0);
+    assert!(
+        matches!(contended, Err(DomainError::LockContention(_))),
+        "lock_mapping's derived name must match lock_target's for the same volume, got {contended:?}"
+    );
+}
+
+/// Review finding (2026-08-10): `close_all`/`slam` discover mappings whose
+/// backing storage may no longer exist on disk — `lock_target` would fail
+/// there (its `lock_target_path` canonicalize-or-parent-fallback has
+/// nothing left to fall back to once both the path and its parent are
+/// gone). `lock_mapping` locks by an already-known name string, with no
+/// filesystem dependency, so it must succeed even when `display_path`
+/// doesn't resolve to anything real.
+#[test]
+fn real_lock_mapping_succeeds_when_the_display_path_does_not_exist() {
+    let adapter = ExecAdapter::default();
+    let missing_path =
+        std::env::temp_dir().join("hypogaol-unit-test-lock-target-does-not-exist-at-all.img");
+    assert!(
+        !missing_path.exists(),
+        "test fixture assumption violated: {missing_path:?} unexpectedly exists"
+    );
+
+    let result = adapter.lock_mapping("vault-0000000000000000", &missing_path);
+    assert!(
+        result.is_ok(),
+        "lock_mapping must not depend on display_path resolving on disk, got {result:?}"
     );
 }
