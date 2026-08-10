@@ -23,12 +23,12 @@ So that I can type common commands faster without giving up the long forms.
 
 ## Tasks / Subtasks
 
-- [ ] **Task 0: Read every file this story touches before changing anything** (AC: all)
+- [x] **Task 0: Read every file this story touches before changing anything** (AC: all)
   - Read in full: `src/cli/main.rs` (880 lines, whole file is in scope — every `#[arg(...)]` attribute across `Commands` and `CreateMode` needs a `short` added). Read `tests/unit/cli.rs` in full (341 lines) — it already exercises `Cli::try_parse_from`/a `help_text(&[...]) -> String` helper (built on `Cli::try_parse_from(...).unwrap_err().to_string()`, since `--help` short-circuits clap's parser with `Err(clap::Error)`) for exactly this kind of flag-presence/parse-behavior assertion; this story's tests extend that existing pattern, they don't invent a new one.
   - Confirm `short` is not used anywhere yet in `src/cli/main.rs` (verified during story creation via `grep -n short src/cli/main.rs` — zero matches) — this is a from-scratch addition across every flag, not a partial one needing audit of existing aliases.
   - Note: `Cli`/`Commands`/`CreateMode` currently derive only `Parser`/`Subcommand` (no `Debug`) and their fields (`command`, `mode`, and every subcommand's fields) are **not** `pub` — `tests/unit/cli.rs` is an external-crate integration test (`hypogaol::cli::main::Cli`), so it cannot inspect parsed field values directly today, only `Cli::try_parse_from(...).is_ok()`/`.is_err()` and `--help` text content. See Task 6 for why this story adds `#[derive(Debug)]` (not `pub` fields) to close that gap cheaply for AC #2's "behaves identically" testing.
 
-- [ ] **Task 1: Design and record the full flag → short-alias table before touching any code** (AC: #1, #2, #3, #4)
+- [x] **Task 1: Design and record the full flag → short-alias table before touching any code** (AC: #1, #2, #3, #4)
   - This is the one piece of design judgment AD-9/AD-19/etc.-style architecture text doesn't pre-resolve for this story (the Consistency Conventions row states the *rule*, not a worked table) — do this once, up front, and implement exactly it, rather than deriving ad hoc aliases flag-by-flag while editing (which is how two colliding flags could silently end up with the same letter). Aliases are assigned **per subcommand** (collisions are scoped to "same-subcommand" per AC #3 and the Consistency Conventions row) — the same long flag name may legitimately get a different short letter in two different subcommands if their collision environments differ; that is expected, not a bug, given the per-subcommand scoping the epic/architecture text both use.
   - **Proposed table (apply exactly, or record and justify any deviation in Completion Notes):**
 
@@ -56,21 +56,21 @@ So that I can type common commands faster without giving up the long forms.
   - **Positional `path` arguments are out of scope for this story.** AC #1/#2/#3 all say "flag" — clap positionals (`path` on `unlock`/`enroll`/`revoke`/`close`/`resize`/`info`/`create file`/`create device`) are not flags and have no `--long`/`-short` form to alias in the first place (confirmed by the existing `tests/unit/cli.rs::*_help_lists_path_as_positional` tests, which assert `<PATH>` appears and `--path` does **not**). Do not add a `-p`/`--path` alias — that would be a new, unrequested flag form, not a short alias for an existing one.
   - **`-h`/`-V` (help/version) are clap-automatic and already excluded from every collision above** — none of the proposed short letters is `h` or `V` (note: `-v` lowercase, used for `enroll`'s `--user-verification`, is a distinct, case-sensitive short flag from `-V` uppercase version — clap treats short flags case-sensitively, confirmed no conflict). Do not pass `short = 'h'`/`short = 'V'` to any `#[arg(...)]`.
 
-- [ ] **Task 2: Add `short` to every flag in `Commands::Unlock`/`Enroll`/`Revoke`/`Close`/`CloseAll`/`Resize`** (AC: #1, #2, #3, #4)
+- [x] **Task 2: Add `short` to every flag in `Commands::Unlock`/`Enroll`/`Revoke`/`Close`/`CloseAll`/`Resize`** (AC: #1, #2, #3, #4)
   - `src/cli/main.rs` lines 42-135 (`Commands` enum). For each `#[arg(long, ...)]` (and the bare `#[arg(long)]` boolean flags), add `short = '<letter>'` per Task 1's table, keeping existing `value_parser`/`requires`/`default_value` attributes unchanged, e.g. `#[arg(short = 'r', long)]` for `Unlock::read_only`, `#[arg(short = 'l', long, value_parser = parse_label)]` for `Revoke::label`.
   - `Enroll::fido2_device`/`Enroll::unlock_fido2_device` keep their existing `requires = "..."` attributes unchanged alongside the new `short`.
 
-- [ ] **Task 3: Add `short` to every flag in `CreateMode::File`/`CreateMode::Device`** (AC: #1, #2, #3, #4)
+- [x] **Task 3: Add `short` to every flag in `CreateMode::File`/`CreateMode::Device`** (AC: #1, #2, #3, #4)
   - `src/cli/main.rs` lines 141-219. Apply Task 1's `create file`/`create device` row to both variants identically — `size`, `filesystem`, `scaffold_hooks`, `label`, `fido2_device`, `user_verification` each gain the same `short` in both `File { ... }` and `Device { ... }` (the two variants declare the same six flags in the same order; `Device::size` is `Option<u64>` vs `File::size`'s `u64`, which doesn't change its short letter). Keep `value_enum`/`default_value`/`value_parser` attributes unchanged.
 
-- [ ] **Task 4: Verify no accidental clap conflict at compile/parse time** (AC: #1, #2, #3, #4)
+- [x] **Task 4: Verify no accidental clap conflict at compile/parse time** (AC: #1, #2, #3, #4)
   - `cargo build` — clap validates `short`/`long` uniqueness per-command at derive-macro-expansion time for some conflict classes, but duplicate `short` letters *within the same variant* may only surface as a runtime panic the first time that command is parsed (clap's derive doesn't catch every case at compile time). Manually cross-check Task 1's table against the actual `#[arg(...)]` attributes once written: no two flags in the same `Commands`/`CreateMode` variant share a `short`.
   - Run `cargo run -- --help`, `cargo run -- create file --help`, `cargo run -- create device --help`, `cargo run -- unlock --help`, `cargo run -- enroll --help`, `cargo run -- revoke --help`, `cargo run -- close --help`, `cargo run -- close-all --help`, `cargo run -- resize --help`, `cargo run -- info --help`, `cargo run -- slam --help` and visually confirm every flag's help line shows `-X, --long-form` (clap's default rendering) with the letter from Task 1's table, and that no subcommand panics on startup.
 
-- [ ] **Task 5: Regression-check every existing flag combination still works via its long form** (AC: #2)
+- [x] **Task 5: Regression-check every existing flag combination still works via its long form** (AC: #2)
   - `tests/unit/cli.rs` already has flag-`requires`/rejection tests (`enroll_rejects_fido2_device_flag_given_without_its_unlock_pair`, `enroll_rejects_unlock_fido2_device_flag_given_without_its_pair`, `enroll_accepts_both_explicit_device_flags_together`, `create_file_rejects_an_empty_label`, `create_device_rejects_a_whitespace_only_label`) built entirely on long-form flags — adding `short` must not change any of their outcomes (clap's `requires`/`value_parser` semantics apply identically regardless of which form invoked the flag). Re-run `make test` after Tasks 2-3 and confirm all pre-existing `tests/unit/cli.rs` tests still pass unmodified — this is a regression signal, not new coverage.
 
-- [ ] **Task 6: Add `#[derive(Debug)]` to `Cli`/`Commands`/`CreateMode` so short-vs-long equivalence is directly testable** (AC: #2)
+- [x] **Task 6: Add `#[derive(Debug)]` to `Cli`/`Commands`/`CreateMode` so short-vs-long equivalence is directly testable** (AC: #2)
   - `src/cli/main.rs` lines 26-31 (`Cli`), 33-136 (`Commands`), 141-219 (`CreateMode`): add `Debug` to each existing `#[derive(...)]` (`Parser`/`Subcommand`). This is the cheapest way to make AC #2 ("behaves identically to the long form") mechanically checkable from `tests/unit/cli.rs`'s external-crate position, since none of these types' fields are `pub` and adding `pub` to every field would be a much larger, unrequested surface-area change. `Debug` output is never shown to a user (it's not used anywhere in `run()`'s printed/error text — confirmed by reading `run()`, lines 788-880, which only ever destructures fields, never formats the enum itself) — this is purely a test-seam addition, not a UX change.
   - Do **not** add `PartialEq`/`Clone` — not needed for the equivalence tests below (string-comparing two `Debug` outputs is sufficient and simpler than deriving equality across types containing `PathBuf`/`Option<String>`/nested enums).
 
@@ -135,4 +135,8 @@ So that I can type common commands faster without giving up the long forms.
 
 ### Completion Notes List
 
+- Tasks 0-6: implemented Task 1's alias table exactly as proposed (validated against the actual `src/cli/main.rs` before coding — declaration order, collisions, and rationale all matched with no deviation needed). Added `short = '<letter>'` to every `#[arg(...)]` in `Commands` and both `CreateMode::File`/`Device` variants. Added `Debug` to `Cli`, `Commands`, `CreateMode`, and (required transitively, not explicitly called out in Task 6 but needed for the derive to compile since it's a field type) `CliFilesystem`. `cargo build` clean; manually ran `--help` for all 11 subcommand forms, confirmed every short letter renders exactly per Task 1's table and no subcommand panics. `make test` re-run after these changes: 279/279 pre-existing tests pass unmodified (33 lib + 246 tests/unit) — no regressions from the `short` additions.
+
 ### File List
+
+- `src/cli/main.rs` (modified)
