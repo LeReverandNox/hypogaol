@@ -1158,21 +1158,33 @@ fn print_enroll_pin_warning(
     existing_device: Option<&Fido2Device>,
     user_verification: bool,
 ) {
-    for device in std::iter::once(new_device).chain(existing_device) {
-        if !device.client_pin {
-            continue;
-        }
+    // `user_verification` only governs `fido2_verification_args` for
+    // `new_device` — the credential being created. `existing_device`, when
+    // present, authenticates the enrollment via `--unlock-fido2-device`
+    // using its own already-established PIN/UV settings, entirely
+    // unaffected by this call's `user_verification` flag: the hedge below
+    // must never apply to it.
+    if new_device.client_pin {
         if user_verification {
             println!(
                 "Heads up: {} has a PIN configured, but since you're enrolling with \
                  user-verification, you won't be asked for it — this enrollment and future \
                  unlocks with this key both use its fingerprint/on-device check instead.",
-                device.path
+                new_device.path
             );
         } else {
             println!(
                 "Heads up: {} has a PIN configured — you'll be asked to enter it.",
-                device.path
+                new_device.path
+            );
+        }
+    }
+
+    if let Some(existing_device) = existing_device {
+        if existing_device.client_pin {
+            println!(
+                "Heads up: {} has a PIN configured — you'll be asked to enter it.",
+                existing_device.path
             );
         }
     }
