@@ -3050,6 +3050,46 @@ mod tests {
         assert_eq!(Fido2StderrSignal::classify(""), None);
     }
 
+    // Regression test for AD-3's Epic 6 amendment: reading stderr only
+    // after `child.wait()` (instead of concurrently, on a background
+    // thread) deadlocks once the child writes enough stderr to fill the
+    // pipe buffer (typically 64KiB on Linux) before anyone drains it. No
+    // FIDO2 hardware needed — any real child process writing to a real
+    // pipe reproduces the exact OS-level property `run_with_stderr_watch`
+    // must avoid. Mirrors Story 6.5's Task 12 precedent (a real,
+    // non-fake regression test for an OS-level concurrency property).
+    //
+    // `run_with_stderr_watch` itself is called on a background thread here
+    // too, with a bounded `recv_timeout` on the result — a real regression
+    // to post-exit-only stderr reading would otherwise hang this test
+    // forever instead of failing it.
+    #[test]
+    fn run_with_stderr_watch_does_not_deadlock_on_a_large_stderr_write() {
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut cmd = Command::new("sh");
+            // 200KiB comfortably exceeds any real pipe buffer size.
+            cmd.arg("-c").arg("yes | head -c 200000 1>&2");
+            let _ = tx.send(run_with_stderr_watch(&mut cmd));
+        });
+
+        match rx.recv_timeout(std::time::Duration::from_secs(10)) {
+            Ok(Ok((status, captured))) => {
+                assert!(status.success(), "expected the shell command to succeed");
+                assert_eq!(
+                    captured.len(),
+                    200_000,
+                    "expected all 200KiB to be captured"
+                );
+            }
+            Ok(Err(e)) => panic!("run_with_stderr_watch returned an error: {e:?}"),
+            Err(_) => panic!(
+                "run_with_stderr_watch did not return within 10s — likely deadlocked reading \
+                 stderr only after child.wait()"
+            ),
+        }
+    }
+
     #[test]
     fn explicit_selection_requires_existing_when_needed() {
         let devices = [device("/dev/hidraw0")];
