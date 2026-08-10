@@ -136,16 +136,19 @@ pub trait FilesystemBackend {
     /// chowned `mountpoint` to the invoking user.
     fn scaffold_hook_templates(&self, mountpoint: &Path) -> Result<(), DomainError>;
 
-    /// Acquires a non-blocking, exclusive `flock(2)` lock on `path` (AD-20,
-    /// CAP-24) — the second statement of every mutating workflow
-    /// (`create`/`enroll`/`revoke`/`close`/`resize`), immediately after
-    /// `preflight` passes, and per-mapping inside `close_all`/`slam`'s
+    /// Acquires a non-blocking, exclusive, process-scoped lock keyed by
+    /// `path` (AD-20, CAP-24) — the second statement of every mutating
+    /// workflow (`create`/`enroll`/`revoke`/`close`/`resize`), immediately
+    /// after `preflight` passes, and per-mapping inside `close_all`/`slam`'s
     /// existing loops. Returns `DomainError::LockContention` immediately
-    /// (never blocks) if another invocation already holds it. The returned
-    /// `LockGuard` releases the lock when dropped — hold it for the
-    /// remainder of the caller's work; dropping it early re-opens the
-    /// race window this method exists to close. `info` and `unlock`
-    /// (including read-only unlock) never call this — excluded from the
-    /// guard by design (AC #4).
+    /// (never blocks) if another invocation already holds it. The real
+    /// implementation is a Linux abstract-namespace socket — a kernel-only
+    /// resource, never written to any filesystem — so it can never collide
+    /// with `cryptsetup`/`systemd-cryptenroll`'s own internal LUKS2
+    /// metadata locking on the target itself. The returned `LockGuard`
+    /// releases the lock when dropped — hold it for the remainder of the
+    /// caller's work; dropping it early re-opens the race window this
+    /// method exists to close. `info` and `unlock` (including read-only
+    /// unlock) never call this — excluded from the guard by design (AC #4).
     fn lock_target(&self, path: &Path) -> Result<LockGuard, DomainError>;
 }

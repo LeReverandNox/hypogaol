@@ -1,7 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashSet;
 use std::io::{self, Write};
-use std::os::fd::{AsRawFd, OwnedFd};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
@@ -338,7 +337,6 @@ fn run_piping_stdin(cmd: &mut Command, input: &[u8]) -> Result<(), String> {
 fn run_cryptsetup_close(name: &str) -> Result<(), DomainError> {
     let output = privileged("cryptsetup")
         .arg("close")
-        .arg("--disable-locks")
         .arg(name)
         .output()
         .map_err(|e| DomainError::AdapterFailure(format!("failed to run cryptsetup close: {e}")))?;
@@ -382,7 +380,6 @@ fn dump_json_metadata(path: &Path) -> Result<Value, DomainError> {
     let output = Command::new("cryptsetup")
         .arg("luksDump")
         .arg("--dump-json-metadata")
-        .arg("--disable-locks")
         .arg(path)
         .output()
         .map_err(|e| {
@@ -751,7 +748,7 @@ impl ExecAdapter {
         metadata: KeyMetadata,
     ) -> Result<(), DomainError> {
         let export = Command::new("cryptsetup")
-            .args(["token", "export", "--token-id", token_id, "--disable-locks"])
+            .args(["token", "export", "--token-id", token_id])
             .arg(path)
             .output()
             .map_err(|e| {
@@ -810,14 +807,7 @@ impl ExecAdapter {
 
         run_piping_stdin(
             Command::new("cryptsetup")
-                .args([
-                    "token",
-                    "import",
-                    "--token-id",
-                    token_id,
-                    "--token-replace",
-                    "--disable-locks",
-                ])
+                .args(["token", "import", "--token-id", token_id, "--token-replace"])
                 .arg(path),
             &payload,
         )
@@ -862,7 +852,7 @@ impl LuksBackend for ExecAdapter {
 
     fn has_luks2_header(&self, path: &Path) -> Result<bool, DomainError> {
         let output = Command::new("cryptsetup")
-            .args(["isLuks", "--type", "luks2", "--disable-locks"])
+            .args(["isLuks", "--type", "luks2"])
             .arg(path)
             .output()
             .map_err(|e| {
@@ -921,13 +911,7 @@ impl LuksBackend for ExecAdapter {
 
         for token_id in token_ids {
             let output = Command::new("cryptsetup")
-                .args([
-                    "token",
-                    "remove",
-                    "--token-id",
-                    &token_id,
-                    "--disable-locks",
-                ])
+                .args(["token", "remove", "--token-id", &token_id])
                 .arg(path)
                 .output()
                 .map_err(|e| {
@@ -974,7 +958,6 @@ impl LuksBackend for ExecAdapter {
                     "--batch-mode",
                     "--key-file",
                     "-",
-                    "--disable-locks",
                 ])
                 .arg(path),
             passphrase.as_bytes(),
@@ -996,7 +979,7 @@ impl LuksBackend for ExecAdapter {
         // 2026-08-08).
         run_piping_stdin(
             Command::new("cryptsetup")
-                .args(["token", "import", "--disable-locks"])
+                .args(["token", "import"])
                 .arg(path),
             format!(r#"{{"type":"{CREATE_MARKER_TOKEN_TYPE}","keyslots":[]}}"#).as_bytes(),
         )
@@ -1004,7 +987,7 @@ impl LuksBackend for ExecAdapter {
 
         run_piping_stdin(
             privileged("cryptsetup")
-                .args(["luksOpen", "--key-file", "-", "--disable-locks"])
+                .args(["luksOpen", "--key-file", "-"])
                 .arg(path)
                 .arg(name),
             passphrase.as_bytes(),
@@ -1060,11 +1043,7 @@ impl LuksBackend for ExecAdapter {
                 // `luksOpen` above already succeeded — same leak this
                 // function's `resize` failure branch below already guards
                 // against applies here too.
-                let _ = privileged("cryptsetup")
-                    .arg("close")
-                    .arg("--disable-locks")
-                    .arg(name)
-                    .output();
+                let _ = privileged("cryptsetup").arg("close").arg(name).output();
                 return Err(DomainError::AdapterFailure(e));
             }
         };
@@ -1077,7 +1056,6 @@ impl LuksBackend for ExecAdapter {
                         &size.to_string(),
                         "--key-file",
                         "-",
-                        "--disable-locks",
                     ])
                     .arg(name),
                 passphrase.as_bytes(),
@@ -1086,11 +1064,7 @@ impl LuksBackend for ExecAdapter {
                 // exists yet for the caller to close on this early return, so
                 // this adapter must close the mapping itself or it leaks
                 // indefinitely.
-                let _ = privileged("cryptsetup")
-                    .arg("close")
-                    .arg("--disable-locks")
-                    .arg(name)
-                    .output();
+                let _ = privileged("cryptsetup").arg("close").arg(name).output();
                 return Err(DomainError::AdapterFailure(e));
             }
         }
@@ -1167,13 +1141,7 @@ impl LuksBackend for ExecAdapter {
         // with no keyslot would let a later count overcount live keys.
         if let Some(token_id) = token_id {
             let output = Command::new("cryptsetup")
-                .args([
-                    "token",
-                    "remove",
-                    "--token-id",
-                    &token_id,
-                    "--disable-locks",
-                ])
+                .args(["token", "remove", "--token-id", &token_id])
                 .arg(path)
                 .output()
                 .map_err(|e| {
@@ -1194,7 +1162,7 @@ impl LuksBackend for ExecAdapter {
         // unconditionally (no re-authentication needed, per
         // cryptsetup-luksKillSlot(8)).
         let output = Command::new("cryptsetup")
-            .args(["luksKillSlot", "--batch-mode", "--disable-locks"])
+            .args(["luksKillSlot", "--batch-mode"])
             .arg(path)
             .arg(slot_str)
             .output()
@@ -1268,7 +1236,7 @@ impl LuksBackend for ExecAdapter {
         // pattern `enroll_fido2_key`'s `systemd-cryptenroll` call already
         // uses.
         let mut cmd = privileged("cryptsetup");
-        cmd.args(["open", "--token-only", "--disable-locks"]);
+        cmd.args(["open", "--token-only"]);
         if read_only {
             cmd.arg("--readonly");
         }
@@ -1304,7 +1272,7 @@ impl LuksBackend for ExecAdapter {
         // stdio (`.status()`, not `.output()`) lets that touch/PIN prompt
         // reach the real terminal, same pattern as `open`.
         let status = privileged("cryptsetup")
-            .args(["resize", "--token-only", "--disable-locks"])
+            .args(["resize", "--token-only"])
             .arg(&mapper.name)
             .status()
             .map_err(|e| {
@@ -1378,7 +1346,6 @@ impl LuksBackend for ExecAdapter {
         for name in names {
             let status_output = privileged("cryptsetup")
                 .arg("status")
-                .arg("--disable-locks")
                 .arg(&name)
                 .output()
                 .map_err(|e| {
@@ -2582,31 +2549,43 @@ impl FilesystemBackend for ExecAdapter {
     }
 
     fn lock_target(&self, path: &Path) -> Result<LockGuard, DomainError> {
+        use std::os::linux::net::SocketAddrExt;
+        use std::os::unix::net::{SocketAddr, UnixListener};
+
+        // A Linux abstract-namespace socket name, not a real filesystem path
+        // — binding it takes no lock on (and makes no write to) the volume
+        // itself or anywhere else on disk. The kernel releases the name the
+        // instant the socket closes, including on process exit or crash, the
+        // same no-stale-state guarantee a real `flock` would give (AD-20,
+        // AC #5) — but on a resource that can never collide with
+        // `cryptsetup`/`systemd-cryptenroll`'s own internal LUKS2 metadata
+        // locking, which both take on the container file/device itself for
+        // nearly every operation (including read-only ones). An earlier
+        // version of this method locked `path` directly via `flock(2)`,
+        // which self-deadlocked: once held for a whole workflow, any
+        // subsequent `cryptsetup`/`systemd-cryptenroll` subprocess call
+        // against that same target blocked forever on a lock this process
+        // would never release until that subprocess finished (found
+        // post-review, 2026-08-10 — `systemd-cryptenroll` has no equivalent
+        // of `cryptsetup --disable-locks` to opt out with).
         let target = mapping_name::lock_target_path(path)?;
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(libc::O_CLOEXEC)
-            .open(&target)
-            .map_err(|e| {
-                DomainError::AdapterFailure(format!(
-                    "failed to open {} for locking: {e}",
-                    target.display()
-                ))
-            })?;
-        let fd: OwnedFd = file.into();
-        let ret = unsafe { libc::flock(fd.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
-        if ret == 0 {
-            Ok(LockGuard(Some(fd)))
-        } else {
-            let err = std::io::Error::last_os_error();
-            if err.raw_os_error() == Some(libc::EWOULDBLOCK) {
+        let name = format!(
+            "hypogaol-lock-{:016x}",
+            mapping_name::fnv1a_hash(target.to_string_lossy().as_bytes())
+        );
+        let addr = SocketAddr::from_abstract_name(name.as_bytes()).map_err(|e| {
+            DomainError::AdapterFailure(format!("failed to build lock socket address: {e}"))
+        })?;
+
+        match UnixListener::bind_addr(&addr) {
+            Ok(listener) => Ok(LockGuard(Some(listener.into()))),
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
                 Err(DomainError::LockContention(path.to_path_buf()))
-            } else {
-                Err(DomainError::AdapterFailure(format!(
-                    "failed to lock {}: {err}",
-                    target.display()
-                )))
             }
+            Err(e) => Err(DomainError::AdapterFailure(format!(
+                "failed to acquire lock for {}: {e}",
+                path.display()
+            ))),
         }
     }
 

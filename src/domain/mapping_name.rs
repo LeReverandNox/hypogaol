@@ -11,8 +11,12 @@ pub(crate) const MAPPING_NAME_PREFIX: &str = "vault";
 /// FNV-1a: a plain, dependency-free, cross-toolchain-stable hash. Unlike
 /// `std::collections::hash_map::DefaultHasher`, its output is not tied to a
 /// particular Rust/std version, which matters here since the mapping name
-/// must stay identical across upgrades (AD-12).
-fn fnv1a_hash(bytes: &[u8]) -> u64 {
+/// must stay identical across upgrades (AD-12). `pub(crate)` so
+/// `adapters::exec` can reuse it for `lock_target`'s abstract-socket lock
+/// name (AD-20) — the same stability requirement applies: two independent
+/// invocations targeting the same canonical path must always derive the
+/// same lock name.
+pub(crate) fn fnv1a_hash(bytes: &[u8]) -> u64 {
     const FNV_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
     const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
@@ -42,9 +46,9 @@ pub fn mapping_name(path: &Path) -> Result<String, DomainError> {
     Ok(format!("{MAPPING_NAME_PREFIX}-{hash:016x}"))
 }
 
-/// Resolves `path` to an absolute, canonical form for `lock_target`'s
-/// locking target — `path` itself if it exists, otherwise its parent
-/// directory (AD-20). Unlike `mapping_name`, which requires `path` to
+/// Resolves `path` to an absolute, canonical form used as the basis for
+/// `lock_target`'s lock name (AD-20) — `path` itself if it exists, otherwise
+/// its parent directory. Unlike `mapping_name`, which requires `path` to
 /// already exist (every one of its callers acts on an already-created
 /// volume), `lock_target` is also called by `create` *before* a
 /// fresh file-backed target exists on disk, so a bare

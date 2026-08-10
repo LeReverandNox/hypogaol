@@ -90,8 +90,10 @@ pub enum Signal {
     Sigkill,
 }
 
-/// Held for the remainder of a mutating workflow's execution (AD-20).
-/// Dropping it closes the underlying fd, which releases the `flock` the
+/// Held for the remainder of a mutating workflow's execution (AD-20). The
+/// real `ExecAdapter` wraps a Linux abstract-namespace socket fd — a
+/// kernel-only resource, never written to any filesystem (not even a lock
+/// file). Dropping it closes the fd, which releases the socket name the
 /// kernel would also release automatically on process exit — so a crash
 /// mid-operation leaves no stale-lock state to detect or clean up (AC
 /// #5). `None` only for `FakeFilesystemBackend`, which holds no real fd.

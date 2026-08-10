@@ -5,12 +5,11 @@ use hypogaol::domain::errors::DomainError;
 use hypogaol::ports::filesystem_backend::FilesystemBackend;
 use hypogaol::ports::luks_backend::LuksBackend;
 
-/// A real, uniquely-named file to lock — `flock(2)` semantics apply to any
-/// regular file, and two independent `open()` calls against the same path
-/// within a single test process behave exactly like two separate processes
-/// for locking purposes (a lock is associated with the *open file
-/// description*, not the process), so this test needs no hardware, `sudo`,
-/// or a real LUKS volume. Cleans itself up on drop, including on test panic.
+/// A real, uniquely-named file whose canonical path feeds `lock_target`'s
+/// abstract-socket lock name — needs no hardware, `sudo`, or a real LUKS
+/// volume; the lock itself is a kernel-only resource (a Linux
+/// abstract-namespace `AF_UNIX` socket), never anything opened on this file.
+/// Cleans itself up on drop, including on test panic.
 struct RealFixtureFile(PathBuf);
 
 impl RealFixtureFile {
@@ -29,9 +28,9 @@ impl Drop for RealFixtureFile {
 }
 
 #[test]
-fn real_flock_contends_while_held_and_releases_on_drop() {
+fn real_lock_contends_while_held_and_releases_on_drop() {
     let adapter = ExecAdapter::default();
-    let fixture = RealFixtureFile::create("real-flock-contends-and-releases");
+    let fixture = RealFixtureFile::create("real-lock-contends-and-releases");
 
     let first_guard = adapter
         .lock_target(&fixture.0)
@@ -48,21 +47,26 @@ fn real_flock_contends_while_held_and_releases_on_drop() {
     let third_attempt = adapter.lock_target(&fixture.0);
     assert!(
         third_attempt.is_ok(),
-        "dropping the first guard must release the real flock, got {third_attempt:?}"
+        "dropping the first guard must release the abstract-socket lock, got {third_attempt:?}"
     );
 }
 
 /// Regression test for a real deadlock found post-review (2026-08-10):
-/// `cryptsetup` takes its own internal lock on the LUKS2 container for
-/// essentially every operation, including read-only ones — while our own
-/// `LockGuard` is held for the whole workflow, any subsequent `cryptsetup`
-/// subprocess call against the same target would block forever waiting for
-/// a lock we'd never release until that same subprocess finished. Reported
-/// as `hypogaol create file --size 64M volume.img` hanging indefinitely on
-/// a second run against the already-existing file — the file already
-/// exists, so `fs.lock_target` locks the file itself (not its parent), and
-/// the very next call, `luks.has_marker_token`, needed cryptsetup's own
-/// lock on that same file.
+/// `cryptsetup`/`systemd-cryptenroll` both take their own internal lock on
+/// the LUKS2 container for nearly every operation, including read-only
+/// ones — an earlier version of `lock_target` used a real `flock(2)` on the
+/// target file itself, so once held for a whole workflow, any subsequent
+/// `cryptsetup` subprocess call against that same target blocked forever
+/// waiting for a lock this process would never release until that
+/// subprocess finished. Reported as `hypogaol create file --size 64M
+/// volume.img` hanging indefinitely on a second run against the
+/// already-existing file, and again as `hypogaol enroll` hanging silently
+/// before ever reaching `systemd-cryptenroll`'s own touch-prompt output
+/// (which has no `--disable-locks`-equivalent escape hatch, unlike
+/// `cryptsetup`). `lock_target`'s current abstract-socket mechanism makes
+/// this structurally impossible — it never opens or locks anything on the
+/// target's own filesystem — but this test stays as a permanent guard
+/// against ever reintroducing a shared resource with `cryptsetup`.
 ///
 /// No hardware or `sudo` needed: `cryptsetup luksFormat`/`luksDump` on a
 /// plain file need no privilege, and this exercises the real `ExecAdapter`
@@ -115,8 +119,8 @@ fn real_lock_does_not_deadlock_a_subsequent_cryptsetup_metadata_read() {
     assert!(format_status.success(), "test setup: luksFormat failed");
 
     // Hold our own real lock, exactly like create::run's `let _lock = ...`
-    // does — the same exclusive flock the reported bug was still held under
-    // when has_marker_token's own cryptsetup call hung indefinitely.
+    // does — held for the same duration a real workflow would hold it
+    // across a `cryptsetup`/`systemd-cryptenroll` subprocess call.
     let _lock = adapter
         .lock_target(&fixture.0)
         .expect("lock_target should succeed on the now-existing file");
