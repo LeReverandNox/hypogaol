@@ -65,7 +65,7 @@ so that I can judge the project's health without digging through CI or config fi
     - **Security audit** → the new audit CI job (Task 5): image following the same GitHub Actions badge-svg pattern as build status but scoped to the audit job/workflow, link to that job's Actions run
   - **Verify every link resolves** before calling this done (curl -I each URL, or open in a browser) — AC #4 explicitly requires "a live, working link — not a placeholder image." The Codecov badge/link will render "unknown"/empty data until Task 4's account-activation follow-up happens (expected, documented in Completion Notes) but must still be a real, live Codecov URL, not a static placeholder image.
 
-- [ ] **Task 7: Full regression pass**
+- [x] **Task 7: Full regression pass**
   - `cargo build` succeeds with `rust-version = "1.90.0"` set (confirms the local/CI toolchain still satisfies it).
   - `make test` passes unchanged — this story touches no `.rs` files, so the full prior suite (**311 total: 33 lib + 278 tests/unit**, per Story 6.7's final verified count) must be unaffected. If any test fails, that is a signal something outside this story's stated scope was touched — stop and re-check.
   - `nix develop -c make coverage` and `nix develop -c make audit` both run successfully end-to-end locally (coverage producing a report file, audit exiting 0 against current `Cargo.lock`).
@@ -123,6 +123,8 @@ so that I can judge the project's health without digging through CI or config fi
 - Task 5: Added an `audit` job to `.github/workflows/ci.yml` running `nix develop -c make audit`, no `continue-on-error`/`|| true` — confirmed genuinely gating: `cargo audit` exits non-zero on a known advisory by default and nothing here suppresses that.
 
 - Task 6: Added a 6-badge row under the `# Hypogaol` title (build status, license, latest release, MSRV, coverage, security audit — audit badge scoped to the `audit` job via GitHub's `?job=` badge param). **Blocking discovery during verification: the repo was actually private** (`gh api repos/LeReverandNox/hypogaol` → `"private": true`), contradicting Task 0's story-creation-time note that it was public — every `github.com` badge/link 404'd anonymously as a result. Flagged to LeReverandNox rather than guessing; he confirmed and made the repo public. Re-verified all 11 badge-image + link-target URLs (`curl -s -o /dev/null -w "%{http_code}"` on each) — all return `200` post-fix. Codecov badge/link resolve (200) but will show "unknown" coverage data until the first CI run lands on `main` post-merge (expected, per Dev Notes).
+
+- Task 7: Full regression pass, all green. `cargo build` succeeds with `rust-version = "1.90.0"` set. `nix develop -c make test`: **311 total (33 lib + 278 tests/unit)** — unchanged from Story 6.7's baseline, confirming this CI/config/docs-only story touched no `.rs` files. `nix develop -c make coverage` produces `lcov.info` end-to-end; `nix develop -c make audit` exits 0 (0 known advisories, 37 crates). `cargo fmt --check` clean. `cargo clippy --all-targets`: same 5 pre-existing `too_many_arguments` warnings as the 6.7 baseline, no new warnings. Confirmed the audit CI job is genuinely gating (no `continue-on-error`/`|| true`/suppression flags anywhere in its definition). Codecov account-activation follow-up: **done** — LeReverandNox registered, activated the repo, and stored `CODECOV_TOKEN` before this story began; the corresponding epic-6 action item in `sprint-status.yaml` is marked resolved.
 
 ### File List
 
