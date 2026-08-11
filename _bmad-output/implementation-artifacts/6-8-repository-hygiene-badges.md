@@ -4,7 +4,7 @@ baseline_commit: 6ba3bde29208a985a8f8bbd8daa40d9506f04a9f
 
 # Story 6.8: Repository Hygiene Badges
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -155,3 +155,4 @@ claude-sonnet-5
 ## Change Log
 
 - 2026-08-11: All 7 tasks implemented and verified. `Cargo.toml` pinned to MSRV 1.90.0; `flake.nix`/`Makefile` gained `cargo-llvm-cov`/`cargo-audit` tooling; `ci.yml` gained `coverage` (Codecov) and `audit` (gating) jobs; `README.md` gained 6 live badges. Mid-implementation discovery: the repo was private, breaking every `github.com`-hosted badge/link for anonymous visitors — LeReverandNox made it public to unblock AC #4. Codecov account activation (previously an open epic-6 action item) was already done by LeReverandNox before this story started. Status: review.
+- 2026-08-11: Code review complete (0 decision-needed, 1 patch, 0 deferred, 11 dismissed as noise). Patch applied: split the `audit` CI job into its own `audit.yml` workflow file so the Security Audit badge is genuinely scoped to it instead of duplicating Build Status (commit `d389788`). Status: done.
