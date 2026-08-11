@@ -1,5 +1,5 @@
 # generated: 2026-07-22
-# last_updated: 2026-08-11 (story 6.7 done)
+# last_updated: 2026-08-11 (story 6.8 reviewed, done)
 # project: hypogaol
 # project_key: NOKEY
 # tracking_system: file-system
@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-22
-last_updated: 2026-08-11 (story 6.7 done)
+last_updated: 2026-08-11 (story 6.8 reviewed, done)
 project: hypogaol
 project_key: NOKEY
 tracking_system: file-system
@@ -95,7 +95,7 @@ development_status:
   6-5-concurrent-invocation-guard: done
   6-6-proactive-fido2-pin-status-guidance: done
   6-7-one-letter-cli-flag-shorthand: done
-  6-8-repository-hygiene-badges: backlog
+  6-8-repository-hygiene-badges: done
   epic-6-retrospective: optional
 
 action_items:
@@ -107,6 +107,10 @@ action_items:
     action: "Manually crash-simulate Story 6.1's marker-verified resume against real hardware — a physical FIDO2 token was detected in the dev-story execution environment (fido2-token -L), but the crash-simulation scenario needs interactive touch/PIN confirmation mid-create, which the non-interactive dev-agent session could not provide. Verify both file-backed and device-backed: interrupt create between luksFormat and final cleanup (kill -9 or a temporary early-return), re-run create against the same destination, confirm it resumes to a fully working, unlockable volume."
     owner: "LeReverandNox"
     status: open
+  - epic: 6
+    action: "Activate LeReverandNox/hypogaol on codecov.io (OAuth login + repo enable) so Story 6.8's coverage badge/upload reports real data — an interactive, account-level step no dev agent can complete non-interactively. The CI job and badge markup ship regardless per the story; only the activation itself is deferred here. RESOLVED 2026-08-11 (LeReverandNox): registered on codecov.io, repo activated, token generated and stored as the `CODECOV_TOKEN` repository secret."
+    owner: "LeReverandNox"
+    status: done
   - epic: 5
     action: "Run `make test-hardware` manually against real hardware to verify Story 5.2's rename (AC #2) — no physical FIDO2 device was available in the dev-story execution environment, so only cargo build/make test/cargo build --test hardware (typecheck) were verified automatically. RESOLVED 2026-08-02 (LeReverandNox): ran against real hardware, 21/22 passed. The 1 failure (resize_rejects_a_shrink_request_and_leaves_the_volume_untouched) is the pre-existing epic-3 grow-only-check bug recurring, not a rename regression — see that action item, reconfirmed a third time by this run."
     owner: "LeReverandNox"

@@ -19,6 +19,8 @@
             clippy
             rustfmt
             rust-analyzer
+            cargo-llvm-cov
+            cargo-audit
 
             # Runtime tools hypogaol orchestrates (AD-1) — not build deps,
             # only needed locally to run the hardware-gated integration suite (AD-7).
@@ -32,6 +34,14 @@
           ];
 
           RUST_BACKTRACE = "1";
+
+          # cargo-llvm-cov looks for llvm-tools-preview under rustc's own sysroot
+          # (a rustup convention); nixpkgs's rustc has no such component, so point
+          # it at the matching-version LLVM tools explicitly (confirmed matching
+          # via `rustc.llvmPackages.llvm.version` == `rustc --version --verbose`'s
+          # reported LLVM version, 2026-08-11).
+          LLVM_COV = "${pkgs.rustc.llvmPackages.llvm}/bin/llvm-cov";
+          LLVM_PROFDATA = "${pkgs.rustc.llvmPackages.llvm}/bin/llvm-profdata";
         };
       });
 }

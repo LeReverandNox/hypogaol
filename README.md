@@ -4,6 +4,13 @@
 
 # Hypogaol
 
+[![Build Status](https://github.com/LeReverandNox/hypogaol/actions/workflows/ci.yml/badge.svg)](https://github.com/LeReverandNox/hypogaol/actions/workflows/ci.yml)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
+[![Latest Release](https://img.shields.io/github/v/release/LeReverandNox/hypogaol)](https://github.com/LeReverandNox/hypogaol/releases/latest)
+[![MSRV](https://img.shields.io/badge/MSRV-1.90.0-orange)](Cargo.toml)
+[![Coverage](https://codecov.io/gh/LeReverandNox/hypogaol/branch/main/graph/badge.svg)](https://codecov.io/gh/LeReverandNox/hypogaol)
+[![Security Audit](https://github.com/LeReverandNox/hypogaol/actions/workflows/audit.yml/badge.svg)](https://github.com/LeReverandNox/hypogaol/actions/workflows/audit.yml)
+
 > Sealed until touched.
 
 *(The "gaol" in Hypogaol is pronounced like "jail" — archaic spelling, not a typo.)*
