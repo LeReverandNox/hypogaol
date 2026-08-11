@@ -77,7 +77,11 @@ enum Commands {
 
         /// Require the device's own fingerprint/PIN check at unlock time,
         /// not touch alone. Fails enrollment outright if the device has no
-        /// on-device verification method (e.g. no fingerprint sensor)
+        /// on-device verification method (e.g. no fingerprint sensor).
+        /// Write `-u` as its own argument — clustering it right after a
+        /// value-taking short flag (e.g. `-fu`) makes clap swallow it as
+        /// that flag's value instead of a separate flag, silently leaving
+        /// this requirement off.
         #[arg(short = 'u', long)]
         user_verification: bool,
     },
@@ -173,7 +177,11 @@ enum CreateMode {
 
         /// Require the device's own fingerprint/PIN check at unlock time,
         /// not touch alone. Fails enrollment outright if the device has no
-        /// on-device verification method (e.g. no fingerprint sensor)
+        /// on-device verification method (e.g. no fingerprint sensor).
+        /// Write `-u` as its own argument — clustering it right after a
+        /// value-taking short flag (e.g. `-du`) makes clap swallow it as
+        /// that flag's value instead of a separate flag, silently leaving
+        /// this requirement off.
         #[arg(short = 'u', long)]
         user_verification: bool,
     },
@@ -212,7 +220,11 @@ enum CreateMode {
 
         /// Require the device's own fingerprint/PIN check at unlock time,
         /// not touch alone. Fails enrollment outright if the device has no
-        /// on-device verification method (e.g. no fingerprint sensor)
+        /// on-device verification method (e.g. no fingerprint sensor).
+        /// Write `-u` as its own argument — clustering it right after a
+        /// value-taking short flag (e.g. `-du`) makes clap swallow it as
+        /// that flag's value instead of a separate flag, silently leaving
+        /// this requirement off.
         #[arg(short = 'u', long)]
         user_verification: bool,
     },
