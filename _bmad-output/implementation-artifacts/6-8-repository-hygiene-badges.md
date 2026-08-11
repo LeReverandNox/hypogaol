@@ -4,7 +4,7 @@ baseline_commit: 6ba3bde29208a985a8f8bbd8daa40d9506f04a9f
 
 # Story 6.8: Repository Hygiene Badges
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -111,6 +111,8 @@ so that I can judge the project's health without digging through CI or config fi
 
 ### Agent Model Used
 
+claude-sonnet-5
+
 ### Debug Log References
 
 ### Completion Notes List
@@ -134,3 +136,7 @@ so that I can judge the project's health without digging through CI or config fi
 - `.gitignore`
 - `.github/workflows/ci.yml`
 - `README.md`
+
+## Change Log
+
+- 2026-08-11: All 7 tasks implemented and verified. `Cargo.toml` pinned to MSRV 1.90.0; `flake.nix`/`Makefile` gained `cargo-llvm-cov`/`cargo-audit` tooling; `ci.yml` gained `coverage` (Codecov) and `audit` (gating) jobs; `README.md` gained 6 live badges. Mid-implementation discovery: the repo was private, breaking every `github.com`-hosted badge/link for anonymous visitors — LeReverandNox made it public to unblock AC #4. Codecov account activation (previously an open epic-6 action item) was already done by LeReverandNox before this story started. Status: review.

@@ -95,7 +95,7 @@ development_status:
   6-5-concurrent-invocation-guard: done
   6-6-proactive-fido2-pin-status-guidance: done
   6-7-one-letter-cli-flag-shorthand: done
-  6-8-repository-hygiene-badges: in-progress
+  6-8-repository-hygiene-badges: review
   epic-6-retrospective: optional
 
 action_items:
