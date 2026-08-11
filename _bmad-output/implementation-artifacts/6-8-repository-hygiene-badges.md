@@ -72,6 +72,21 @@ so that I can judge the project's health without digging through CI or config fi
   - `cargo fmt --check` and `cargo clippy --all-targets` both clean, same baseline as Story 6.7 (5 pre-existing `too_many_arguments` warnings, unaffected by this story).
   - State explicitly in Completion Notes: the final verified test count (unchanged from 6.7 unless proven otherwise), confirmation that the audit job is genuinely gating (not soft-failing), and the Codecov account-activation follow-up status.
 
+### Review Findings
+
+- [x] [Review][Patch] Security Audit badge doesn't scope to the audit job — GitHub's `actions/workflows/ci.yml/badge.svg` endpoint ignores the `?job=` query param, so it's byte-identical to the Build Status badge above it (confirmed via live `curl`), violating Task 6's explicit "scoped to the audit job/workflow" instruction and AC #3's intent of a distinct security-audit badge [README.md:12, .github/workflows/ci.yml:42]. **Fixed:** split the `audit` job out into its own `.github/workflows/audit.yml` workflow file (permitted by Task 4/5's own "new workflow file is acceptable" language); README badge/link now point at `audit.yml`'s dedicated badge endpoint, which is genuinely scoped to that workflow instead of duplicating Build Status.
+- [x] [Review][Dismiss] MSRV badge/`rust-version` asserted but not CI-verified against the 1.90.0 floor — real gap but not required by AC #1/Task 1, out of this story's scope
+- [x] [Review][Dismiss] Coverage CI job is non-gating (`fail_ci_if_error: false`, no threshold) — as designed; only the audit job is required to gate per AC #2 vs #3 and the story's own Completion Notes
+- [x] [Review][Dismiss] Coverage measurement excludes `tests/hardware` — explicitly in scope per Task 3 (`--lib --test unit`, matching `make test`)
+- [x] [Review][Dismiss] `cargo audit` has no advisory-ignore/suppression mechanism configured — standard practice is to add ignore rules only once a real advisory needs a waiver, not preemptively
+- [x] [Review][Dismiss] "Gating" audit job isn't enforced via GitHub branch protection — branch protection was already decided not applicable for this repo (personal-account plan limitation, resolved in Epic 1 retro); AC #3 only requires the job itself to fail the build, which it does
+- [x] [Review][Dismiss] `CODECOV_TOKEN` repo-secret registration is self-attested in Completion Notes with no way to verify from the diff — inherent to secrets, not fixable from a code review
+- [x] [Review][Dismiss] `flake.nix`'s `LLVM_COV`/`LLVM_PROFDATA` rely on a hand-verified, dated comment with no automated version-match check — real low-priority robustness gap, but no unambiguous mechanical fix and risk only materializes on a future `flake.lock` bump
+- [x] [Review][Dismiss] No caching (`actions/cache`/nix store cache) in any of the three CI jobs — legitimate performance follow-up, not required by this story's scope
+- [x] [Review][Dismiss] License/MSRV badges are hand-typed static text that can drift from `Cargo.toml`/`LICENSE` — inherent to the static-badge approach Task 6 explicitly mandates for this unpublished (`publish = false`) crate
+- [x] [Review][Dismiss] `CODECOV_TOKEN` is unavailable to `pull_request` workflows triggered from forks, so external-contributor PRs silently skip the coverage upload — standard, accepted OSS pattern; deliberate `fail_ci_if_error: false` keeps fork PRs green, and it doesn't affect the README badge (which reads `branch/main` data only)
+- [x] [Review][Dismiss] `codecov-action` wired with an explicit `CODECOV_TOKEN` rather than the tokenless OIDC upload Task 4 anticipated — reasonable, disclosed deviation (Codecov has since tightened tokenless-upload policy); already reconciled in Completion Notes
+
 ## Dev Notes
 
 - **No new port, no new architectural layer, no `domain`/`ports`/`adapters` change at all — CI/config/docs only.** CAP-21's own row in the Capability → Architecture Map states it explicitly: *"CI workflows, `README.md` | CI tooling — not a domain AD; epics.md assigns the next `AR-Dev` number when it scopes this."* [Source: ARCHITECTURE-SPINE.md, Capability → Architecture Map, line 297] No such `AR-Dev`/AD number has in fact been assigned anywhere in the architecture doc (highest existing is AD-21, none reference CAP-21) — consistent with "not a domain AD," nothing to look up here.
