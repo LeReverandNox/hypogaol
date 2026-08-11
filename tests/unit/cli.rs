@@ -568,6 +568,63 @@ fn enroll_short_u_is_user_verification_not_unlock_fido2_device() {
     assert_eq!(format!("{short:?}"), format!("{long:?}"));
 }
 
+#[test]
+fn create_file_label_short_and_long_forms_are_equivalent() {
+    let short = Cli::try_parse_from([
+        "hypogaol", "create", "file", "/tmp/v", "--size", "64M", "-l", "backup",
+    ])
+    .unwrap();
+    let long = Cli::try_parse_from([
+        "hypogaol", "create", "file", "/tmp/v", "--size", "64M", "--label", "backup",
+    ])
+    .unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn create_file_user_verification_short_and_long_forms_are_equivalent() {
+    let short = Cli::try_parse_from([
+        "hypogaol", "create", "file", "/tmp/v", "--size", "64M", "-u",
+    ])
+    .unwrap();
+    let long = Cli::try_parse_from([
+        "hypogaol",
+        "create",
+        "file",
+        "/tmp/v",
+        "--size",
+        "64M",
+        "--user-verification",
+    ])
+    .unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn create_device_label_short_and_long_forms_are_equivalent() {
+    let short =
+        Cli::try_parse_from(["hypogaol", "create", "device", "/tmp/v", "-l", "backup"]).unwrap();
+    let long = Cli::try_parse_from([
+        "hypogaol", "create", "device", "/tmp/v", "--label", "backup",
+    ])
+    .unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn create_device_user_verification_short_and_long_forms_are_equivalent() {
+    let short = Cli::try_parse_from(["hypogaol", "create", "device", "/tmp/v", "-u"]).unwrap();
+    let long = Cli::try_parse_from([
+        "hypogaol",
+        "create",
+        "device",
+        "/tmp/v",
+        "--user-verification",
+    ])
+    .unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
 // --- Story 6.7: help-text short-alias presence tests (AC #1) ---
 
 #[test]
