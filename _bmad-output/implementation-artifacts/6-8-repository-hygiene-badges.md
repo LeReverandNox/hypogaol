@@ -55,7 +55,7 @@ so that I can judge the project's health without digging through CI or config fi
   - Add a job to `.github/workflows/ci.yml` running `nix develop -c make audit`. This job must **fail the workflow** on a known RustSec advisory (`cargo audit`'s default exit code behavior already does this — do not add `continue-on-error` or `|| true`, which would silently defeat AC #3's "gating" requirement).
   - Verify locally before considering this task done: `nix develop -c make audit` currently exits 0 (no known advisories against `Cargo.lock` as of story creation) — this confirms the gate is real (would fail on a real advisory) without needing to fabricate one.
 
-- [ ] **Task 6: Add all six badges to `README.md`'s header** (AC: #1, #2, #3, #4)
+- [x] **Task 6: Add all six badges to `README.md`'s header** (AC: #1, #2, #3, #4)
   - Insert a badge row directly under the `# Hypogaol` title (above the `> Sealed until touched.` tagline) — six badges, each a real image linking to the resource it reflects, no placeholder images:
     - **Build status** → CI workflow run: image `https://github.com/LeReverandNox/hypogaol/actions/workflows/ci.yml/badge.svg`, link `https://github.com/LeReverandNox/hypogaol/actions/workflows/ci.yml`
     - **License** → `LICENSE` file: shields.io static badge reading `GPL--3.0--or--later` (double-dash-escaped per shields.io's static-badge syntax — verify exact syntax at implementation time), link to `LICENSE` in the repo
@@ -122,6 +122,8 @@ so that I can judge the project's health without digging through CI or config fi
 - Task 4: Added a `coverage` job to `.github/workflows/ci.yml` running `nix develop -c make coverage`, uploading `lcov.info` via `codecov/codecov-action@v7` (latest stable major, `v7.0.0`). Wired `secrets.CODECOV_TOKEN` through explicitly — LeReverandNox already registered and activated the repo on codecov.io and stored the token as a repository secret before this story started, so the epic-6 action item for that manual step is resolved (see `sprint-status.yaml`). `fail_ci_if_error: false` so a Codecov-side outage doesn't block the build (coverage isn't a gating requirement per AC #3, only the audit job is).
 - Task 5: Added an `audit` job to `.github/workflows/ci.yml` running `nix develop -c make audit`, no `continue-on-error`/`|| true` — confirmed genuinely gating: `cargo audit` exits non-zero on a known advisory by default and nothing here suppresses that.
 
+- Task 6: Added a 6-badge row under the `# Hypogaol` title (build status, license, latest release, MSRV, coverage, security audit — audit badge scoped to the `audit` job via GitHub's `?job=` badge param). **Blocking discovery during verification: the repo was actually private** (`gh api repos/LeReverandNox/hypogaol` → `"private": true`), contradicting Task 0's story-creation-time note that it was public — every `github.com` badge/link 404'd anonymously as a result. Flagged to LeReverandNox rather than guessing; he confirmed and made the repo public. Re-verified all 11 badge-image + link-target URLs (`curl -s -o /dev/null -w "%{http_code}"` on each) — all return `200` post-fix. Codecov badge/link resolve (200) but will show "unknown" coverage data until the first CI run lands on `main` post-merge (expected, per Dev Notes).
+
 ### File List
 
 - `Cargo.toml`
@@ -129,3 +131,4 @@ so that I can judge the project's health without digging through CI or config fi
 - `Makefile`
 - `.gitignore`
 - `.github/workflows/ci.yml`
+- `README.md`
