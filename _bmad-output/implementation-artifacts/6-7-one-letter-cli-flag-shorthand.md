@@ -4,7 +4,7 @@ baseline_commit: 437b726d1d41a51933ac6087655133aac606302a
 
 # Story 6.7: One-Letter CLI Flag Shorthand
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -93,6 +93,11 @@ So that I can type common commands faster without giving up the long forms.
   - `make test` passes with all prior tests green (verified current baseline **279 total: 33 lib + 246 tests/unit**, independently re-run against this story's own `baseline_commit` during story creation — not taken from a prior story's self-reported claim) plus this story's new tests. This story is CLI-attribute-only — no `domain`/`ports`/`adapters` change expected; if any turns out to be needed, that is a signal of scope drift, stop and re-check against Task 1's design first.
   - `cargo fmt --check` and `cargo clippy --all-targets` both clean — no new warnings (baseline: 7 pre-existing `too_many_arguments` warnings per Story 6.6's own verified count, unrelated to this story — confirm the same count, not a new one, after this story's changes).
   - State explicitly in Completion Notes the actual final test count (lib + tests/unit), verified against real `cargo test` output, not a memory/estimate — matches this project's own recurring-pattern watchlist (self-reported counts drifting from reality hit Stories 6.4/6.5/6.6 already, each caught only in review).
+
+### Review Findings
+
+- [x] [Review][Patch] Short-flag clustering silently misparses adjacent value+boolean short flags (e.g. `-fu`, `-lu`, `-du`, `-cu`) — `Cli::try_parse_from(["hypogaol", "enroll", "/tmp/v", "--label", "x", "-fu", "-n", "/dev/hidraw0"])` parses successfully as `fido2_device: Some("u")`, `user_verification: false` (verified live: reproduced via a scratch test in `tests/unit/cli.rs`, `cargo test`, then reverted). Root cause: clap's short-flag clustering treats everything after a value-taking short flag in the same token as its literal value — standard getopt-style behavior, not a parsing defect. **Resolution (LeReverandNox, 2026-08-11): keep clap's default behavior, mitigate via documentation** — added a doc-comment callout on `user_verification` (the security-relevant flag) in `enroll` and both `create file`/`create device`, warning against clustering `-u`/`-c` directly after a value-taking short flag (`-f`/`-l`/`-d`/`-s`/`-n`) in the same subcommand. Fixed in `src/cli/main.rs` (commit `d2b4222`).
+- [x] [Review][Patch] Add short-vs-long equivalence test for `create file`/`create device`'s `-u`/`-l` flags [tests/unit/cli.rs] — Task 7 only requires collision-pair coverage plus "at least one" flag per subcommand; `-u` (`user_verification`) and `-l` (`label`) on `create file`/`create device` currently have help-text presence checks but no `try_parse_from` short-vs-long functional equivalence test, unlike every other flag in the file. Fixed: added 4 new tests to `tests/unit/cli.rs` (commit `534e708`). Final verified count: 311 total (33 lib + 278 tests/unit).
 
 ## Dev Notes
 
