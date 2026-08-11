@@ -4,7 +4,7 @@ baseline_commit: 437b726d1d41a51933ac6087655133aac606302a
 
 # Story 6.7: One-Letter CLI Flag Shorthand
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -88,7 +88,7 @@ So that I can type common commands faster without giving up the long forms.
   - **Help-text short-alias presence tests** (AC #1), extending the existing `help_text(&[...])` helper pattern already in this file: for each subcommand, assert its `--help` output contains the expected `-X` token alongside the existing long-form assertions already present (e.g. extend `unlock_help_lists_read_only_flag` or add a sibling test asserting `help.contains("-r, --read-only")` — check clap 4.6.4's actual rendered format first via Task 4's manual `--help` runs before hardcoding the exact separator/spacing, since clap's help formatting is not this story's to redesign).
   - **`-h`/`-V` untouched test** (AC #4): a test asserting `Cli::try_parse_from(["hypogaol", "-V"])` still errors with clap's version short-circuit (mirroring the existing `help_text` helper's `--help` pattern — `-V`/`--version` behave the same way, both return `Err(clap::Error)` with `ErrorKind::DisplayVersion` and short-circuit before subcommand dispatch) and that no subcommand's `--help` text shows `-h`/`-V` bound to anything other than help/version.
 
-- [ ] **Task 8: Full regression pass**
+- [x] **Task 8: Full regression pass**
   - `cargo build` succeeds, no panics on any subcommand's `--help`/actual invocation shape.
   - `make test` passes with all prior tests green (verified current baseline **279 total: 33 lib + 246 tests/unit**, independently re-run against this story's own `baseline_commit` during story creation — not taken from a prior story's self-reported claim) plus this story's new tests. This story is CLI-attribute-only — no `domain`/`ports`/`adapters` change expected; if any turns out to be needed, that is a signal of scope drift, stop and re-check against Task 1's design first.
   - `cargo fmt --check` and `cargo clippy --all-targets` both clean — no new warnings (baseline: 7 pre-existing `too_many_arguments` warnings per Story 6.6's own verified count, unrelated to this story — confirm the same count, not a new one, after this story's changes).
@@ -131,10 +131,13 @@ So that I can type common commands faster without giving up the long forms.
 
 ### Agent Model Used
 
+Claude Sonnet 5 (Amelia)
+
 ### Debug Log References
 
 ### Completion Notes List
 
+- Final verified test count: **307 total (33 lib + 274 tests/unit)**, confirmed via a real `cargo test` run (`make test`), not a memory/estimate — 279 baseline + 28 new tests from Task 7, 0 failures.
 - Tasks 0-6: implemented Task 1's alias table exactly as proposed (validated against the actual `src/cli/main.rs` before coding — declaration order, collisions, and rationale all matched with no deviation needed). Added `short = '<letter>'` to every `#[arg(...)]` in `Commands` and both `CreateMode::File`/`Device` variants. Added `Debug` to `Cli`, `Commands`, `CreateMode`, and (required transitively, not explicitly called out in Task 6 but needed for the derive to compile since it's a field type) `CliFilesystem`. `cargo build` clean; manually ran `--help` for all 11 subcommand forms, confirmed every short letter renders exactly per Task 1's table and no subcommand panics. `make test` re-run after these changes: 279/279 pre-existing tests pass unmodified (33 lib + 246 tests/unit) — no regressions from the `short` additions.
 - Task 7: added 28 new tests to `tests/unit/cli.rs` — short-vs-long equivalence for a representative flag per subcommand, explicit collision-pair coverage for every Task 1 collision (`create file`/`device`'s `-s`/`-c`/`-f`/`-d`, `enroll`'s `-u`/`-v`), help-text short-alias presence per subcommand, and `-h`/`-V` untouched tests (both still short-circuit correctly, and top-level `--help` still lists them). `cargo build --tests` clean, `cargo fmt` applied (one line needed rewrapping), `make test` green: 307/307 (33 lib + 274 tests/unit, baseline 279 + 28 new).
 - Task 8: `cargo clippy --all-targets` — 5 pre-existing `too_many_arguments` warnings, none new or removed by this story's changes. Note: independently re-verified against this story's own `baseline_commit` (437b726) by stashing, checking out that commit's files, and re-running clippy there: the real baseline is **5**, not the **7** this story's own Dev Notes/Task 8 text stated (itself sourced from "Story 6.6's own verified count"). This is exactly the self-reported-count-drift pattern this story's own watchlist (Dev Notes) warns about — flagging it rather than silently using the wrong number. What matters for this story's regression gate is unaffected either way: 5 before this story's changes, 5 after, zero drift introduced by this story.
@@ -143,3 +146,7 @@ So that I can type common commands faster without giving up the long forms.
 
 - `src/cli/main.rs` (modified)
 - `tests/unit/cli.rs` (modified)
+
+## Change Log
+
+- 2026-08-11: Implemented Story 6.7 end-to-end. Added `short = '<letter>'` to every `#[arg(...)]` in `Commands` (Unlock/Enroll/Revoke/Close/CloseAll/Resize) and both `CreateMode::File`/`Device` variants, per Task 1's per-subcommand collision-resolved alias table (validated against the actual code, applied with no deviation). Added `Debug` to `Cli`/`Commands`/`CreateMode`/`CliFilesystem` as a test-only seam for short-vs-long parse-equivalence assertions. Added 28 tests to `tests/unit/cli.rs`: equivalence tests, explicit collision-pair coverage, help-text short-alias presence, and `-h`/`-V` untouched tests. Corrected this story's own stated `too_many_arguments` clippy-warning baseline (7, from Story 6.6's claim) against an independent re-run at `baseline_commit`: actual baseline is 5, unaffected by this story's changes (5 before, 5 after). Final verified total: 307 (33 lib + 274 tests/unit), all passing. Only `src/cli/main.rs` and `tests/unit/cli.rs` touched — no `domain`/`ports`/`adapters` change, matching this story's scoped Dev Notes.
