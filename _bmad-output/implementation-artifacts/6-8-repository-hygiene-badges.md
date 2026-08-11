@@ -23,19 +23,19 @@ so that I can judge the project's health without digging through CI or config fi
 
 ## Tasks / Subtasks
 
-- [ ] **Task 0: Read every file this story touches before changing anything** (AC: all)
+- [x] **Task 0: Read every file this story touches before changing anything** (AC: all)
   - Read in full: `README.md` (top ~40 lines, header/title area only — badges are inserted there), `Cargo.toml` (30 lines, no `rust-version` field today — confirmed via `grep -n rust-version Cargo.toml`, zero matches), `flake.nix` (37 lines), `Makefile` (10 lines), `.github/workflows/ci.yml` (23 lines, single `test` job running `nix develop -c make test`), `LICENSE` (GPL-3.0-or-later, matches `Cargo.toml`'s `license` field).
   - Confirm current gaps (verified during story creation): no badges exist anywhere in `README.md`; `Cargo.toml` has no `rust-version`; `flake.nix`'s devShell packages list has none of `cargo-llvm-cov`/`cargo-audit` — despite the architecture's own Structural Seed comment already (aspirationally) documenting them as belonging there (see Dev Notes below, this is a real gap this story closes, not a misread).
   - Confirm release/tag state: two GitHub Releases exist (`hypogaol-v0.2.0`, latest; `tomb-fido2-v0.1.0`, pre-rebrand) at `https://github.com/LeReverandNox/hypogaol/releases`. Repo is public.
 
-- [ ] **Task 1: Pin the MSRV in `Cargo.toml`** (AC: #1)
+- [x] **Task 1: Pin the MSRV in `Cargo.toml`** (AC: #1)
   - Add `rust-version = "1.90.0"` to `Cargo.toml`'s `[package]` table — this is the architecture's verified MSRV floor [Source: architecture/architecture-tomb-fido2-2026-07-22/ARCHITECTURE-SPINE.md, Stack table, line 203], and gives the MSRV badge (Task 5) a real source of truth to link to instead of a hardcoded, driftable number. `cargo build` will now hard-fail on a toolchain older than 1.90.0 — confirm the CI/dev Nix toolchain (nixpkgs unstable) is still >= 1.90.0 after this change (it was verified locally at story-creation time).
 
-- [ ] **Task 2: Add `cargo-llvm-cov` and `cargo-audit` to the Nix devShell** (AC: #2, #3)
+- [x] **Task 2: Add `cargo-llvm-cov` and `cargo-audit` to the Nix devShell** (AC: #2, #3)
   - `flake.nix`'s `devShells.default.packages` list (currently: `rustc`, `cargo`, `clippy`, `rustfmt`, `rust-analyzer`, `cryptsetup`, `systemd`, `libfido2`, `psmisc`, `lvm2`) — add `cargo-llvm-cov` and `cargo-audit` (both present in `nixpkgs`). This is required so the new CI jobs (Tasks 4-5) can invoke them the same way the existing `test` job invokes `cargo`/`make` — through `nix develop -c ...`, not a separate install step in the workflow.
   - This does **not** touch `xfsprogs`/`btrfs-progs`/`e2fsprogs` — those are a separate, pre-existing gap (hardware-test-only tooling, not CI-gated) out of this story's scope; don't fix it here.
 
-- [ ] **Task 3: Add `coverage` and `audit` Makefile targets** (AC: #2, #3)
+- [x] **Task 3: Add `coverage` and `audit` Makefile targets** (AC: #2, #3)
   - `Makefile` currently has exactly three one-line targets (`build`, `test`, `test-hardware`). Add two more in the same style, e.g.:
     ```makefile
     coverage:
@@ -115,4 +115,13 @@ so that I can judge the project's health without digging through CI or config fi
 
 ### Completion Notes List
 
+- Task 1: Added `rust-version = "1.90.0"` to `Cargo.toml`. Local toolchain is `rustc 1.96.1`, well above the floor. `cargo build` confirmed clean.
+- Task 2: Added `cargo-llvm-cov` and `cargo-audit` to `flake.nix`'s devShell packages. Verified via `nix develop -c bash -c 'cargo llvm-cov --version && cargo audit --version'` — both resolve from nixpkgs and run (`cargo-llvm-cov 0.8.7`, `cargo-audit-audit 0.22.2`).
+- Task 3: Added `coverage`/`audit` Makefile targets, matching the existing `--lib --test unit` scope of `make test`. `cargo-llvm-cov` needed one extra wiring step beyond what the story anticipated: it looks for the `llvm-tools-preview` rustup component under rustc's sysroot, which nixpkgs's plain `rustc` doesn't provide. Fixed by adding `LLVM_COV`/`LLVM_PROFDATA` env vars to `flake.nix`'s devShell, pointing at `rustc.llvmPackages.llvm` (its version, 21.1.8, is confirmed to match `rustc --version --verbose`'s reported LLVM version exactly, so no ABI mismatch risk). Verified end-to-end: `nix develop -c make coverage` produces `lcov.info` (278 tests run, all passing); `nix develop -c make audit` exits 0 against current `Cargo.lock` (0 known advisories, 37 crates scanned). Added `lcov.info` to `.gitignore`.
+
 ### File List
+
+- `Cargo.toml`
+- `flake.nix`
+- `Makefile`
+- `.gitignore`
