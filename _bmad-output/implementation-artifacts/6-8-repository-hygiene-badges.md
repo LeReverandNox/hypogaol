@@ -47,11 +47,11 @@ so that I can judge the project's health without digging through CI or config fi
   - Keep scope to the fake-backed suite (`--lib --test unit`), matching `make test`'s own scope — coverage of the manual/hardware-gated suite is out of scope (that suite isn't run in CI at all, per AD-7).
   - CI (Tasks 4-5) should call `make coverage`/`make audit`, not raw `cargo llvm-cov`/`cargo audit` inline — mirrors the existing `nix develop -c make test` convention in `ci.yml`, don't introduce a second convention.
 
-- [ ] **Task 4: Add a coverage CI job reporting to Codecov** (AC: #2)
+- [x] **Task 4: Add a coverage CI job reporting to Codecov** (AC: #2)
   - Add a job to `.github/workflows/ci.yml` (or a new workflow file — either is acceptable, pick whichever keeps the file readable; the existing file has room for a second job) that runs `nix develop -c make coverage` to produce an lcov report, then uploads it via `codecov/codecov-action` (check the current major version at implementation time — this project's own convention for external CI actions is "latest stable, re-resolve, not a hard pin" [Source: ARCHITECTURE-SPINE.md, Stack table, lines 220-222]).
   - **External account dependency — cannot be completed non-interactively:** Codecov needs the `LeReverandNox/hypogaol` repo activated on codecov.io before uploads will succeed or a badge will render real data. This is an account-linking step only `LeReverandNox` can do (OAuth login to codecov.io), the same category of manual-only step this project already tracks as action items (e.g. Epic 3/4's "exercise the release pipeline against a real tag" item). **Add the CI job and badge markup regardless** (public-repo uploads via `codecov-action` v4+ support tokenless upload via GitHub OIDC, so no `CODECOV_TOKEN` secret should be required) — record in Completion Notes that repo activation on codecov.io is a follow-up the user must do, and add an epic-6 action item for it in `sprint-status.yaml` rather than blocking this story on it.
 
-- [ ] **Task 5: Add a gating security-audit CI job** (AC: #3)
+- [x] **Task 5: Add a gating security-audit CI job** (AC: #3)
   - Add a job to `.github/workflows/ci.yml` running `nix develop -c make audit`. This job must **fail the workflow** on a known RustSec advisory (`cargo audit`'s default exit code behavior already does this — do not add `continue-on-error` or `|| true`, which would silently defeat AC #3's "gating" requirement).
   - Verify locally before considering this task done: `nix develop -c make audit` currently exits 0 (no known advisories against `Cargo.lock` as of story creation) — this confirms the gate is real (would fail on a real advisory) without needing to fabricate one.
 
@@ -119,9 +119,13 @@ so that I can judge the project's health without digging through CI or config fi
 - Task 2: Added `cargo-llvm-cov` and `cargo-audit` to `flake.nix`'s devShell packages. Verified via `nix develop -c bash -c 'cargo llvm-cov --version && cargo audit --version'` — both resolve from nixpkgs and run (`cargo-llvm-cov 0.8.7`, `cargo-audit-audit 0.22.2`).
 - Task 3: Added `coverage`/`audit` Makefile targets, matching the existing `--lib --test unit` scope of `make test`. `cargo-llvm-cov` needed one extra wiring step beyond what the story anticipated: it looks for the `llvm-tools-preview` rustup component under rustc's sysroot, which nixpkgs's plain `rustc` doesn't provide. Fixed by adding `LLVM_COV`/`LLVM_PROFDATA` env vars to `flake.nix`'s devShell, pointing at `rustc.llvmPackages.llvm` (its version, 21.1.8, is confirmed to match `rustc --version --verbose`'s reported LLVM version exactly, so no ABI mismatch risk). Verified end-to-end: `nix develop -c make coverage` produces `lcov.info` (278 tests run, all passing); `nix develop -c make audit` exits 0 against current `Cargo.lock` (0 known advisories, 37 crates scanned). Added `lcov.info` to `.gitignore`.
 
+- Task 4: Added a `coverage` job to `.github/workflows/ci.yml` running `nix develop -c make coverage`, uploading `lcov.info` via `codecov/codecov-action@v7` (latest stable major, `v7.0.0`). Wired `secrets.CODECOV_TOKEN` through explicitly — LeReverandNox already registered and activated the repo on codecov.io and stored the token as a repository secret before this story started, so the epic-6 action item for that manual step is resolved (see `sprint-status.yaml`). `fail_ci_if_error: false` so a Codecov-side outage doesn't block the build (coverage isn't a gating requirement per AC #3, only the audit job is).
+- Task 5: Added an `audit` job to `.github/workflows/ci.yml` running `nix develop -c make audit`, no `continue-on-error`/`|| true` — confirmed genuinely gating: `cargo audit` exits non-zero on a known advisory by default and nothing here suppresses that.
+
 ### File List
 
 - `Cargo.toml`
 - `flake.nix`
 - `Makefile`
 - `.gitignore`
+- `.github/workflows/ci.yml`
