@@ -72,13 +72,13 @@ enum Commands {
 
         /// Hidraw path of the already-enrolled security key to authenticate
         /// this enrollment with. Must be given together with --fido2-device.
-        #[arg(short = 'u', long, requires = "fido2_device")]
+        #[arg(short = 'n', long, requires = "fido2_device")]
         unlock_fido2_device: Option<PathBuf>,
 
         /// Require the device's own fingerprint/PIN check at unlock time,
         /// not touch alone. Fails enrollment outright if the device has no
         /// on-device verification method (e.g. no fingerprint sensor)
-        #[arg(short = 'v', long)]
+        #[arg(short = 'u', long)]
         user_verification: bool,
     },
 

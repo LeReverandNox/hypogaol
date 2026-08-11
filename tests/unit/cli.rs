@@ -524,7 +524,7 @@ fn create_device_short_d_is_fido2_device_not_filesystem() {
 }
 
 #[test]
-fn enroll_short_u_is_unlock_fido2_device_not_user_verification() {
+fn enroll_short_n_is_unlock_fido2_device_not_user_verification() {
     let short = Cli::try_parse_from([
         "hypogaol",
         "enroll",
@@ -533,7 +533,7 @@ fn enroll_short_u_is_unlock_fido2_device_not_user_verification() {
         "backup",
         "--fido2-device",
         "/dev/hidraw1",
-        "-u",
+        "-n",
         "/dev/hidraw0",
     ])
     .unwrap();
@@ -553,9 +553,9 @@ fn enroll_short_u_is_unlock_fido2_device_not_user_verification() {
 }
 
 #[test]
-fn enroll_short_v_is_user_verification_not_unlock_fido2_device() {
+fn enroll_short_u_is_user_verification_not_unlock_fido2_device() {
     let short =
-        Cli::try_parse_from(["hypogaol", "enroll", "/tmp/v", "--label", "backup", "-v"]).unwrap();
+        Cli::try_parse_from(["hypogaol", "enroll", "/tmp/v", "--label", "backup", "-u"]).unwrap();
     let long = Cli::try_parse_from([
         "hypogaol",
         "enroll",
@@ -582,8 +582,8 @@ fn enroll_help_shows_short_aliases() {
     let help = help_text(&["hypogaol", "enroll", "--help"]);
     assert!(help.contains("-l, --label"));
     assert!(help.contains("-f, --fido2-device"));
-    assert!(help.contains("-u, --unlock-fido2-device"));
-    assert!(help.contains("-v, --user-verification"));
+    assert!(help.contains("-n, --unlock-fido2-device"));
+    assert!(help.contains("-u, --user-verification"));
 }
 
 #[test]
