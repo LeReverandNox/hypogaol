@@ -339,3 +339,316 @@ fn enroll_accepts_both_explicit_device_flags_together() {
         "expected --fido2-device and --unlock-fido2-device together to parse successfully"
     );
 }
+
+// --- Story 6.7: short-vs-long equivalence tests ---
+
+#[test]
+fn unlock_read_only_short_and_long_forms_are_equivalent() {
+    let short = Cli::try_parse_from(["hypogaol", "unlock", "/tmp/v", "-r"]).unwrap();
+    let long = Cli::try_parse_from(["hypogaol", "unlock", "/tmp/v", "--read-only"]).unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn unlock_skip_hooks_short_and_long_forms_are_equivalent() {
+    let short = Cli::try_parse_from(["hypogaol", "unlock", "/tmp/v", "-s"]).unwrap();
+    let long = Cli::try_parse_from(["hypogaol", "unlock", "/tmp/v", "--skip-hooks"]).unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn enroll_label_short_and_long_forms_are_equivalent() {
+    let short = Cli::try_parse_from(["hypogaol", "enroll", "/tmp/v", "-l", "backup"]).unwrap();
+    let long = Cli::try_parse_from(["hypogaol", "enroll", "/tmp/v", "--label", "backup"]).unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn revoke_label_short_and_long_forms_are_equivalent() {
+    let short = Cli::try_parse_from(["hypogaol", "revoke", "/tmp/v", "-l", "primary"]).unwrap();
+    let long = Cli::try_parse_from(["hypogaol", "revoke", "/tmp/v", "--label", "primary"]).unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn close_skip_hooks_short_and_long_forms_are_equivalent() {
+    let short = Cli::try_parse_from(["hypogaol", "close", "/tmp/v", "-s"]).unwrap();
+    let long = Cli::try_parse_from(["hypogaol", "close", "/tmp/v", "--skip-hooks"]).unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn close_all_skip_hooks_short_and_long_forms_are_equivalent() {
+    let short = Cli::try_parse_from(["hypogaol", "close-all", "-s"]).unwrap();
+    let long = Cli::try_parse_from(["hypogaol", "close-all", "--skip-hooks"]).unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn resize_size_short_and_long_forms_are_equivalent() {
+    let short = Cli::try_parse_from(["hypogaol", "resize", "/tmp/v", "-s", "20G"]).unwrap();
+    let long = Cli::try_parse_from(["hypogaol", "resize", "/tmp/v", "--size", "20G"]).unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+// --- Story 6.7: explicit collision-pair coverage (proves AC #3) ---
+
+#[test]
+fn create_file_short_s_is_size_not_scaffold_hooks() {
+    let short = Cli::try_parse_from(["hypogaol", "create", "file", "/tmp/v", "-s", "64M"]).unwrap();
+    let long =
+        Cli::try_parse_from(["hypogaol", "create", "file", "/tmp/v", "--size", "64M"]).unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn create_file_short_c_is_scaffold_hooks_not_size() {
+    let short = Cli::try_parse_from([
+        "hypogaol", "create", "file", "/tmp/v", "--size", "64M", "-c",
+    ])
+    .unwrap();
+    let long = Cli::try_parse_from([
+        "hypogaol",
+        "create",
+        "file",
+        "/tmp/v",
+        "--size",
+        "64M",
+        "--scaffold-hooks",
+    ])
+    .unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn create_file_short_f_is_filesystem_not_fido2_device() {
+    let short = Cli::try_parse_from([
+        "hypogaol", "create", "file", "/tmp/v", "--size", "64M", "-f", "xfs",
+    ])
+    .unwrap();
+    let long = Cli::try_parse_from([
+        "hypogaol",
+        "create",
+        "file",
+        "/tmp/v",
+        "--size",
+        "64M",
+        "--filesystem",
+        "xfs",
+    ])
+    .unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn create_file_short_d_is_fido2_device_not_filesystem() {
+    let short = Cli::try_parse_from([
+        "hypogaol",
+        "create",
+        "file",
+        "/tmp/v",
+        "--size",
+        "64M",
+        "-d",
+        "/dev/hidraw1",
+    ])
+    .unwrap();
+    let long = Cli::try_parse_from([
+        "hypogaol",
+        "create",
+        "file",
+        "/tmp/v",
+        "--size",
+        "64M",
+        "--fido2-device",
+        "/dev/hidraw1",
+    ])
+    .unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn create_device_short_s_is_size_not_scaffold_hooks() {
+    let short =
+        Cli::try_parse_from(["hypogaol", "create", "device", "/tmp/v", "-s", "64M"]).unwrap();
+    let long =
+        Cli::try_parse_from(["hypogaol", "create", "device", "/tmp/v", "--size", "64M"]).unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn create_device_short_c_is_scaffold_hooks_not_size() {
+    let short = Cli::try_parse_from(["hypogaol", "create", "device", "/tmp/v", "-c"]).unwrap();
+    let long = Cli::try_parse_from(["hypogaol", "create", "device", "/tmp/v", "--scaffold-hooks"])
+        .unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn create_device_short_f_is_filesystem_not_fido2_device() {
+    let short =
+        Cli::try_parse_from(["hypogaol", "create", "device", "/tmp/v", "-f", "btrfs"]).unwrap();
+    let long = Cli::try_parse_from([
+        "hypogaol",
+        "create",
+        "device",
+        "/tmp/v",
+        "--filesystem",
+        "btrfs",
+    ])
+    .unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn create_device_short_d_is_fido2_device_not_filesystem() {
+    let short = Cli::try_parse_from([
+        "hypogaol",
+        "create",
+        "device",
+        "/tmp/v",
+        "-d",
+        "/dev/hidraw1",
+    ])
+    .unwrap();
+    let long = Cli::try_parse_from([
+        "hypogaol",
+        "create",
+        "device",
+        "/tmp/v",
+        "--fido2-device",
+        "/dev/hidraw1",
+    ])
+    .unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn enroll_short_u_is_unlock_fido2_device_not_user_verification() {
+    let short = Cli::try_parse_from([
+        "hypogaol",
+        "enroll",
+        "/tmp/v",
+        "--label",
+        "backup",
+        "--fido2-device",
+        "/dev/hidraw1",
+        "-u",
+        "/dev/hidraw0",
+    ])
+    .unwrap();
+    let long = Cli::try_parse_from([
+        "hypogaol",
+        "enroll",
+        "/tmp/v",
+        "--label",
+        "backup",
+        "--fido2-device",
+        "/dev/hidraw1",
+        "--unlock-fido2-device",
+        "/dev/hidraw0",
+    ])
+    .unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn enroll_short_v_is_user_verification_not_unlock_fido2_device() {
+    let short =
+        Cli::try_parse_from(["hypogaol", "enroll", "/tmp/v", "--label", "backup", "-v"]).unwrap();
+    let long = Cli::try_parse_from([
+        "hypogaol",
+        "enroll",
+        "/tmp/v",
+        "--label",
+        "backup",
+        "--user-verification",
+    ])
+    .unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+// --- Story 6.7: help-text short-alias presence tests (AC #1) ---
+
+#[test]
+fn unlock_help_shows_short_aliases() {
+    let help = help_text(&["hypogaol", "unlock", "--help"]);
+    assert!(help.contains("-r, --read-only"));
+    assert!(help.contains("-s, --skip-hooks"));
+}
+
+#[test]
+fn enroll_help_shows_short_aliases() {
+    let help = help_text(&["hypogaol", "enroll", "--help"]);
+    assert!(help.contains("-l, --label"));
+    assert!(help.contains("-f, --fido2-device"));
+    assert!(help.contains("-u, --unlock-fido2-device"));
+    assert!(help.contains("-v, --user-verification"));
+}
+
+#[test]
+fn revoke_help_shows_short_alias() {
+    let help = help_text(&["hypogaol", "revoke", "--help"]);
+    assert!(help.contains("-l, --label"));
+}
+
+#[test]
+fn close_help_shows_short_alias() {
+    let help = help_text(&["hypogaol", "close", "--help"]);
+    assert!(help.contains("-s, --skip-hooks"));
+}
+
+#[test]
+fn close_all_help_shows_short_alias() {
+    let help = help_text(&["hypogaol", "close-all", "--help"]);
+    assert!(help.contains("-s, --skip-hooks"));
+}
+
+#[test]
+fn resize_help_shows_short_alias() {
+    let help = help_text(&["hypogaol", "resize", "--help"]);
+    assert!(help.contains("-s, --size"));
+}
+
+#[test]
+fn create_file_help_shows_short_aliases() {
+    let help = help_text(&["hypogaol", "create", "file", "--help"]);
+    assert!(help.contains("-s, --size"));
+    assert!(help.contains("-f, --filesystem"));
+    assert!(help.contains("-c, --scaffold-hooks"));
+    assert!(help.contains("-l, --label"));
+    assert!(help.contains("-d, --fido2-device"));
+    assert!(help.contains("-u, --user-verification"));
+}
+
+#[test]
+fn create_device_help_shows_short_aliases() {
+    let help = help_text(&["hypogaol", "create", "device", "--help"]);
+    assert!(help.contains("-s, --size"));
+    assert!(help.contains("-f, --filesystem"));
+    assert!(help.contains("-c, --scaffold-hooks"));
+    assert!(help.contains("-l, --label"));
+    assert!(help.contains("-d, --fido2-device"));
+    assert!(help.contains("-u, --user-verification"));
+}
+
+// --- Story 6.7: -h/-V untouched (AC #4) ---
+
+#[test]
+fn short_h_flag_still_short_circuits_to_help() {
+    let err = Cli::try_parse_from(["hypogaol", "-h"]).unwrap_err();
+    assert_eq!(err.kind(), clap::error::ErrorKind::DisplayHelp);
+}
+
+#[test]
+fn short_uppercase_v_flag_still_short_circuits_to_version() {
+    let err = Cli::try_parse_from(["hypogaol", "-V"]).unwrap_err();
+    assert_eq!(err.kind(), clap::error::ErrorKind::DisplayVersion);
+}
+
+#[test]
+fn top_level_help_still_lists_the_clap_automatic_h_and_uppercase_v_flags() {
+    let help = help_text(&["hypogaol", "--help"]);
+    assert!(help.contains("-h, --help"));
+    assert!(help.contains("-V, --version"));
+}
