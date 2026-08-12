@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.3.0](https://github.com/LeReverandNox/hypogaol/compare/hypogaol-v0.2.0...hypogaol-v0.3.0) (2026-08-12)
+
+
+### Features
+
+* **6.1:** crash-safe create resume ([#60](https://github.com/LeReverandNox/hypogaol/issues/60)) ([919c684](https://github.com/LeReverandNox/hypogaol/commit/919c684d43a5917ffd4497a7360376fefc76aa0b))
+* **6.2:** Custom Key Label at Create ([#62](https://github.com/LeReverandNox/hypogaol/issues/62)) ([952c614](https://github.com/LeReverandNox/hypogaol/commit/952c614a51ea4e645bf0e0d8a21f78254578ee81))
+* **6.3:** Hook-Template Scaffolding at Create ([#64](https://github.com/LeReverandNox/hypogaol/issues/64)) ([25c655d](https://github.com/LeReverandNox/hypogaol/commit/25c655d823c4fcd790c70fc82b659a1ff6e50d5a))
+* **6.4:** XFS and Btrfs Filesystem Support ([#66](https://github.com/LeReverandNox/hypogaol/issues/66)) ([3f630db](https://github.com/LeReverandNox/hypogaol/commit/3f630dbf17189f62150bcb11f8aea83e5553f208))
+* **6.5:** Concurrent-Invocation Guard ([#68](https://github.com/LeReverandNox/hypogaol/issues/68)) ([f867364](https://github.com/LeReverandNox/hypogaol/commit/f867364ad071992bdd0a48efcff2fd5eb79e7e98))
+* **6.6:** Proactive FIDO2 PIN-Status Guidance ([#70](https://github.com/LeReverandNox/hypogaol/issues/70)) ([437b726](https://github.com/LeReverandNox/hypogaol/commit/437b726d1d41a51933ac6087655133aac606302a))
+* **6.7:** One-Letter CLI Flag Shorthand ([#72](https://github.com/LeReverandNox/hypogaol/issues/72)) ([6ba3bde](https://github.com/LeReverandNox/hypogaol/commit/6ba3bde29208a985a8f8bbd8daa40d9506f04a9f))
+* **6.8:** Repository Hygiene Badges ([#74](https://github.com/LeReverandNox/hypogaol/issues/74)) ([6e7821c](https://github.com/LeReverandNox/hypogaol/commit/6e7821c53b96dbd9bef1c9992f16d3a561cf6e32))
+
+
+### Bug Fixes
+
+* **ci:** authenticate release-please with a GitHub App token ([04b5a33](https://github.com/LeReverandNox/hypogaol/commit/04b5a33e21c17107079ee7eaee2250c91f158f93))
+
 ## [0.2.0](https://github.com/LeReverandNox/hypogaol/compare/hypogaol-v0.1.0...hypogaol-v0.2.0) (2026-08-03)
 
 
