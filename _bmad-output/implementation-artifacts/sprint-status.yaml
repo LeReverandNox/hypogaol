@@ -1,5 +1,5 @@
 # generated: 2026-07-22
-# last_updated: 2026-08-11 (story 6.8 reviewed, done)
+# last_updated: 2026-08-12 (epic 6 retrospective complete)
 # project: hypogaol
 # project_key: NOKEY
 # tracking_system: file-system
@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-22
-last_updated: 2026-08-11 (story 6.8 reviewed, done)
+last_updated: 2026-08-12 (epic 6 retrospective complete)
 project: hypogaol
 project_key: NOKEY
 tracking_system: file-system
@@ -96,17 +96,29 @@ development_status:
   6-6-proactive-fido2-pin-status-guidance: done
   6-7-one-letter-cli-flag-shorthand: done
   6-8-repository-hygiene-badges: done
-  epic-6-retrospective: optional
+  epic-6-retrospective: done
 
 action_items:
+  - epic: 6
+    action: "Automate the test-count/clippy-warning line Completion Notes cite (e.g. a make target that prints 'N total (X lib + Y unit)' and the current too_many_arguments warning count directly from cargo test/cargo clippy output) so a story copy-pastes a real number instead of hand arithmetic — Epic 6 retro (2026-08-11) found 6 stories in a row (6.2 through 6.7) where a self-reported baseline/count was wrong, each caught only by a subsequent story's from-scratch re-verification. The existing Epic 5 watch item (below) has kept this from causing real harm, but it's pure review overhead; this item aims at the root cause instead."
+    owner: "Amelia"
+    status: open
+  - epic: 6
+    action: "Sync sprint-status.yaml's action_items entries in the same pass a story's Completion Notes resolves one — Epic 6 retro (2026-08-11) found 3 stale entries (Story 6.1's crash-simulation gap, and the Epic 3/4 release-pipeline verifications) that were actually completed and documented elsewhere (story Completion Notes, a real GitHub release) but never marked done here."
+    owner: "Amelia"
+    status: open
+  - epic: 6
+    action: "Carry the AD-20 lesson forward: any future feature adding locking/synchronization around an adapters::exec subprocess call must be checked against cryptsetup's and systemd-cryptenroll's own internal locking behavior at design time, not discovered live — Story 6.5's flock(2) design self-deadlocked against both tools' internal locking and was replaced with a Linux abstract-namespace AF_UNIX socket mid-story. Already documented in ARCHITECTURE-SPINE.md's AD-20; this item is a reminder to read it next time, not new work."
+    owner: "Winston"
+    status: open
   - epic: 6
     action: "Manually verify Story 6.5's concurrent-invocation guard (AC #1) against real hardware with two genuine OS processes — this dev/review session could not: no assert_cmd-style plumbing exists in tests/hardware/main.rs to spawn CARGO_BIN_EXE_hypogaol as a child process, and no interactive sudo/physical FIDO2 touch was available. tests/unit/lock_target.rs already proves the underlying flock-free abstract-socket lock mechanism contends/releases correctly within one process (two independently-opened file descriptors), but the literal two-real-process revoke scenario is unverified. Run two concurrent `revoke` invocations (or the in-process two-thread fallback Story 6.5's Task 13 describes) against a real volume with 2 valid FIDO2 keyslots and confirm exactly one succeeds while the other reports the lock-contention message. RESOLVED 2026-08-10 (LeReverandNox): re-ran `make test-hardware` and a concurrent two-process revoke script against a real volume with 2 valid FIDO2 keyslots — exactly one succeeded, the other reported the lock-contention message. Also manually verified the `close_all`/`slam`+`lock_mapping` fix (2026-08-10 review finding) directly: deleted a mapping's backing file while it was still open, then ran `close-all`/`slam` — both closed it successfully instead of hard-failing to lock."
     owner: "LeReverandNox"
     status: done
   - epic: 6
-    action: "Manually crash-simulate Story 6.1's marker-verified resume against real hardware — a physical FIDO2 token was detected in the dev-story execution environment (fido2-token -L), but the crash-simulation scenario needs interactive touch/PIN confirmation mid-create, which the non-interactive dev-agent session could not provide. Verify both file-backed and device-backed: interrupt create between luksFormat and final cleanup (kill -9 or a temporary early-return), re-run create against the same destination, confirm it resumes to a fully working, unlockable volume."
+    action: "Manually crash-simulate Story 6.1's marker-verified resume against real hardware — a physical FIDO2 token was detected in the dev-story execution environment (fido2-token -L), but the crash-simulation scenario needs interactive touch/PIN confirmation mid-create, which the non-interactive dev-agent session could not provide. Verify both file-backed and device-backed: interrupt create between luksFormat and final cleanup (kill -9 or a temporary early-return), re-run create against the same destination, confirm it resumes to a fully working, unlockable volume. RESOLVED 2026-08-08 (LeReverandNox), documented in 6-1-crash-safe-create-resume.md's Completion Notes but not previously synced here: a temporary panic! was inserted in bootstrap_and_provision right after bootstrap_format_and_open returns, then reverted. File-backed: confirmed working end-to-end, resumed with no confirmation prompt, produced a fully working, unlockable volume; a subsequent create against the completed volume correctly refused with DestinationExists. Device-backed: confirmed working under sudo (the unprivileged-shellout gap is a separate, already-tracked issue). A real gap was found and fixed in the same session: a crashed attempt's dm-crypt mapping survives process death (kernel object, independent of userspace), which made a resume's luksFormat fail with a busy-device error before marker-verified resume logic ever ran — fixed via a new close_stale_mapping call, unconditional at the top of bootstrap_and_provision, tolerant of the common no-stale-mapping case."
     owner: "LeReverandNox"
-    status: open
+    status: done
   - epic: 6
     action: "Activate LeReverandNox/hypogaol on codecov.io (OAuth login + repo enable) so Story 6.8's coverage badge/upload reports real data — an interactive, account-level step no dev agent can complete non-interactively. The CI job and badge markup ship regardless per the story; only the activation itself is deferred here. RESOLVED 2026-08-11 (LeReverandNox): registered on codecov.io, repo activated, token generated and stored as the `CODECOV_TOKEN` repository secret."
     owner: "LeReverandNox"
@@ -168,9 +180,9 @@ action_items:
     owner: "Amelia"
     status: done
   - epic: 2
-    action: "When a story adds a new workflow reusing shared adapters::exec error strings, explicitly check for marker-bleed into other workflows' plain-language translations before merge (3 real bugs from this pattern across 2 stories so far)"
+    action: "When a story adds a new workflow reusing shared adapters::exec error strings, explicitly check for marker-bleed into other workflows' plain-language translations before merge (3 real bugs from this pattern across 2 stories so far). GRADUATED to done (Epic 6 retro, 2026-08-11, LeReverandNox): applied proactively in both Story 6.1 (create-marker-write/remove bleed, fixed pre-review) and Story 6.4 (transient-mount bleed, fixed pre-review via Task 10) — zero fresh marker-bleed bugs found in review across the whole epic. Treated as internalized practice, not a standing watch item."
     owner: "Amelia"
-    status: in-progress
+    status: done
   - epic: 3
     action: "Document the sudo requirement for device-backed operations in --help/README. DONE 2026-07-28 (Epic 4 retro), commit 38ac76a"
     owner: "Amelia"
@@ -188,18 +200,18 @@ action_items:
     owner: "Amelia"
     status: done
   - epic: 3
-    action: "Exercise release automation end-to-end against a real tag at least once before treating it as production-ready"
+    action: "Exercise release automation end-to-end against a real tag at least once before treating it as production-ready. RESOLVED (never synced here — found stale during the Epic 6 retro, 2026-08-11): release-please cut hypogaol-v0.2.0 (published 2026-08-03), cargo-dist attached full artifacts (aarch64/x86_64 tarballs + sha256 sums, source archive, dist-manifest.json) — verified live via `gh release view hypogaol-v0.2.0`. Pipeline proven end-to-end."
     owner: "LeReverandNox"
-    status: in-progress
+    status: done
   - epic: 3
     action: "BUG (found during Story 4.3's hardware run, 2026-07-27): resize::run's tier-2 grow-only check (resize.rs's grow_open_mapping, fs.filesystem_size comparison) fails to reject a same-size resize request on a small (32 MiB) file-backed tomb — tests/hardware/main.rs's resize_rejects_a_shrink_request_and_leaves_the_tomb_untouched failed with 'expected DomainError::ResizeMustGrow, got Ok(())'. Root cause unconfirmed but suspected: mkfs.ext4 overhead on a near-minimum-size tomb makes the filesystem's own reported size close enough to the full backing-file size that new_size <= live_current_size no longer holds. Introduced in Story 3.2 (PR #29) — unrelated to Story 4.3's changes (neither resize.rs nor this test's assertions were touched by 4.3). Other 17/18 hardware tests passed. RECONFIRMED 2026-08-02 during Story 5.2's hardware run (test renamed to resize_rejects_a_shrink_request_and_leaves_the_volume_untouched, same panic: 'expected DomainError::ResizeMustGrow, got Ok(())', 21/22 other tests passed) — third occurrence (4.3, and now 5.2), still unrelated to whatever story is running at the time; this is a standing tier-2 grow-only-check defect that needs its own fix, not a story-specific regression."
     owner: "unassigned"
     status: open
   - epic: 4
-    action: "Watch for 'new pure parsing/logic function ships without a unit test' as an explicit recurring-pattern check, the same way marker-bleed is checked — it hit three times in Epic 4 (4.3's fido2_verification_args, 4.5's loop:/device: field parser, 4.6's fuser -m PID parser), each caught only in review"
+    action: "Watch for 'new pure parsing/logic function ships without a unit test' as an explicit recurring-pattern check, the same way marker-bleed is checked — it hit three times in Epic 4 (4.3's fido2_verification_args, 4.5's loop:/device: field parser, 4.6's fuser -m PID parser), each caught only in review. GRADUATED to done (Epic 6 retro, 2026-08-11, LeReverandNox): applied proactively across Story 6.1 (marker-id extraction), 6.3 (bind-hooks template zero-entries proof), 6.5 (lock_target_path), and 6.6 (PIN-status parser, stderr-signal classifier) — every new parsing function got a direct unit test without review having to ask. Treated as internalized practice, not a standing watch item."
     owner: "Amelia"
-    status: open
+    status: done
   - epic: 4
-    action: "Push commit 38ac76a to main, merge the resulting release-please PR, and confirm v0.1.0 publishes with artifacts attached via cargo-dist — first real exercise of the release pipeline"
+    action: "Push commit 38ac76a to main, merge the resulting release-please PR, and confirm v0.1.0 publishes with artifacts attached via cargo-dist — first real exercise of the release pipeline. RESOLVED (never synced here — found stale during the Epic 6 retro, 2026-08-11): superseded by hypogaol-v0.2.0 (published 2026-08-03, post-rebrand), same pipeline, full cargo-dist artifacts attached — see the epic-3 action item above for the verification."
     owner: "LeReverandNox"
-    status: in-progress
+    status: done
