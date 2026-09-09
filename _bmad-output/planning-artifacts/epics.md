@@ -1,5 +1,5 @@
 ---
-stepsCompleted: [step-01-validate-prerequisites, step-01-refresh-2026-07-22, step-02-design-epics, step-01-refresh-2026-07-22-b, step-03-epic-1-stories, step-03-epic-2-stories, step-03-epic-3-stories, step-03-create-stories, step-01-refresh-2026-07-27-epic4, step-02-design-epics-epic4, step-03-epic-4-stories, step-01-refresh-2026-08-08-epic6, step-02-design-epics-epic6, step-03-epic-6-stories]
+stepsCompleted: [step-01-validate-prerequisites, step-01-refresh-2026-07-22, step-02-design-epics, step-01-refresh-2026-07-22-b, step-03-epic-1-stories, step-03-epic-2-stories, step-03-epic-3-stories, step-03-create-stories, step-01-refresh-2026-07-27-epic4, step-02-design-epics-epic4, step-03-epic-4-stories, step-01-refresh-2026-08-08-epic6, step-02-design-epics-epic6, step-03-epic-6-stories, step-01-refresh-2026-09-10-epic7, step-02-design-epics-epic7, step-03-epic-7-stories]
 inputDocuments:
   - _bmad-output/specs/spec-tomb-fido2/SPEC.md
   - _bmad-output/specs/spec-tomb-fido2/hooks.md
@@ -43,6 +43,9 @@ FR22: User can create/resize a volume using XFS or Btrfs as the filesystem, in a
 FR23: User can re-run create against the same destination after a crash/interruption during a prior create attempt, and have the tool detect the partial attempt and restart it clean, rather than being left with an unrecoverable partial volume or a false "destination already exists" refusal. (CAP-23)
 FR24: Tool prevents two simultaneous invocations against the same volume from racing past each other in a way that corrupts state or bypasses a safety guard, particularly the last-keyslot guard. (CAP-24)
 FR25: Tool gives plain-language guidance when the FIDO2 device involved in an operation has a device-level PIN configured, detected proactively before the touch prompt, distinct from user-verification. (CAP-25)
+FR26: User can enroll a FIDO2 key with presence-only unlock (no PIN/UV) via `--client-pin=false`, mapping to `--fido2-with-client-pin=BOOL`. (CAP-26)
+FR27: User can enroll a FIDO2 key with the presence check itself disabled via `--user-presence=false`, mapping to `--fido2-with-user-presence=BOOL` — the weakest supported mode, requiring the token itself be configured to allow it. (CAP-27)
+FR28: When enrolling (create's bootstrap step or standalone `enroll`) and none of the three FIDO2 flags (`--user-verification`, `--client-pin`, `--user-presence`) are explicitly passed, the tool presents an interactive menu offering UV / PIN+UP / UP / NO-UP, defaulting to UV when the token supports it, with unavailable or unverifiable options shown annotated rather than hidden. (CAP-28)
 
 ### NonFunctional Requirements
 
@@ -67,6 +70,8 @@ NFR18: `mkfs.btrfs --mixed` is unconditional for every Btrfs volume this tool cr
 NFR19: The concurrent-invocation lock (`flock`, `LOCK_EX | LOCK_NB`) never blocks/serializes silently — on contention it returns immediately with a plain-language "another operation is already in progress" error.
 NFR20: Read-only workflows (`info`, `unlock` including its read-only variant) never acquire the invocation lock — scope stays strictly limited to mutating workflows, per CAP-24's own success criterion.
 NFR21: FIDO2 PIN-status detection is proactive — queried during device enumeration/preflight — and any resulting warning is always shown before the blocking touch/PIN subprocess call, never only after a failure.
+NFR22: Enrolling in UP-only or NO-UP mode must print an explicit security warning naming the weaker guarantee, consistent with the existing enroll-time PIN-warning convention (AD-16).
+NFR23: Combining the three FIDO2 flags (`--user-verification`, `--client-pin`, `--user-presence`) must resolve through one deterministic, documented precedence rule — no undefined/silent behavior for any combination.
 
 ### Additional Requirements
 
@@ -101,6 +106,9 @@ NFR21: FIDO2 PIN-status detection is proactive — queried during device enumera
 - AD-21 (new, Epic 6): FIDO2 PIN-status detection — the existing `Fido2Device` struct (already shared by `LuksBackend::open`'s presence-wait loop and `Fido2Backend::enroll_fido2_key`'s device-selection resolvers) gains a `client_pin: bool` field, populated via one additional `fido2-token -I` call per enumerated device — no new `Fido2Backend` port method. `enroll_fido2_key`'s resolvers, once a specific device is selected, warn naming that device; `LuksBackend::open`'s presence-wait loop (which never selects a device — cryptsetup itself matches the token to whichever device answers) warns with a blanket list of every currently-enumerated PIN-required device instead. Both warnings print before the blocking touch/PIN subprocess call. The reactive wrong-PIN-retry warning is translated from that same call's stderr (see AD-3 amendment below), never from stdin/stdout. (binds CAP-25)
 - AD-3 amended (Epic 6, CAP-25): stdin/stdout stay strictly inherited/passthrough for the actual secret-entry exchange, unchanged — but stderr on that same subprocess call may now be piped and parsed, for non-secret diagnostic text only (wrong-PIN retry-count warning, PIN-required hint). Nothing captured from stderr may ever contain or derive the secret itself; if a given authenticator's diagnostic text can't be cleanly distinguished from secret material, that call falls back to the original passthrough-only rule. Implementation must read stderr concurrently (separate thread, or non-blocking interleaved reads) rather than only after the child exits, to avoid a pipe-buffer deadlock on a long touch/PIN-blocking call. (binds CAP-25)
 - New external tool dependencies (Epic 6): `xfsprogs` (`mkfs.xfs`, `xfs_growfs`, CAP-22) and `btrfs-progs` (`mkfs.btrfs`, `btrfs`, CAP-22) — added to preflight's checked binaries (only when the corresponding `Filesystem` variant is requested) and the Nix devShell. `cargo-llvm-cov` (coverage instrumentation) and `cargo-audit` (RustSec advisory scan, gating CI job) plus hosted Codecov (CAP-21) — CI/badge tooling only, not part of preflight or the runtime devShell.
+- **Candidate (Epic 7, pending Architect formalization):** `Fido2Backend::enroll_fido2_key`/`fido2_verification_args` extended to accept the two new tri-state flags (`client_pin`, `user_presence`) alongside the existing `user_verification`, with AD-16's precedence precedent (UV forces `client-pin=false`) extended into a full precedence table covering all three, satisfying NFR23. (binds CAP-26, CAP-27)
+- **Candidate (Epic 7, pending Architect formalization):** UV capability detection — parse the bare `uv` token from `fido2-token -I`'s CTAP2 `options:` line, same technique as the existing `parse_client_pin_configured` (clientPin). Three outcomes: capable, not-capable (absent/false), check-error — feeds CAP-28's default selection. (binds CAP-28)
+- **Candidate (Epic 7, pending Architect formalization):** Interactive unlocking-mode menu (UV/PIN+UP/UP/NO-UP), triggered only when none of the three FIDO2 flags are explicitly passed, reusing the existing hand-rolled prompt style (`resolve_interactive_selection`, no external menu crate). Unavailable/unverifiable UV is shown as an annotated, unselectable row (not omitted) — discoverability over a shrinking menu — falling back to PIN+UP as the pre-selected default whenever UV can't be offered. (binds CAP-28, NFR22)
 - Data/error conventions: per-key label + metadata stored as JSON in the LUKS2 token slot (`key_label`, `credential_id`, `created_at`, `filesystem`); domain errors are a typed enum (`thiserror`), translated to plain-language text only at the `cli` boundary; no persistent logging/telemetry (stderr-only, ephemeral); no config file.
 - Stack: Rust 1.90.0, clap 4.6.4, serde/serde_json 1.0.229, thiserror 2.0.19, anyhow 1.0.104, zeroize 1.9.0 (AD-3/AD-9 bootstrap-passphrase wipe only); external: cryptsetup 2.8.6, systemd 261 (+FIDO2 +LIBCRYPTSETUP_PLUGINS), fido2-token/libfido2 1.17.0, e2fsprogs (`mkfs.ext4`/`resize2fs`, AD-8 v1 ext4-only), util-linux `blockdev` (AD-9 `device_capacity`); Linux only.
 - Structural seed: `src/domain/{workflows/{create,unlock,enroll,revoke,close,resize}.rs, preflight.rs, errors.rs}`, `src/ports/{luks_backend,fido2_backend,filesystem_backend}.rs`, `src/adapters/exec/`, `src/cli/{main,ux}.rs`, `tests/{unit,hardware}/`, `Makefile`, `flake.nix`/`flake.lock`, `README.md`. No starter template — greenfield project.
@@ -117,9 +125,10 @@ NFR21: FIDO2 PIN-status detection is proactive — queried during device enumera
 - Remote or delegated unlock beyond cryptsetup's native FIDO2 token mode.
 - Post-quantum-readiness features.
 - Shrinking an existing tomb — resize is grow-only for v1.
-- Exposing the full `systemd-cryptenroll` FIDO2 flag set during enrollment — deferred (open design question), not decided; still not in Epic 6 scope.
 
 > Four items previously listed here as deferred are now in scope via Epic 6: FIDO2 PIN-required-device UX (FR25/CAP-25), the concurrent-invocation guard (FR24/CAP-24), resuming a partial/crashed `create` (FR23/CAP-23), and filesystem types beyond ext4 (FR22/CAP-22).
+>
+> One further item previously listed here as deferred is now in scope via Epic 7: exposing the rest of `systemd-cryptenroll`'s FIDO2 flag set during enrollment (FR26–FR28/CAP-26–28).
 
 ### UX Design Requirements
 
@@ -152,6 +161,9 @@ FR22: Epic 6 - XFS/Btrfs filesystem support alongside ext4
 FR23: Epic 6 - Crash-safe create resume via marker-token detection
 FR24: Epic 6 - Concurrent-invocation guard against racing mutating workflows
 FR25: Epic 6 - Proactive FIDO2 device-PIN guidance
+FR26: Epic 7 - Enroll a FIDO2 key with presence-only unlock (`--client-pin=false`)
+FR27: Epic 7 - Enroll a FIDO2 key with the presence check itself disabled (`--user-presence=false`)
+FR28: Epic 7 - Interactive unlocking-mode menu (UV/PIN+UP/UP/NO-UP) when no FIDO2 flag is passed
 
 ## Epic List
 
@@ -178,6 +190,10 @@ Users and contributors see the project consistently as Hypogaol everywhere it pr
 ### Epic 6: Volume Resilience, Filesystem Choice & Everyday Polish
 Users get a more resilient, flexible, and ergonomic tool: create survives a crash/interruption and resumes cleanly instead of leaving an unrecoverable partial volume or a false refusal, users choose XFS or Btrfs alongside ext4, label their first key at creation time, and optionally scaffold example hook files so hooks are discoverable without reading docs; two invocations against the same volume can no longer race past a safety guard; a FIDO2 device with a PIN configured warns the user before the touch prompt, not after a confusing failure; and both end users (one-letter flag shorthand across the whole CLI) and contributors/evaluators (README health badges) get quality-of-life polish. No new port or architectural layer — every capability slots onto Epics 1-4's existing `create`/`FilesystemBackend`/`Fido2Backend` surface.
 **FRs covered:** FR18, FR19, FR20, FR21, FR22, FR23, FR24, FR25
+
+### Epic 7: FIDO2 Unlocking-Behavior Flags & Interactive Menu
+Users can enroll a FIDO2 key using any of systemd-cryptenroll's remaining unlock-behavior flags — presence-only (no PIN/UV) via `--client-pin`, or the weakest touch-free mode via `--user-presence` — alongside the existing `--user-verification` flag, giving four selectable unlocking modes in total (UV, PIN+UP, UP, NO-UP). When enrolling without specifying any of the three FIDO2 flags, the tool presents an interactive menu so regular users can choose a mode without memorizing flags, and newcomers can discover modes they didn't know existed — defaulting to UV when the connected token supports it, annotating (not hiding) any mode it can't offer, and warning clearly wherever a weaker mode is chosen. This closes out the "expose the full FIDO2 flag set" item previously carried as a non-goal. No new port or architectural layer — slots onto Epic 4's existing FIDO2 enrollment surface (`Fido2Backend::enroll_fido2_key`, `fido2_verification_args`).
+**FRs covered:** FR26, FR27, FR28
 
 ## Epic 1: Create & Open a Tomb (Foundation)
 
@@ -967,11 +983,121 @@ So that I can judge the project's health without digging through CI or config fi
 **When** they're added
 **Then** each is a live, working link — not a placeholder image
 
+## Epic 7: FIDO2 Unlocking-Behavior Flags & Interactive Menu
+
+Users can enroll a FIDO2 key using any of systemd-cryptenroll's remaining unlock-behavior flags — presence-only (no PIN/UV) via `--client-pin`, or the weakest touch-free mode via `--user-presence` — alongside the existing `--user-verification` flag, giving four selectable unlocking modes in total (UV, PIN+UP, UP, NO-UP). When enrolling without specifying any of the three FIDO2 flags, the tool presents an interactive menu so regular users can choose a mode without memorizing flags, and newcomers can discover modes they didn't know existed — defaulting to UV when the connected token supports it, annotating (not hiding) any mode it can't offer, and warning clearly wherever a weaker mode is chosen. This closes out the "expose the full FIDO2 flag set" item previously carried as a non-goal/backlog item. No new port or architectural layer — slots onto Epic 4's existing FIDO2 enrollment surface (`Fido2Backend::enroll_fido2_key`, `fido2_verification_args`).
+
+### Story 7.1: Presence-Only Enrollment (UP-only mode)
+
+As a user,
+I want to enroll a FIDO2 key with the PIN requirement dropped, keeping only the touch/presence check,
+So that I can unlock with just a tap, without a PIN, when I don't need biometric-grade verification.
+
+**Acceptance Criteria:**
+
+**Given** I run enroll or create's bootstrap step with `--client-pin=false`
+**When** enrollment completes
+**Then** `--fido2-with-client-pin=false` is passed to systemd-cryptenroll for that credential, and future unlock requires only touch — no PIN
+
+**Given** I run with `--client-pin=false` and `--user-verification` is not set (or explicitly false)
+**When** enrollment completes
+**Then** user-verification itself stays off — this flag governs PIN only, not UV, so a token with a fingerprint sensor still isn't asked for a fingerprint
+
+**Given** `--client-pin` is not passed at all
+**When** enrollment runs
+**Then** behavior is unchanged from before this story — today's PIN+UP default
+
+### Story 7.2: Touchless Enrollment & Flag Precedence (NO-UP mode)
+
+As a user,
+I want to enroll a FIDO2 key with the presence check itself disabled,
+So that I can unlock with zero interaction, on tokens configured to allow it.
+
+**Acceptance Criteria:**
+
+**Given** I run enroll or create's bootstrap step with `--user-presence=false`
+**When** enrollment completes
+**Then** `--fido2-with-user-presence=false` is passed to systemd-cryptenroll, and future unlock requires no touch
+
+**Given** `--user-presence=false` is requested without an explicit `--client-pin`
+**When** enrollment completes
+**Then** client-pin is also forced to false, producing the fully touch-and-PIN-free NO-UP mode — mirroring AD-16's existing precedent of UV forcing client-pin off
+
+**Given** `--user-verification=true` is passed together with `--user-presence=false`
+**When** enrollment is attempted
+**Then** UV's existing precedence wins outright — user-presence is overridden (with a plain-language notice, not a silent drop), and the credential is enrolled as full UV, extending AD-16's existing "UV forces client-pin=false" precedent to also override user-presence
+
+**Given** the connected token isn't itself configured to allow disabling UP
+**When** systemd-cryptenroll/libfido2 rejects the enrollment for that reason
+**Then** the tool surfaces the rejection in plain language, naming that the token needs UP disabled on itself first — not a generic failure
+
+**Given** UP-only or NO-UP mode is being enrolled
+**When** enrollment proceeds
+**Then** an explicit security warning naming the weaker guarantee is shown first (NFR22), matching the existing enroll-time PIN-warning convention
+
+### Story 7.3: UV Capability Detection
+
+As a user,
+I want the tool to know whether my connected FIDO2 token actually supports built-in user verification before offering it,
+So that I'm never offered or defaulted into a mode my hardware can't deliver.
+
+**Acceptance Criteria:**
+
+**Given** a connected token whose `fido2-token -I` output reports the CTAP2 `uv` option as true (bare `uv` token, mirroring how `clientPin` is parsed today)
+**When** the capability check runs during enrollment
+**Then** it's reported as UV-capable
+
+**Given** a token whose output reports `uv` as false or omits it entirely
+**When** the capability check runs
+**Then** it's reported as not UV-capable, with no error
+
+**Given** the `fido2-token -I` call itself fails (device unplugged mid-check, communication error)
+**When** the capability check runs
+**Then** it's reported as a check-error, distinct from "not capable" — surfaced by Story 7.4's menu, not by this story's own UI
+
+**Given** this capability check
+**When** it runs
+**Then** it's a plain internal query only — no CLI subcommand or user-facing message of its own, foundation for Story 7.4
+
+### Story 7.4: Interactive Unlocking-Mode Menu
+
+As a user,
+I want to be walked through choosing an unlocking mode when I don't specify one via flags,
+So that I can pick without memorizing three separate flags, and discover modes I didn't know existed.
+
+**Acceptance Criteria:**
+
+**Given** I run enroll or create's bootstrap step with none of `--user-verification`, `--client-pin`, or `--user-presence` passed
+**When** enrollment reaches the point of resolving unlocking behavior
+**Then** an interactive menu is shown listing, in order: UV, PIN+UP, UP, NO-UP
+
+**Given** Story 7.3 reports the connected token as UV-capable
+**When** the menu is shown
+**Then** UV is pre-selected as the default
+
+**Given** Story 7.3 reports the token as not UV-capable, or the capability check itself errored
+**When** the menu is shown
+**Then** the UV row is still shown, annotated inline with the reason it can't be selected (e.g. "unavailable — this token has no built-in verification" / "could not check: <error>"), and the pre-selected default falls to PIN+UP instead
+
+**Given** UP or NO-UP is selected from the menu
+**When** the choice is confirmed
+**Then** the same security warning as Story 7.2/NFR22 is shown before enrollment proceeds
+
+**Given** at least one of the three flags was passed explicitly
+**When** enroll or create's bootstrap step runs
+**Then** the menu is skipped entirely — flags always take precedence over the interactive prompt
+
+**Given** the menu
+**When** it's shown
+**Then** it uses the same hand-rolled println/stdin prompt convention as device selection (`resolve_interactive_selection`) — no new menu library/dependency
+
 ## Backlog — Unscoped Candidate Ideas (Not Yet an Epic)
 
 > Captured 2026-08-02 alongside the Hypogaol rename (Epic 5) but deliberately **not** part of it — unrelated in scope, and none of these have been through requirements elicitation yet (no FR numbers, no architecture decisions, no acceptance criteria). Listed here so they aren't lost, pending a future planning session to properly scope them into an epic.
 >
 > **Promoted to Epic 6 (2026-08-08), removed from this list:** custom key label at create (→ CAP-18/FR18), hook-template scaffolding (→ CAP-19/FR19), one-letter shorthand flags (→ CAP-20/FR20), repository hygiene badges (→ CAP-21/FR21), XFS/Btrfs support (→ CAP-22/FR22), crash-safe create resume (→ CAP-23/FR23), concurrent-invocation guard (→ CAP-24/FR24), FIDO2 PIN-required-device UX (→ CAP-25/FR25).
+>
+> **Partially promoted to Epic 7 (2026-09-10), removed from this list:** `--fido2-with-client-pin`/`--fido2-with-user-presence` support plus the interactive unlocking-mode menu (→ CAP-26/FR26, CAP-27/FR27, CAP-28/FR28). `--fido2-credential-algorithm`, `--fido2-salt-file`, and `--fido2-parameters-in-header` remain below, still undecided.
 
-- **Expose all `systemd-cryptenroll` FIDO2 flags during enrollment** (`--fido2-credential-algorithm`, `--fido2-salt-file`, `--fido2-parameters-in-header`, `--fido2-with-client-pin`, `--fido2-with-user-presence`) — **open question, not yet decided:** is the added surface area worth it for advanced users, given the project's existing zero-fallback/zero-cognitive-overhead design posture (NFR3/NFR5)? Needs a deliberate design decision before this can become a real story — flagged here rather than assumed in scope.
+- **Expose remaining `systemd-cryptenroll` FIDO2 flags during enrollment** (`--fido2-credential-algorithm`, `--fido2-salt-file`, `--fido2-parameters-in-header`) — **open question, not yet decided:** is the added surface area worth it for advanced users, given the project's existing zero-fallback/zero-cognitive-overhead design posture (NFR3/NFR5)? Needs a deliberate design decision before this can become a real story — flagged here rather than assumed in scope.
 - **Publish to crates.io — considered and declined (2026-08-06).** Would add ecosystem discoverability, a version badge, and a `cargo install hypogaol` path. Declined because: (1) it doesn't address the tool's actual dependency problem — hypogaol shells out to system binaries (`cryptsetup`, `systemd-cryptenroll`, `fido2-token`, `mkfs.ext4`/`resize2fs`) that `cargo install` can't provide, so a crates.io user still needs the same manual/Nix setup as building from source; (2) it would be a second release surface to keep in sync with the existing `cargo-dist` + `release-please` GitHub Releases pipeline, for no functional gain; (3) `AR-Dev4`'s scope fence already defers distro/packaging channels beyond GitHub Releases + `cargo build --release` for v1, and crates.io publishing falls inside that fence. Revisit only if there's an actual demand signal (someone asking for `cargo install`).
