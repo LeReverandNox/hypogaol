@@ -529,6 +529,32 @@ impl Drop for UnlockCleanup {
     }
 }
 
+/// Restores a `/run/media/<username>` base directory's ownership/mode on
+/// drop — used by Story 7.2's pre-existing-root-owned-base scenario, which
+/// must root-own that real directory to simulate udisks2/gvfs. `Drop` fires
+/// on panic/unwind too, unlike plain sequential restore code at the end of a
+/// test function, so the tester's real desktop automount directory is never
+/// left permanently root-owned even if the scenario under test fails.
+struct MediaBaseOwnershipGuard {
+    media_base: PathBuf,
+    uid: String,
+    gid: String,
+}
+
+impl Drop for MediaBaseOwnershipGuard {
+    fn drop(&mut self) {
+        let _ = Command::new("sudo")
+            .arg("chown")
+            .arg(format!("{}:{}", self.uid, self.gid))
+            .arg(&self.media_base)
+            .output();
+        let _ = Command::new("sudo")
+            .args(["chmod", "0755"])
+            .arg(&self.media_base)
+            .output();
+    }
+}
+
 /// End-to-end unlock verification (Story 1.7, AC #1): create a real
 /// file-backed volume via this tool's own `create::run`, then unlock and mount
 /// it via `unlock::run`, and confirm — independently of this tool's own
@@ -1057,6 +1083,19 @@ fn unlock_mounts_successfully_when_run_media_base_is_pre_owned_by_root() {
         String::from_utf8_lossy(&chmod.stderr)
     );
 
+    // RAII, not plain sequential code at the end of the function: production
+    // code no longer touches the base directory's ownership once it already
+    // exists, so nothing else restores it. If `unlock::run` below panics
+    // (the exact regression this test exists to catch), sequential
+    // restore-at-the-end code would never run, permanently leaving the
+    // tester's real /run/media/<username> root-owned. `Drop` fires on
+    // unwind too, so this restores regardless.
+    let _media_base_restore = MediaBaseOwnershipGuard {
+        media_base: media_base.clone(),
+        uid: id_output("-u"),
+        gid: id_output("-g"),
+    };
+
     let dir = std::env::temp_dir().join("volume-fido2-hardware-test-root-owned-base");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
@@ -1097,21 +1136,6 @@ fn unlock_mounts_successfully_when_run_media_base_is_pre_owned_by_root() {
     assert_mountpoint_under_run_media(&mountpoint, &path);
 
     cleanup.run();
-
-    // Best-effort restore: production code no longer touches the base
-    // directory's ownership once it already exists, so nothing else will fix
-    // it back for the tester after this test intentionally root-owned it.
-    let uid = id_output("-u");
-    let gid = id_output("-g");
-    let _ = Command::new("sudo")
-        .arg("chown")
-        .arg(format!("{uid}:{gid}"))
-        .arg(&media_base)
-        .output();
-    let _ = Command::new("sudo")
-        .args(["chmod", "0755"])
-        .arg(&media_base)
-        .output();
 }
 
 /// Blocks on stdin until the tester presses Enter, after printing `prompt` —
