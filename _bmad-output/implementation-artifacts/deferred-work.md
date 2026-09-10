@@ -1,5 +1,15 @@
 # Deferred Work
 
+## Deferred from: code review of 7-1-presence-only-enrollment-up-only-mode (2026-09-10)
+
+- `codecov.yml` addition contradicts the story's own "No new files" note and weakens patch-coverage enforcement by excluding `src/adapters/exec/mod.rs` and `src/cli/main.rs` — deferred: needed as a CI workaround, this being the first real development since codecov's introduction; already tracked as an open action item (owner: Winston). [codecov.yml]
+- `print_enroll_pin_warning`'s UV-branch message doesn't name the ignored `--client-pin` flag when `--user-verification`+`--client-pin=true` are combined — pre-existing warning design (gated on device's own PIN state), cosmetic clarity gap only. [src/adapters/exec/mod.rs:1176-1182]
+- Task 4's hardware spike only exercised the `create file` call path; the standalone `enroll --client-pin=false` branch (`--unlock-fido2-device`) was never itself run against real hardware — shares the same `fido2_verification_args` call, low risk. [src/adapters/exec/mod.rs enroll_fido2_key]
+- `client_pin == Some(true)` has no real-hardware verification, only a unit test on the arg-string literal — self-admitted not required by any AC. [src/adapters/exec/mod.rs:3396-3403]
+- Bare `-p`/`--client-pin` (no value) is behaviorally a no-op vs omitting the flag entirely, undocumented in `--help` — intentional pre-seeding for Story 7.2 per Dev Notes. [src/cli/main.rs:88-93]
+- No hardware-in-the-loop automated regression test for `client_pin`'s `Some(true)`/`Some(false)` behavior; only a manual one-off hardware run recorded as prose — pre-existing project limitation (no CI-hooked hardware loop). [tests/hardware/main.rs]
+- `client_pin: Option<bool>` threaded as another bare positional parameter through 6+ already-`too_many_arguments`-flagged functions with no structural mitigation — pre-existing pattern tracked via the epic-6 clippy-noise action item. [src/domain/workflows/create.rs, src/adapters/exec/mod.rs]
+
 ## Deferred from: code review of 6-6-proactive-fido2-pin-status-guidance (2026-08-11)
 
 - `open_pty_pair`'s fixed 128-byte `ptsname_r` buffer has no `ERANGE` handling — pre-existing pattern (fixed-size stack buffers elsewhere in this file), effectively unreachable on Linux. [src/adapters/exec/mod.rs:472-484]

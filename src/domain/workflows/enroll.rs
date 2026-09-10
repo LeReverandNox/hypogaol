@@ -19,6 +19,7 @@ pub fn run(
     key_label: String,
     selection: Fido2DeviceSelection,
     user_verification: bool,
+    client_pin: Option<bool>,
     luks: &dyn LuksBackend,
     fido2: &dyn Fido2Backend,
     fs: &dyn FilesystemBackend,
@@ -39,5 +40,5 @@ pub fn run(
         filesystem: Filesystem::Ext4,
     };
 
-    fido2.enroll_fido2_key(&mapper, metadata, selection, user_verification)
+    fido2.enroll_fido2_key(&mapper, metadata, selection, user_verification, client_pin)
 }

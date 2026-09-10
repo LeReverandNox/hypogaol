@@ -25,6 +25,7 @@ fn create_run_stops_at_preflight_before_reaching_its_own_todo() {
         Filesystem::Ext4,
         false,
         None,
+        None,
         false,
         Fido2DeviceSelection::Interactive,
         &no_progress,

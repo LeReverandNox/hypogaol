@@ -62,6 +62,7 @@ pub fn run(
     target: CreateTarget,
     filesystem: Filesystem,
     user_verification: bool,
+    client_pin: Option<bool>,
     key_label: Option<String>,
     scaffold_hooks: bool,
     fido2_selection: Fido2DeviceSelection,
@@ -113,6 +114,7 @@ pub fn run(
                 size,
                 filesystem,
                 user_verification,
+                client_pin,
                 key_label,
                 scaffold_hooks,
                 fido2_selection,
@@ -192,6 +194,7 @@ pub fn run(
                 resolved_size,
                 filesystem,
                 user_verification,
+                client_pin,
                 key_label,
                 scaffold_hooks,
                 fido2_selection,
@@ -216,6 +219,7 @@ fn bootstrap_and_provision(
     size: u64,
     filesystem: Filesystem,
     user_verification: bool,
+    client_pin: Option<bool>,
     key_label: Option<String>,
     scaffold_hooks: bool,
     fido2_selection: Fido2DeviceSelection,
@@ -251,6 +255,7 @@ fn bootstrap_and_provision(
         &mapper,
         filesystem,
         user_verification,
+        client_pin,
         key_label,
         scaffold_hooks,
         fido2_selection,
@@ -274,6 +279,7 @@ fn finish_provisioning(
     mapper: &MapperHandle,
     filesystem: Filesystem,
     user_verification: bool,
+    client_pin: Option<bool>,
     key_label: Option<String>,
     scaffold_hooks: bool,
     fido2_selection: Fido2DeviceSelection,
@@ -294,7 +300,13 @@ fn finish_provisioning(
         filesystem,
     };
     progress(CreateStage::EnrollingFido2Key);
-    fido2.enroll_fido2_key(mapper, metadata, fido2_selection, user_verification)?;
+    fido2.enroll_fido2_key(
+        mapper,
+        metadata,
+        fido2_selection,
+        user_verification,
+        client_pin,
+    )?;
 
     progress(CreateStage::CreatingFilesystem);
     fs.mkfs(mapper, filesystem)?;

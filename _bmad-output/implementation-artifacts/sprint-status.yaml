@@ -1,5 +1,5 @@
 # generated: 2026-07-22
-# last_updated: 2026-09-10 (epic 7 added to sprint tracking)
+# last_updated: 2026-09-10 (story 7.1 code review complete, marked done)
 # project: hypogaol
 # project_key: NOKEY
 # tracking_system: file-system
@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-22
-last_updated: 2026-09-10 (epic 7 added to sprint tracking)
+last_updated: 2026-09-10 (story 7.1 code review complete, marked done)
 project: hypogaol
 project_key: NOKEY
 tracking_system: file-system
@@ -87,7 +87,7 @@ development_status:
   5-4-update-live-planning-automation-pointers: done
   epic-5-retrospective: done
 
-  epic-6: in-progress
+  epic-6: done
   6-1-crash-safe-create-resume: done
   6-2-custom-key-label-at-create: done
   6-3-hook-template-scaffolding-at-create: done
@@ -98,14 +98,26 @@ development_status:
   6-8-repository-hygiene-badges: done
   epic-6-retrospective: done
 
-  epic-7: backlog
-  7-1-presence-only-enrollment-up-only-mode: backlog
+  epic-7: in-progress
+  7-1-presence-only-enrollment-up-only-mode: done
   7-2-touchless-enrollment-flag-precedence-no-up-mode: backlog
   7-3-uv-capability-detection: backlog
   7-4-interactive-unlocking-mode-menu: backlog
   epic-7-retrospective: optional
 
 action_items:
+  - epic: 7
+    action: "Story 7.1's PR (#76) is the first since Codecov was activated (Story 6.8) to actually surface patch-coverage findings — codecov.yml now excludes src/adapters/exec/mod.rs and src/cli/main.rs wholesale (their dispatch/subprocess-calling functions are exercised only by make test-hardware, never by CI's make coverage). Known tradeoff, not yet resolved: both files also hold genuinely unit-tested pure functions (fido2_verification_args, parse_client_pin_configured, parse_size, confirms_wipe, device_create_confirmation, etc.) — excluding the whole file means a future regression in one of those, shipped without a matching test, no longer shows up as a coverage drop either. LeReverandNox wants to re-challenge this with Winston — a more surgical fix (splitting hardware-only code into its own submodule so only that gets ignored) is possible but needs proper scoping, not a bolt-on."
+    owner: "Winston"
+    status: open
+  - epic: 7
+    action: "Story 7.1's own stated baseline (Dev Notes/Task 9: 'cargo clippy --all-targets → 7 warnings, all pre-existing too_many_arguments') was wrong when independently re-verified: `git stash` + `cargo clippy --all-targets` against the story's own `baseline_commit` (`41be34f`) shows 5, not 7. Same recurring pattern as the epic-5/epic-6 self-reported-count watch items (below) — a story's own doc claimed a number that a from-scratch re-check contradicted. No functional impact (this story's post-implementation count of 6 is consistent with the corrected baseline of 5 plus one expected new warning on `enroll::run`), but the automation action item below (epic 6, 'Automate the test-count/clippy-warning line...') remains unaddressed and this is a fresh data point for it."
+    owner: "Amelia"
+    status: open
+  - epic: 7
+    action: "Story 7.1's Task 4 real-hardware spike (confirm whether an explicit --client-pin=false enrollment ceremony itself still prompts for a PIN against a PIN-configured device, mirroring the already-hardware-confirmed user_verification=true case) was not completed in the dev-agent session — two independent environment gaps: sudo requires an interactive password this non-interactive dev-agent session can't supply, and this Nix dev shell's cryptsetup also lacks the systemd-fido2 external token plugin (confirmed via a real, harmless CLI invocation that correctly failed preflight on this). RESOLVED 2026-09-10 (LeReverandNox): ran `hypogaol create file --size=64M --client-pin=false tomb-pin-spike` live, outside the Nix devshell, against a PIN-configured TOKEN2 key (/dev/hidraw3). No PIN prompt appeared at any point — only the two standard presence-confirmation hints — and the resulting volume unlocked fine afterward with touch alone, matching the already-confirmed user_verification=true case exactly. print_enroll_pin_warning's client_pin==Some(false) wording updated from hedged to a flat statement accordingly."
+    owner: "LeReverandNox"
+    status: done
   - epic: 6
     action: "Automate the test-count/clippy-warning line Completion Notes cite (e.g. a make target that prints 'N total (X lib + Y unit)' and the current too_many_arguments warning count directly from cargo test/cargo clippy output) so a story copy-pastes a real number instead of hand arithmetic — Epic 6 retro (2026-08-11) found 6 stories in a row (6.2 through 6.7) where a self-reported baseline/count was wrong, each caught only by a subsequent story's from-scratch re-verification. The existing Epic 5 watch item (below) has kept this from causing real harm, but it's pure review overhead; this item aims at the root cause instead."
     owner: "Amelia"

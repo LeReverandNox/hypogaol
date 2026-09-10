@@ -1153,23 +1153,38 @@ fn resolve_explicit_selection(
 /// Notes): a `--fido2-with-client-pin=false` enrollment against a
 /// PIN-configured device completed with no PIN prompt whatsoever, only
 /// presence/fingerprint confirmation — this is no longer a hedge.
+///
+/// Story 7.1 extends this to an *explicit* `client_pin == Some(false)`
+/// request (`user_verification` left off). Confirmed live against real
+/// hardware (2026-09-10, `LeReverandNox`, see this story's Completion
+/// Notes): `hypogaol create file --client-pin=false` against a
+/// PIN-configured TOKEN2 key completed with no PIN prompt at all — only the
+/// two standard presence-confirmation hints — exactly like the
+/// `user_verification` case above. No longer a hedge.
 fn print_enroll_pin_warning(
     new_device: &Fido2Device,
     existing_device: Option<&Fido2Device>,
     user_verification: bool,
+    client_pin: Option<bool>,
 ) {
-    // `user_verification` only governs `fido2_verification_args` for
-    // `new_device` — the credential being created. `existing_device`, when
-    // present, authenticates the enrollment via `--unlock-fido2-device`
+    // `user_verification`/`client_pin` only govern `fido2_verification_args`
+    // for `new_device` — the credential being created. `existing_device`,
+    // when present, authenticates the enrollment via `--unlock-fido2-device`
     // using its own already-established PIN/UV settings, entirely
-    // unaffected by this call's `user_verification` flag: the hedge below
-    // must never apply to it.
+    // unaffected by either flag: neither branch below must ever apply to it.
     if new_device.client_pin {
         if user_verification {
             println!(
                 "Heads up: {} has a PIN configured, but since you're enrolling with \
                  user-verification, you won't be asked for it — this enrollment and future \
                  unlocks with this key both use its fingerprint/on-device check instead.",
+                new_device.path
+            );
+        } else if client_pin == Some(false) {
+            println!(
+                "Heads up: {} has a PIN configured, but since you're enrolling with \
+                 --client-pin=false, you won't be asked for it — this enrollment and future \
+                 unlocks with this key both use touch/presence only.",
                 new_device.path
             );
         } else {
@@ -1206,6 +1221,7 @@ fn resolve_device_selection(
     selection: &Fido2DeviceSelection,
     need_existing: bool,
     user_verification: bool,
+    client_pin: Option<bool>,
 ) -> Result<(Fido2Device, Option<Fido2Device>), DomainError> {
     let (new_device, existing_device) = match selection {
         Fido2DeviceSelection::Interactive => resolve_interactive_selection(need_existing)?,
@@ -1242,7 +1258,12 @@ fn resolve_device_selection(
         }
     };
 
-    print_enroll_pin_warning(&new_device, existing_device.as_ref(), user_verification);
+    print_enroll_pin_warning(
+        &new_device,
+        existing_device.as_ref(),
+        user_verification,
+        client_pin,
+    );
 
     Ok((new_device, existing_device))
 }
@@ -1252,19 +1273,29 @@ fn resolve_device_selection(
 /// explicitly disabled too: `systemd-cryptenroll` defaults `clientPin` to
 /// "yes", and if left enabled it satisfies the FIDO2 "uv" requirement via a
 /// host-typed PIN prompt even on tokens with a fingerprint sensor — which
-/// would defeat the point of asking for on-device verification. Left
-/// untouched (systemd's own "yes" default) when `user_verification` is
-/// `false`, preserving Epic 2's touch-alone behavior unchanged (AC #2). A
-/// token with no fingerprint sensor and no `clientPin` support then has no
-/// way to satisfy "uv" at all — `systemd-cryptenroll` fails enrollment
-/// outright, which is the correct, explicit outcome for that combination.
-fn fido2_verification_args(user_verification: bool) -> Vec<String> {
+/// would defeat the point of asking for on-device verification. This
+/// precedence is unconditional: `user_verification == true` always wins over
+/// `client_pin`, regardless of its value (Story 7.1 does not touch this).
+///
+/// When `user_verification` is `false`, `client_pin` governs
+/// `--fido2-with-client-pin` directly (Story 7.1/FR26): `Some(false)` pushes
+/// `--fido2-with-client-pin=false` (drops the PIN requirement, UP-only
+/// mode); `Some(true)` pushes `--fido2-with-client-pin=true` (explicit
+/// request, for symmetry); `None` pushes nothing extra, preserving
+/// `systemd-cryptenroll`'s own "yes" default and today's exact behavior (AC
+/// #3). A token with no fingerprint sensor and no `clientPin` support then
+/// has no way to satisfy "uv" at all — `systemd-cryptenroll` fails
+/// enrollment outright, which is the correct, explicit outcome for that
+/// combination.
+fn fido2_verification_args(user_verification: bool, client_pin: Option<bool>) -> Vec<String> {
     let mut args = vec![format!(
         "--fido2-with-user-verification={}",
         if user_verification { "yes" } else { "no" }
     )];
     if user_verification {
         args.push("--fido2-with-client-pin=false".to_string());
+    } else if let Some(client_pin) = client_pin {
+        args.push(format!("--fido2-with-client-pin={client_pin}"));
     }
     args
 }
@@ -2044,6 +2075,7 @@ impl Fido2Backend for ExecAdapter {
         metadata: KeyMetadata,
         selection: Fido2DeviceSelection,
         user_verification: bool,
+        client_pin: Option<bool>,
     ) -> Result<(), DomainError> {
         let path = &mapper.source_path;
 
@@ -2079,8 +2111,12 @@ impl Fido2Backend for ExecAdapter {
         // needs filling when a transient passphrase exists (create's
         // bootstrap-enroll call); a standalone enroll also needs an
         // "existing key" role to authenticate against.
-        let (new_device, existing_device) =
-            resolve_device_selection(&selection, !has_transient_passphrase, user_verification)?;
+        let (new_device, existing_device) = resolve_device_selection(
+            &selection,
+            !has_transient_passphrase,
+            user_verification,
+            client_pin,
+        )?;
 
         let passphrase = self.transient_passphrase.borrow_mut().take();
 
@@ -2133,7 +2169,7 @@ impl Fido2Backend for ExecAdapter {
                 let mut cmd = Command::new("systemd-cryptenroll");
                 cmd.arg(format!("--fido2-device={}", new_device.path))
                     .arg(format!("--unlock-key-file={}", key_file.path.display()))
-                    .args(fido2_verification_args(user_verification))
+                    .args(fido2_verification_args(user_verification, client_pin))
                     .arg(path);
                 (cmd, Some(key_file))
             }
@@ -2165,7 +2201,7 @@ impl Fido2Backend for ExecAdapter {
                 let mut cmd = Command::new("systemd-cryptenroll");
                 cmd.arg(format!("--fido2-device={}", new_device.path))
                     .arg(format!("--unlock-fido2-device={}", existing_device.path))
-                    .args(fido2_verification_args(user_verification))
+                    .args(fido2_verification_args(user_verification, client_pin))
                     .arg(path);
                 (cmd, None)
             }
@@ -3330,7 +3366,7 @@ mod tests {
     #[test]
     fn fido2_verification_args_true_disables_client_pin() {
         assert_eq!(
-            fido2_verification_args(true),
+            fido2_verification_args(true, None),
             vec![
                 "--fido2-with-user-verification=yes".to_string(),
                 "--fido2-with-client-pin=false".to_string(),
@@ -3341,8 +3377,50 @@ mod tests {
     #[test]
     fn fido2_verification_args_false_leaves_client_pin_at_its_default() {
         assert_eq!(
-            fido2_verification_args(false),
+            fido2_verification_args(false, None),
             vec!["--fido2-with-user-verification=no".to_string()]
+        );
+    }
+
+    #[test]
+    fn fido2_verification_args_client_pin_false_adds_explicit_disable_flag() {
+        assert_eq!(
+            fido2_verification_args(false, Some(false)),
+            vec![
+                "--fido2-with-user-verification=no".to_string(),
+                "--fido2-with-client-pin=false".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn fido2_verification_args_client_pin_true_adds_explicit_enable_flag() {
+        assert_eq!(
+            fido2_verification_args(false, Some(true)),
+            vec![
+                "--fido2-with-user-verification=no".to_string(),
+                "--fido2-with-client-pin=true".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn fido2_verification_args_client_pin_none_leaves_args_unchanged_from_before_this_story() {
+        assert_eq!(
+            fido2_verification_args(false, None),
+            vec!["--fido2-with-user-verification=no".to_string()]
+        );
+    }
+
+    #[test]
+    fn fido2_verification_args_uv_true_still_forces_client_pin_false_even_when_client_pin_is_explicitly_true(
+    ) {
+        assert_eq!(
+            fido2_verification_args(true, Some(true)),
+            vec![
+                "--fido2-with-user-verification=yes".to_string(),
+                "--fido2-with-client-pin=false".to_string(),
+            ]
         );
     }
 

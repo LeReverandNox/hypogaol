@@ -327,6 +327,7 @@ pub struct FakeFido2Backend {
     fail_at: Option<&'static str>,
     user_verification_received: Cell<Option<bool>>,
     key_label_received: RefCell<Option<String>>,
+    client_pin_received: Cell<Option<Option<bool>>>,
 }
 
 impl FakeFido2Backend {
@@ -337,6 +338,7 @@ impl FakeFido2Backend {
             fail_at: None,
             user_verification_received: Cell::new(None),
             key_label_received: RefCell::new(None),
+            client_pin_received: Cell::new(None),
         }
     }
 
@@ -347,6 +349,7 @@ impl FakeFido2Backend {
             fail_at: None,
             user_verification_received: Cell::new(None),
             key_label_received: RefCell::new(None),
+            client_pin_received: Cell::new(None),
         }
     }
 
@@ -373,6 +376,16 @@ impl FakeFido2Backend {
     pub fn key_label_received(&self) -> Option<String> {
         self.key_label_received.borrow().clone()
     }
+
+    /// The `client_pin` value most recently passed to `enroll_fido2_key` —
+    /// lets a test assert the CLI flag/workflow parameter actually reached
+    /// the port (Story 7.1, Task 8). One `Option` layer deeper than
+    /// `user_verification_received`: the outer `Option` is "was
+    /// `enroll_fido2_key` ever called", the inner one is the port
+    /// parameter's own tri-state value.
+    pub fn client_pin_received(&self) -> Option<Option<bool>> {
+        self.client_pin_received.get()
+    }
 }
 
 impl Fido2Backend for FakeFido2Backend {
@@ -386,10 +399,12 @@ impl Fido2Backend for FakeFido2Backend {
         metadata: KeyMetadata,
         _selection: Fido2DeviceSelection,
         user_verification: bool,
+        client_pin: Option<bool>,
     ) -> Result<(), DomainError> {
         self.log.borrow_mut().push("enroll_fido2_key".to_string());
         self.user_verification_received.set(Some(user_verification));
         *self.key_label_received.borrow_mut() = Some(metadata.key_label.clone());
+        self.client_pin_received.set(Some(client_pin));
         if self.fail_at == Some("enroll_fido2_key") {
             return Err(DomainError::AdapterFailure(
                 "enroll_fido2_key failed (test)".to_string(),

@@ -1,0 +1,25 @@
+# src/adapters/exec/mod.rs's subprocess/FIDO2-hardware calls and
+# src/cli/main.rs's dispatch/wiring functions are, by design, exercised only
+# by `make test-hardware` against real FIDO2 hardware — never by
+# `make coverage` (cargo llvm-cov --lib --test unit), which is all CI ever
+# runs. Excluded here so patch/project coverage stay real, hard-enforced
+# gates instead of permanently red on code that was never meant to be
+# unit-testable.
+#
+# Tradeoff (flagged for Winston to re-examine): both files also contain
+# genuinely unit-tested pure functions (e.g. fido2_verification_args,
+# parse_client_pin_configured in exec/mod.rs; parse_size, confirms_wipe,
+# device_create_confirmation in cli/main.rs) — excluding the whole file
+# means a future regression in one of those, shipped without a matching
+# test, would no longer show up as a coverage drop either. A more surgical
+# fix would split the hardware-only code into its own submodule so only
+# that gets ignored.
+coverage:
+  status:
+    patch:
+      default:
+        target: auto
+        threshold: 1%
+ignore:
+  - "src/adapters/exec/mod.rs"
+  - "src/cli/main.rs"

@@ -84,6 +84,21 @@ enum Commands {
         /// this requirement off.
         #[arg(short = 'u', long)]
         user_verification: bool,
+
+        /// Drop the PIN requirement, keeping only the touch/presence check
+        /// (UP-only mode) — pass `--client-pin=false`. `--client-pin` alone
+        /// (or `--client-pin=true`) requests it explicitly on; omit entirely
+        /// to leave today's default (PIN+UP) unchanged. The `=` is required
+        /// when giving a value — `--client-pin false` (no `=`) would
+        /// otherwise let clap swallow the next positional argument instead.
+        #[arg(
+            short = 'p',
+            long,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            require_equals = true
+        )]
+        client_pin: Option<bool>,
     },
 
     /// Revoke a FIDO2 key's keyslot from an existing volume
@@ -184,6 +199,21 @@ enum CreateMode {
         /// this requirement off.
         #[arg(short = 'u', long)]
         user_verification: bool,
+
+        /// Drop the PIN requirement, keeping only the touch/presence check
+        /// (UP-only mode) — pass `--client-pin=false`. `--client-pin` alone
+        /// (or `--client-pin=true`) requests it explicitly on; omit entirely
+        /// to leave today's default (PIN+UP) unchanged. The `=` is required
+        /// when giving a value — `--client-pin false` (no `=`) would
+        /// otherwise let clap swallow the next positional argument instead.
+        #[arg(
+            short = 'p',
+            long,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            require_equals = true
+        )]
+        client_pin: Option<bool>,
     },
 
     /// Create a new volume on an existing raw device or partition
@@ -227,6 +257,21 @@ enum CreateMode {
         /// this requirement off.
         #[arg(short = 'u', long)]
         user_verification: bool,
+
+        /// Drop the PIN requirement, keeping only the touch/presence check
+        /// (UP-only mode) — pass `--client-pin=false`. `--client-pin` alone
+        /// (or `--client-pin=true`) requests it explicitly on; omit entirely
+        /// to leave today's default (PIN+UP) unchanged. The `=` is required
+        /// when giving a value — `--client-pin false` (no `=`) would
+        /// otherwise let clap swallow the next positional argument instead.
+        #[arg(
+            short = 'p',
+            long,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            require_equals = true
+        )]
+        client_pin: Option<bool>,
     },
 }
 
@@ -396,6 +441,7 @@ fn run_create(
     target: CreateTarget,
     filesystem: Filesystem,
     user_verification: bool,
+    client_pin: Option<bool>,
     key_label: Option<String>,
     scaffold_hooks: bool,
     fido2_selection: Fido2DeviceSelection,
@@ -412,6 +458,7 @@ fn run_create(
         target,
         filesystem,
         user_verification,
+        client_pin,
         key_label,
         scaffold_hooks,
         fido2_selection,
@@ -512,6 +559,7 @@ fn run_enroll(
     label: String,
     fido2_selection: Fido2DeviceSelection,
     user_verification: bool,
+    client_pin: Option<bool>,
 ) {
     let adapter = ExecAdapter::default();
 
@@ -527,6 +575,7 @@ fn run_enroll(
         label,
         fido2_selection,
         user_verification,
+        client_pin,
         &adapter,
         &adapter,
         &adapter,
@@ -810,6 +859,7 @@ pub fn run() {
                 label,
                 fido2_device,
                 user_verification,
+                client_pin,
             } => {
                 let display_path = path.display().to_string();
                 let target = CreateTarget::File { path, size };
@@ -818,6 +868,7 @@ pub fn run() {
                     target,
                     filesystem.into(),
                     user_verification,
+                    client_pin,
                     label,
                     scaffold_hooks,
                     selection,
@@ -833,6 +884,7 @@ pub fn run() {
                 label,
                 fido2_device,
                 user_verification,
+                client_pin,
             } => {
                 let precheck_adapter = ExecAdapter::default();
                 let marker_verified_resume =
@@ -859,6 +911,7 @@ pub fn run() {
                     target,
                     filesystem.into(),
                     user_verification,
+                    client_pin,
                     label,
                     scaffold_hooks,
                     selection,
@@ -878,9 +931,10 @@ pub fn run() {
             fido2_device,
             unlock_fido2_device,
             user_verification,
+            client_pin,
         } => {
             let selection = fido2_selection_for_enroll(fido2_device, unlock_fido2_device);
-            run_enroll(path, label, selection, user_verification);
+            run_enroll(path, label, selection, user_verification, client_pin);
         }
         Commands::Revoke { path, label } => run_revoke(path, label),
         Commands::Close { path, skip_hooks } => run_close(path, skip_hooks),
