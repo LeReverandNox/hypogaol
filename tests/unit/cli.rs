@@ -670,6 +670,70 @@ fn create_device_client_pin_short_and_long_forms_are_equivalent() {
     assert_eq!(format!("{short:?}"), format!("{long:?}"));
 }
 
+// --- Story 7.1 code review: `--client-pin=false` must actually parse through the
+// CLI layer (AC #1's literal invocation syntax), and `require_equals` must hold
+// so the flag can never swallow the following positional `path` argument.
+
+#[test]
+fn enroll_client_pin_equals_false_parses_through_the_cli_and_differs_from_the_bare_flag() {
+    let with_value = Cli::try_parse_from([
+        "hypogaol",
+        "enroll",
+        "/tmp/v",
+        "--label",
+        "backup",
+        "--client-pin=false",
+    ])
+    .unwrap();
+    let bare = Cli::try_parse_from([
+        "hypogaol",
+        "enroll",
+        "/tmp/v",
+        "--label",
+        "backup",
+        "--client-pin",
+    ])
+    .unwrap();
+    assert_ne!(format!("{with_value:?}"), format!("{bare:?}"));
+}
+
+#[test]
+fn enroll_client_pin_before_the_positional_path_does_not_swallow_it() {
+    let flag_first = Cli::try_parse_from([
+        "hypogaol",
+        "enroll",
+        "--client-pin=false",
+        "/tmp/v",
+        "--label",
+        "backup",
+    ])
+    .unwrap();
+    let flag_last = Cli::try_parse_from([
+        "hypogaol",
+        "enroll",
+        "/tmp/v",
+        "--label",
+        "backup",
+        "--client-pin=false",
+    ])
+    .unwrap();
+    assert_eq!(format!("{flag_first:?}"), format!("{flag_last:?}"));
+}
+
+#[test]
+fn enroll_client_pin_without_equals_before_a_value_is_rejected_not_silently_swallowed() {
+    let result = Cli::try_parse_from([
+        "hypogaol",
+        "enroll",
+        "--client-pin",
+        "false",
+        "/tmp/v",
+        "--label",
+        "backup",
+    ]);
+    assert!(result.is_err());
+}
+
 // --- Story 6.7: help-text short-alias presence tests (AC #1) ---
 
 #[test]
