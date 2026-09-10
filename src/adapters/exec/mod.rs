@@ -167,36 +167,90 @@ fn invoking_identity() -> Result<InvokingIdentity, DomainError> {
     })
 }
 
+/// The mount-point candidate path for a given attempt: the plain
+/// `base/volume_name` on the first attempt, `base/volume_name-<4hex>` (from
+/// `suffix`) on every retry. Pure and I/O-free so the naming/collision-retry
+/// sequence stays fast-unit-testable even though `create_mount_point` itself
+/// is `sudo`-only end-to-end (Story 7.2).
+fn mount_point_candidate(base: &Path, volume_name: &str, attempt: u32, suffix: &str) -> PathBuf {
+    if attempt == 1 {
+        base.join(volume_name)
+    } else {
+        base.join(format!("{volume_name}-{}", &suffix[..4]))
+    }
+}
+
 /// Creates a fresh directory named `volume_name` under `base` (AD-12: still
-/// deterministic from `mapper.source_path` on the common path — no registry).
-/// Falls back to a short random-suffixed name only on an actual collision,
-/// bounded to a small number of attempts.
-fn create_mount_point(base: &Path, volume_name: &str) -> Result<PathBuf, DomainError> {
+/// deterministic from `mapper.source_path` on the common path — no registry),
+/// then chowns it to `identity`. Both the `mkdir` and the `chown` are
+/// unconditionally privileged and never depend on `base`'s own existence or
+/// ownership — unlike `mount()`'s base-directory bootstrap, which only fixes
+/// `base` when it's entirely absent, this leaf is always created and handed
+/// to the invoking user regardless of what already owns `base` (e.g. a
+/// pre-existing `751 root:root` `/run/media/<username>` left by udisks2/gvfs;
+/// Story 7.2). Falls back to a short random-suffixed name only on an actual
+/// collision, bounded to a small number of attempts.
+fn create_mount_point(
+    base: &Path,
+    volume_name: &str,
+    identity: &InvokingIdentity,
+) -> Result<PathBuf, DomainError> {
     const MAX_ATTEMPTS: u32 = 3;
-    let mut candidate = base.join(volume_name);
     let mut attempt = 1;
+    let mut candidate = mount_point_candidate(base, volume_name, attempt, "");
 
     loop {
-        match std::fs::create_dir(&candidate) {
-            Ok(()) => return Ok(candidate),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && attempt < MAX_ATTEMPTS => {
-                let suffix = random_hex_suffix().map_err(DomainError::AdapterFailure)?;
-                candidate = base.join(format!("{volume_name}-{}", &suffix[..4]));
-                attempt += 1;
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+        let mkdir_output = privileged("mkdir").arg(&candidate).output().map_err(|e| {
+            DomainError::AdapterFailure(format!(
+                "failed to create mount point {}: {e}",
+                candidate.display()
+            ))
+        })?;
+
+        if mkdir_output.status.success() {
+            let chown_output = privileged("chown")
+                .arg(format!("{}:{}", identity.uid, identity.gid))
+                .arg(&candidate)
+                .output()
+                .map_err(|e| {
+                    DomainError::AdapterFailure(format!(
+                        "failed to change ownership of mount point {}: {e}",
+                        candidate.display()
+                    ))
+                })?;
+            if !chown_output.status.success() {
                 return Err(DomainError::AdapterFailure(format!(
-                    "could not find an available mount point under {} after {MAX_ATTEMPTS} attempts",
-                    base.display()
+                    "failed to change ownership of mount point {}: {}",
+                    candidate.display(),
+                    String::from_utf8_lossy(&chown_output.stderr).trim()
                 )));
             }
-            Err(e) => {
-                return Err(DomainError::AdapterFailure(format!(
-                    "failed to create mount point {}: {e}",
-                    candidate.display()
-                )));
-            }
+            return Ok(candidate);
         }
+
+        // `sudo mkdir` gives a `Command` output, not an `io::ErrorKind`, so
+        // there's no `AlreadyExists` to match on. An unprivileged, read-only
+        // stat distinguishes "it already exists (expected collision, retry)"
+        // from "it still doesn't exist (a genuine failure)" without parsing
+        // mkdir's locale-dependent stderr text.
+        if std::fs::symlink_metadata(&candidate).is_ok() {
+            if attempt < MAX_ATTEMPTS {
+                let suffix = random_hex_suffix().map_err(DomainError::AdapterFailure)?;
+                attempt += 1;
+                candidate = mount_point_candidate(base, volume_name, attempt, &suffix);
+                continue;
+            }
+            return Err(DomainError::AdapterFailure(format!(
+                "could not find an available mount point under {} after {MAX_ATTEMPTS} attempts",
+                base.display()
+            )));
+        }
+
+        return Err(DomainError::AdapterFailure(format!(
+            "failed to create mount point {}: {}",
+            candidate.display(),
+            String::from_utf8_lossy(&mkdir_output.stderr).trim()
+        )));
     }
 }
 
@@ -2900,7 +2954,7 @@ impl FilesystemBackend for ExecAdapter {
             }
         }
 
-        let mountpoint = create_mount_point(&base, &volume_name)?;
+        let mountpoint = create_mount_point(&base, &volume_name, &identity)?;
 
         // No `-t`: let mount auto-detect the filesystem type from the
         // superblock (standard kernel behavior) rather than re-deriving it
@@ -3341,6 +3395,22 @@ mod tests {
             description: "test key".to_string(),
             client_pin: false,
         }
+    }
+
+    #[test]
+    fn mount_point_candidate_uses_plain_basename_on_first_attempt() {
+        let candidate = mount_point_candidate(Path::new("/run/media/alice"), "vault", 1, "");
+        assert_eq!(candidate, Path::new("/run/media/alice/vault"));
+    }
+
+    #[test]
+    fn mount_point_candidate_appends_a_suffix_shape_on_retry() {
+        let candidate =
+            mount_point_candidate(Path::new("/run/media/alice"), "vault", 2, "deadbeef");
+        let basename = candidate.file_name().unwrap().to_str().unwrap();
+        let (prefix, suffix) = basename.split_once('-').expect("expected a '-' separator");
+        assert_eq!(prefix, "vault");
+        assert!(!suffix.is_empty());
     }
 
     #[test]
