@@ -1007,7 +1007,31 @@ So that I can unlock with just a tap, without a PIN, when I don't need biometric
 **When** enrollment runs
 **Then** behavior is unchanged from before this story — today's PIN+UP default
 
-### Story 7.2: Touchless Enrollment & Flag Precedence (NO-UP mode)
+### Story 7.2: Mount-Point Creation Resilient to Pre-Existing `/run/media` Ownership
+
+As a user,
+I want unlock's mount-point directory creation to succeed regardless of what already owns `/run/media/<username>`,
+So that unlocking works the same whether or not a desktop mount manager (udisks2/gvfs) is running on my machine.
+
+**Acceptance Criteria:**
+
+**Given** `/run/media/<username>` does not yet exist
+**When** `unlock` mounts a volume
+**Then** behavior is unchanged from today — it's created and the per-volume mount point is chowned to the invoking user
+
+**Given** `/run/media/<username>` already exists, owned by another user or root (e.g. pre-created by udisks2/gvfs at `751 root:root`)
+**When** `unlock` mounts a volume
+**Then** the per-volume mount-point directory is still created successfully — via an unconditionally privileged `mkdir` + `chown` of the leaf directory to the invoking user, regardless of the parent directory's ownership — and mount proceeds normally
+
+**Given** the per-volume mount-point directory name is already in use (collision), under either ownership scenario above
+**When** `create_mount_point`'s retry logic runs
+**Then** the existing basename-then-suffixed-retry collision behavior (Story 1.9, AC #2) is unchanged
+
+**Given** this fix
+**When** implemented
+**Then** it does not attempt to change ownership or ACLs of the shared `/run/media/<username>` parent directory itself — mount succeeding and the volume being accessible to the invoking user is sufficient (declined porting `dyne/tomb`'s ACL-on-parent behavior)
+
+### Story 7.3: Touchless Enrollment & Flag Precedence (NO-UP mode)
 
 As a user,
 I want to enroll a FIDO2 key with the presence check itself disabled,
@@ -1035,7 +1059,7 @@ So that I can unlock with zero interaction, on tokens configured to allow it.
 **When** enrollment proceeds
 **Then** an explicit security warning naming the weaker guarantee is shown first (NFR22), matching the existing enroll-time PIN-warning convention
 
-### Story 7.3: UV Capability Detection
+### Story 7.4: UV Capability Detection
 
 As a user,
 I want the tool to know whether my connected FIDO2 token actually supports built-in user verification before offering it,
@@ -1053,13 +1077,13 @@ So that I'm never offered or defaulted into a mode my hardware can't deliver.
 
 **Given** the `fido2-token -I` call itself fails (device unplugged mid-check, communication error)
 **When** the capability check runs
-**Then** it's reported as a check-error, distinct from "not capable" — surfaced by Story 7.4's menu, not by this story's own UI
+**Then** it's reported as a check-error, distinct from "not capable" — surfaced by Story 7.5's menu, not by this story's own UI
 
 **Given** this capability check
 **When** it runs
-**Then** it's a plain internal query only — no CLI subcommand or user-facing message of its own, foundation for Story 7.4
+**Then** it's a plain internal query only — no CLI subcommand or user-facing message of its own, foundation for Story 7.5
 
-### Story 7.4: Interactive Unlocking-Mode Menu
+### Story 7.5: Interactive Unlocking-Mode Menu
 
 As a user,
 I want to be walked through choosing an unlocking mode when I don't specify one via flags,
@@ -1071,17 +1095,17 @@ So that I can pick without memorizing three separate flags, and discover modes I
 **When** enrollment reaches the point of resolving unlocking behavior
 **Then** an interactive menu is shown listing, in order: UV, PIN+UP, UP, NO-UP
 
-**Given** Story 7.3 reports the connected token as UV-capable
+**Given** Story 7.4 reports the connected token as UV-capable
 **When** the menu is shown
 **Then** UV is pre-selected as the default
 
-**Given** Story 7.3 reports the token as not UV-capable, or the capability check itself errored
+**Given** Story 7.4 reports the token as not UV-capable, or the capability check itself errored
 **When** the menu is shown
 **Then** the UV row is still shown, annotated inline with the reason it can't be selected (e.g. "unavailable — this token has no built-in verification" / "could not check: <error>"), and the pre-selected default falls to PIN+UP instead
 
 **Given** UP or NO-UP is selected from the menu
 **When** the choice is confirmed
-**Then** the same security warning as Story 7.2/NFR22 is shown before enrollment proceeds
+**Then** the same security warning as Story 7.3/NFR22 is shown before enrollment proceeds
 
 **Given** at least one of the three flags was passed explicitly
 **When** enroll or create's bootstrap step runs
