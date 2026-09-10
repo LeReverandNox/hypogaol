@@ -1492,7 +1492,7 @@ fn resolve_device_selection(
     need_existing: bool,
     user_verification: bool,
     client_pin: Option<bool>,
-) -> Result<(Fido2Device, Option<Fido2Device>), DomainError> {
+) -> Result<(Fido2Device, Option<Fido2Device>, bool, Option<bool>), DomainError> {
     let (new_device, existing_device) = match selection {
         Fido2DeviceSelection::Interactive => resolve_interactive_selection(need_existing)?,
         Fido2DeviceSelection::Explicit { new, existing } => {
@@ -1528,6 +1528,28 @@ fn resolve_device_selection(
         }
     };
 
+    // AC #5: the menu only runs when neither flag was passed explicitly —
+    // if either was, keep the passed-in values unchanged and skip it
+    // entirely. Shadows the parameters with the resolved result so both this
+    // function's own `print_enroll_pin_warning` call below and
+    // `enroll_fido2_key`'s downstream `fido2_verification_args` call sites
+    // see what was actually chosen, not just what was passed on the CLI.
+    let (user_verification, client_pin) = if !user_verification && client_pin.is_none() {
+        resolve_unlocking_mode_menu(&new_device.path)?
+    } else {
+        (user_verification, client_pin)
+    };
+
+    // Independent of `print_enroll_pin_warning` below (that's about
+    // PIN-prompt behavior, this is NFR22's weaker-guarantee warning) — both
+    // can fire for the same enrollment. Covers both the menu-selected UP row
+    // and an explicit `--client-pin=false` CLI flag that skipped the menu
+    // entirely, since both converge on the same resolved `client_pin` value
+    // right here.
+    if client_pin == Some(false) {
+        println!("{}", up_only_security_warning());
+    }
+
     print_enroll_pin_warning(
         &new_device,
         existing_device.as_ref(),
@@ -1535,7 +1557,7 @@ fn resolve_device_selection(
         client_pin,
     );
 
-    Ok((new_device, existing_device))
+    Ok((new_device, existing_device, user_verification, client_pin))
 }
 
 /// `--fido2-with-user-verification` is always passed explicitly (AD-16 — see
@@ -2381,12 +2403,13 @@ impl Fido2Backend for ExecAdapter {
         // needs filling when a transient passphrase exists (create's
         // bootstrap-enroll call); a standalone enroll also needs an
         // "existing key" role to authenticate against.
-        let (new_device, existing_device) = resolve_device_selection(
-            &selection,
-            !has_transient_passphrase,
-            user_verification,
-            client_pin,
-        )?;
+        let (new_device, existing_device, user_verification, client_pin) =
+            resolve_device_selection(
+                &selection,
+                !has_transient_passphrase,
+                user_verification,
+                client_pin,
+            )?;
 
         let passphrase = self.transient_passphrase.borrow_mut().take();
 
