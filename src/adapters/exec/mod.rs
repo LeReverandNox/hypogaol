@@ -176,7 +176,10 @@ fn mount_point_candidate(base: &Path, volume_name: &str, attempt: u32, suffix: &
     if attempt == 1 {
         base.join(volume_name)
     } else {
-        base.join(format!("{volume_name}-{}", &suffix[..4]))
+        base.join(format!(
+            "{volume_name}-{}",
+            suffix.get(..4).unwrap_or(suffix)
+        ))
     }
 }
 
@@ -208,23 +211,29 @@ fn create_mount_point(
         })?;
 
         if mkdir_output.status.success() {
-            let chown_output = privileged("chown")
+            let chown_result = privileged("chown")
                 .arg(format!("{}:{}", identity.uid, identity.gid))
                 .arg(&candidate)
-                .output()
-                .map_err(|e| {
-                    DomainError::AdapterFailure(format!(
-                        "failed to change ownership of mount point {}: {e}",
-                        candidate.display()
-                    ))
-                })?;
-            if !chown_output.status.success() {
+                .output();
+
+            let chown_failure = match chown_result {
+                Ok(output) if output.status.success() => None,
+                Ok(output) => Some(String::from_utf8_lossy(&output.stderr).trim().to_string()),
+                Err(e) => Some(e.to_string()),
+            };
+
+            if let Some(stderr) = chown_failure {
+                // The leaf was created but never correctly handed to the
+                // invoking user — best-effort remove it rather than leaving a
+                // root-owned orphan that a later unlock of this volume would
+                // silently misclassify as a name collision.
+                let _ = privileged("rmdir").arg(&candidate).output();
                 return Err(DomainError::AdapterFailure(format!(
-                    "failed to change ownership of mount point {}: {}",
-                    candidate.display(),
-                    String::from_utf8_lossy(&chown_output.stderr).trim()
+                    "failed to change ownership of mount point {}: {stderr}",
+                    candidate.display()
                 )));
             }
+
             return Ok(candidate);
         }
 
