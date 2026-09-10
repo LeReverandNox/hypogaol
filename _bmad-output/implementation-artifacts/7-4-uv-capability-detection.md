@@ -4,7 +4,7 @@ baseline_commit: 1db093f44dc91fe17c779f34a57a3e346bf5cb63
 
 # Story 7.4: UV Capability Detection
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -53,6 +53,15 @@ so that I'm never offered or defaulted into a mode my hardware can't deliver.
   - `make test` (`cargo test --lib --test unit`) passes with all prior tests green plus this story's new ones. **Verified live in this session at baseline_commit (`1db093f`): 39 lib + 289 unit = 328 total, 0 failed.** Re-verify from scratch rather than reusing this number if any time/other work has passed, per the standing project convention (epic-5/6/7 self-reported-count watch items).
   - `cargo fmt --check` and `cargo clippy --all-targets` both clean of new warnings. **Baseline, verified live at `1db093f`: 6 warnings, all pre-existing `too_many_arguments`** (identical to Story 7.2's documented baseline — nothing has changed it since). This story adds two new, narrow-signature free functions; it should not newly cross the `too_many_arguments` threshold anywhere, but confirm the post-change count explicitly rather than assuming.
   - State explicitly in Completion Notes whether the parser's behavior was additionally eyeballed against a real `fido2-token -I` invocation against actual hardware (not required for the unit-test suite to pass, but this project's convention is to note what real-hardware confirmation was or wasn't available in a non-interactive session — see Story 7.1/7.2's own Completion Notes for the pattern).
+
+### Review Findings
+
+- [x] [Review][Defer] `fido2_token_supports_uv` collapses a malformed-but-successful `fido2-token -I` response (exit 0, stdout with no `options:` line) into `Ok(false)` via `parse_uv_capable`'s `unwrap_or(false)`, silently merging "couldn't determine" into "not capable" — the exact ambiguity AC #3's three-way distinction exists to prevent, just reached through the parse layer instead of the exec layer [src/adapters/exec/mod.rs:979-991, 1017-1023] — deferred, inherited from `parse_client_pin_configured`'s identical technique (harmless in practice since conformant `fido2-token` output always includes an `options:` line on success); a real fix needs an architecture call on whether the pure parser should signal ambiguity at all, out of this story's narrow scope — flag for Story 7.5
+- [x] [Review][Defer] `parse_uv_capable` (and its `parse_client_pin_configured` template) mis-parses as "not capable" on non-conformant `options:` formatting: leading whitespace before the `options: ` prefix, a separator other than exactly `", "` (e.g. CRLF line endings), or multiple `options:` lines in the output (only the first is read) [src/adapters/exec/mod.rs:1017-1023] — deferred, identical pre-existing technique mirrored intentionally per this story's own Task 1 instruction ("no new logic shape... same one-liner chain as its template"), not introduced by this diff
+- [x] [Review][Defer] `fido2_token_supports_uv` duplicates `fido2_token_has_pin`'s `Command`/error-handling body verbatim, differing only in which parser is called on the last line — no shared helper extracted [src/adapters/exec/mod.rs:952-991] — deferred, deliberate per this story's own Dev Notes (mirrors AD-21's "reuse over new port method" precedent); extracting a shared helper would touch `fido2_token_has_pin`, outside this story's declared scope
+- [x] [Review][Defer] Both I/O wrappers produce the exact same error string shape (`"fido2-token -I failed for {path}: {stderr}"`), so once Story 7.5 calls both for the same device, a failure gives no way to tell which check failed from the message text alone [src/adapters/exec/mod.rs:958-961, 984-987] — deferred, no call site exists yet in this diff to observe or fix concretely; the right fix depends on how Story 7.5's caller wants to disambiguate — flag for 7.5's design
+- [x] [Review][Defer] `fido2_token_supports_uv` ships `#[allow(dead_code)]` with zero consumers, depending on Story 7.5 (still `backlog`, no committed design) to add the only planned call site, in an epic that withdrew its immediately preceding story (7.3) this same day [src/adapters/exec/mod.rs:978] — deferred, matches AC #4's explicit "foundation for Story 7.5" framing; not actionable until 7.5's shape is known
+- [x] [Review][Defer] `REAL_INFO_OUTPUT_WITH_PIN` (a single TOKEN2 capture) is the only real-hardware ground truth behind both `parse_client_pin_configured` and this story's new `parse_uv_capable`; multi-line-wrapped `options:` output from other authenticator models/firmware is untested [src/adapters/exec/mod.rs:3551] — deferred, pre-existing limitation inherited unchanged, not introduced by this story
 
 ## Dev Notes
 
