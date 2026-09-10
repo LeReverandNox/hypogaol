@@ -88,8 +88,16 @@ enum Commands {
         /// Drop the PIN requirement, keeping only the touch/presence check
         /// (UP-only mode) — pass `--client-pin=false`. `--client-pin` alone
         /// (or `--client-pin=true`) requests it explicitly on; omit entirely
-        /// to leave today's default (PIN+UP) unchanged.
-        #[arg(short = 'p', long, num_args = 0..=1, default_missing_value = "true")]
+        /// to leave today's default (PIN+UP) unchanged. The `=` is required
+        /// when giving a value — `--client-pin false` (no `=`) would
+        /// otherwise let clap swallow the next positional argument instead.
+        #[arg(
+            short = 'p',
+            long,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            require_equals = true
+        )]
         client_pin: Option<bool>,
     },
 
@@ -195,8 +203,16 @@ enum CreateMode {
         /// Drop the PIN requirement, keeping only the touch/presence check
         /// (UP-only mode) — pass `--client-pin=false`. `--client-pin` alone
         /// (or `--client-pin=true`) requests it explicitly on; omit entirely
-        /// to leave today's default (PIN+UP) unchanged.
-        #[arg(short = 'p', long, num_args = 0..=1, default_missing_value = "true")]
+        /// to leave today's default (PIN+UP) unchanged. The `=` is required
+        /// when giving a value — `--client-pin false` (no `=`) would
+        /// otherwise let clap swallow the next positional argument instead.
+        #[arg(
+            short = 'p',
+            long,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            require_equals = true
+        )]
         client_pin: Option<bool>,
     },
 
@@ -245,8 +261,16 @@ enum CreateMode {
         /// Drop the PIN requirement, keeping only the touch/presence check
         /// (UP-only mode) — pass `--client-pin=false`. `--client-pin` alone
         /// (or `--client-pin=true`) requests it explicitly on; omit entirely
-        /// to leave today's default (PIN+UP) unchanged.
-        #[arg(short = 'p', long, num_args = 0..=1, default_missing_value = "true")]
+        /// to leave today's default (PIN+UP) unchanged. The `=` is required
+        /// when giving a value — `--client-pin false` (no `=`) would
+        /// otherwise let clap swallow the next positional argument instead.
+        #[arg(
+            short = 'p',
+            long,
+            num_args = 0..=1,
+            default_missing_value = "true",
+            require_equals = true
+        )]
         client_pin: Option<bool>,
     },
 }
