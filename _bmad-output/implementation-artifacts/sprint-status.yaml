@@ -107,6 +107,10 @@ development_status:
 
 action_items:
   - epic: 7
+    action: "Story 7.1's PR (#76) is the first since Codecov was activated (Story 6.8) to actually surface patch-coverage findings — codecov.yml now excludes src/adapters/exec/mod.rs and src/cli/main.rs wholesale (their dispatch/subprocess-calling functions are exercised only by make test-hardware, never by CI's make coverage). Known tradeoff, not yet resolved: both files also hold genuinely unit-tested pure functions (fido2_verification_args, parse_client_pin_configured, parse_size, confirms_wipe, device_create_confirmation, etc.) — excluding the whole file means a future regression in one of those, shipped without a matching test, no longer shows up as a coverage drop either. LeReverandNox wants to re-challenge this with Winston — a more surgical fix (splitting hardware-only code into its own submodule so only that gets ignored) is possible but needs proper scoping, not a bolt-on."
+    owner: "Winston"
+    status: open
+  - epic: 7
     action: "Story 7.1's own stated baseline (Dev Notes/Task 9: 'cargo clippy --all-targets → 7 warnings, all pre-existing too_many_arguments') was wrong when independently re-verified: `git stash` + `cargo clippy --all-targets` against the story's own `baseline_commit` (`41be34f`) shows 5, not 7. Same recurring pattern as the epic-5/epic-6 self-reported-count watch items (below) — a story's own doc claimed a number that a from-scratch re-check contradicted. No functional impact (this story's post-implementation count of 6 is consistent with the corrected baseline of 5 plus one expected new warning on `enroll::run`), but the automation action item below (epic 6, 'Automate the test-count/clippy-warning line...') remains unaddressed and this is a fresh data point for it."
     owner: "Amelia"
     status: open
