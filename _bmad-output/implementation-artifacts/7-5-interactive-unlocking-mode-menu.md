@@ -4,7 +4,7 @@ baseline_commit: cc2f0d58859498c77457a662ad76dd9529101485
 
 # Story 7.5: Interactive Unlocking-Mode Menu
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
