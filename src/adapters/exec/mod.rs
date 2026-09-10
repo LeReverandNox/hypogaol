@@ -1055,7 +1055,8 @@ fn default_unlocking_mode(uv_capable: &Result<bool, DomainError>) -> UnlockingMo
             default: UnlockingMode::PinUp,
             uv_selectable: false,
             uv_annotation: Some(
-                "unavailable — this token has no built-in verification".to_string(),
+                "unavailable — built-in verification isn't available on this token right now"
+                    .to_string(),
             ),
         },
         Err(e) => UnlockingModeMenuState {
@@ -1545,8 +1546,12 @@ fn resolve_device_selection(
     // can fire for the same enrollment. Covers both the menu-selected UP row
     // and an explicit `--client-pin=false` CLI flag that skipped the menu
     // entirely, since both converge on the same resolved `client_pin` value
-    // right here.
-    if client_pin == Some(false) {
+    // right here. Gated on `!user_verification`, same precedence as
+    // `print_enroll_pin_warning` below: `fido2_verification_args` forces
+    // `--fido2-with-client-pin=false` whenever `user_verification` is true
+    // (AD-16), so `--user-verification --client-pin=false` together resolve
+    // to UV, not UP-only — the warning must not fire for that combination.
+    if !user_verification && client_pin == Some(false) {
         println!("{}", up_only_security_warning());
     }
 
@@ -3804,7 +3809,7 @@ mod tests {
         assert!(!state.uv_selectable);
         assert_eq!(
             state.uv_annotation.as_deref(),
-            Some("unavailable — this token has no built-in verification")
+            Some("unavailable — built-in verification isn't available on this token right now")
         );
     }
 
