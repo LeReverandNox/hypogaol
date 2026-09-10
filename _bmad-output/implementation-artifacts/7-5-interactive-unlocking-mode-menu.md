@@ -130,4 +130,13 @@ Amelia (claude-sonnet-5)
 ### File List
 
 - `src/adapters/exec/mod.rs`
+
+### Review Findings
+
+- [x] [Review][Patch] NFR22 UP-only warning fires even when `--user-verification` is also passed alongside `--client-pin=false` [src/adapters/exec/mod.rs:1549] — fixed, gated on `!user_verification`
+- [x] [Review][Patch] UV-unavailable annotation overclaims "no built-in verification" when the underlying signal can't distinguish "not supported" from "supported but not configured" [src/adapters/exec/mod.rs:1058] — fixed, wording softened to "isn't available on this token right now"
+- [x] [Review][Defer] Redundant `fido2-token -I` subprocess call for the UV probe on top of prior device-enrichment queries [src/adapters/exec/mod.rs:1329] — deferred, pre-existing pattern of separate targeted exec calls elsewhere in this file
+- [x] [Review][Defer] `resolve_device_selection`'s widened return is a bare 4-tuple rather than a labeled struct [src/adapters/exec/mod.rs:1492] — deferred, alternative was explicitly considered and dismissed in the story's own Task 3 wording
+- [x] [Review][Defer] `prompt_for_unlocking_mode` duplicates `prompt_for_device_index`'s read/flush/EOF-handling boilerplate instead of extracting a shared helper [src/adapters/exec/mod.rs:1313] — deferred, low-risk reuse opportunity, not blocking
+- [x] [Review][Defer] Completion Notes disclose the `Explicit`-selection stdin-blocking UX change but omit that `create`'s default single-key bootstrap path is now also interactive by default [src/adapters/exec/mod.rs:1531] — deferred, spec-compliant behavior (AC#5), documentation completeness only
 </content>
