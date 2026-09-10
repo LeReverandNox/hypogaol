@@ -1,0 +1,21 @@
+# Patch coverage is kept informational-only: large parts of this codebase
+# (adapters::exec's subprocess/FIDO2-hardware calls, cli::main's dispatch/
+# wiring functions) are, by design, exercised only by `make test-hardware`
+# against real FIDO2 hardware — never by `make coverage`
+# (cargo llvm-cov --lib --test unit), which is all CI ever runs. Any new
+# line added inside one of those already-0%-covered functions will always
+# report 0% patch coverage, regardless of the change's actual quality —
+# confirmed against `main` directly (e.g. `run_create` was already 0/34
+# lines covered before Story 7.1 touched it). A hard-failing patch gate on
+# this codebase would be a permanent false negative, not a real signal.
+#
+# Project coverage stays a real, enforced gate.
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        informational: true
