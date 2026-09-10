@@ -3576,6 +3576,32 @@ mod tests {
     }
 
     #[test]
+    fn parse_uv_capable_true_for_real_captured_output_with_uv_option() {
+        assert!(parse_uv_capable(REAL_INFO_OUTPUT_WITH_PIN));
+    }
+
+    #[test]
+    fn parse_uv_capable_false_when_uv_option_present_but_disabled() {
+        // Synthetically derived from the real-captured fixture above (no
+        // independently real-captured non-UV-capable sample exists yet) —
+        // replaces only the bare `uv` token, leaving `noalwaysUv` untouched.
+        let output = REAL_INFO_OUTPUT_WITH_PIN.replace(", uv,", ", nouv,");
+        assert!(!parse_uv_capable(&output));
+    }
+
+    #[test]
+    fn parse_uv_capable_false_when_token_absent_entirely() {
+        let output = "options: rk, up, noplat, noalwaysUv\npin retries: 8\n";
+        assert!(!parse_uv_capable(output));
+    }
+
+    #[test]
+    fn parse_uv_capable_false_for_empty_or_malformed_input() {
+        assert!(!parse_uv_capable(""));
+        assert!(!parse_uv_capable("not a real fido2-token -I output at all"));
+    }
+
+    #[test]
     fn parse_pin_retries_from_real_captured_output() {
         assert_eq!(parse_pin_retries(REAL_INFO_OUTPUT_WITH_PIN), Some(8));
     }
