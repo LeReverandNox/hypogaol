@@ -1,5 +1,5 @@
 # generated: 2026-07-22
-# last_updated: 2026-08-12 (epic 6 retrospective complete)
+# last_updated: 2026-09-10 (epic 7 added to sprint tracking)
 # project: hypogaol
 # project_key: NOKEY
 # tracking_system: file-system
@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-22
-last_updated: 2026-08-12 (epic 6 retrospective complete)
+last_updated: 2026-09-10 (epic 7 added to sprint tracking)
 project: hypogaol
 project_key: NOKEY
 tracking_system: file-system
@@ -97,6 +97,13 @@ development_status:
   6-7-one-letter-cli-flag-shorthand: done
   6-8-repository-hygiene-badges: done
   epic-6-retrospective: done
+
+  epic-7: backlog
+  7-1-presence-only-enrollment-up-only-mode: backlog
+  7-2-touchless-enrollment-flag-precedence-no-up-mode: backlog
+  7-3-uv-capability-detection: backlog
+  7-4-interactive-unlocking-mode-menu: backlog
+  epic-7-retrospective: optional
 
 action_items:
   - epic: 6
