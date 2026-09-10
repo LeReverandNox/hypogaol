@@ -4,7 +4,7 @@ baseline_commit: 41be34f2fc5f67618368d6c15de307260924fd15
 
 # Story 7.1: Presence-Only Enrollment (UP-only mode)
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
