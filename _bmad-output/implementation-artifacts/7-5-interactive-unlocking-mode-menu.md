@@ -27,7 +27,7 @@ so that I can pick without memorizing two separate flags, and discover modes I d
 
 ## Tasks / Subtasks
 
-- [ ] **Task 0: Read every file/section this story touches before changing anything** (AC: all)
+- [x] **Task 0: Read every file/section this story touches before changing anything** (AC: all)
   - `src/adapters/exec/mod.rs` lines 900-1023: `Fido2Device`, `fido2_token_has_pin`/`parse_client_pin_configured` (AD-21/CAP-25, template), and this story's actual foundation, `fido2_token_supports_uv`/`parse_uv_capable` (Story 7.4/CAP-28) — currently unused, `#[allow(dead_code)]`, `Result<bool, DomainError>` intentionally uncollapsed (three-way capable/not-capable/check-error). Remove the `#[allow(dead_code)]` attribute once this story adds its call site.
   - `src/adapters/exec/mod.rs` lines 1054-1212 (`wait_for_enough_fido2_devices`, `print_numbered_fido2_devices`, `prompt_for_device_index`, `resolve_interactive_selection`): the exact hand-rolled println/stdin prompt convention AC #6 requires reusing. `prompt_for_device_index` re-prompts on out-of-range/unparseable input and handles closed-stdin (`Ok(0)`) as a hard `DomainError::AdapterFailure`, not an infinite loop — this story's own prompt loop must do the same, plus reject selecting an unavailable UV row (a new failure mode `prompt_for_device_index` doesn't have).
   - `src/adapters/exec/mod.rs` lines 1246-1406 (`print_enroll_pin_warning`, `resolve_device_selection`, `fido2_verification_args`): **this is the critical wiring point, read it fully before writing any code.** `resolve_device_selection` is the one function that already has both what this story's menu needs simultaneously — the resolved `new_device` (so its hidraw path can be UV-probed) *and* the `user_verification`/`client_pin` flags — and it's called identically from both `enroll`'s standalone path and `create`'s bootstrap-enroll path (single call site for both, per `enroll_fido2_key` below). `print_enroll_pin_warning` is called at the end of `resolve_device_selection`, using whatever `user_verification`/`client_pin` values were passed in — see Dev Notes' "Where the menu must live" for why this must be the resolved (post-menu), not raw, values.
@@ -38,7 +38,7 @@ so that I can pick without memorizing two separate flags, and discover modes I d
   - `_bmad-output/implementation-artifacts/7-4-uv-capability-detection.md` Dev Notes and Review Findings — five deferred findings explicitly flagged "for Story 7.5" (see Dev Notes' "Inherited from Story 7.4" below); read all five before designing this story's error handling.
   - `_bmad-output/implementation-artifacts/7-1-presence-only-enrollment-up-only-mode.md` line 112 — **critical historical context**: Story 7.1 explicitly deferred NFR22's security-warning implementation to what was then "Story 7.2" (the NO-UP-mode story). That story was later renumbered to 7.3 during Epic 7's mid-epic restructuring (mount-point fix inserted as the new 7.2) and then withdrawn entirely 2026-09-10 with zero code written. The warning obligation was never picked up anywhere else and has now landed on this story by inheritance — see Dev Notes' "NFR22 has never been implemented" below; do not assume it already exists.
 
-- [ ] **Task 1: Add a pure default-selection function** (AC #2, #3)
+- [x] **Task 1: Add a pure default-selection function** (AC #2, #3)
   - Add a pure, unit-testable function taking the UV-capability check's outcome (`Result<bool, DomainError>`, i.e. `fido2_token_supports_uv`'s own return shape) and returning which of the three rows (UV / PIN+UP / UP) is pre-selected by default, plus whether the UV row is selectable and what annotation (if any) to print next to it.
   - Three cases: `Ok(true)` → UV selectable, pre-selected, no annotation. `Ok(false)` → UV shown but unselectable, annotation "unavailable — this token has no built-in verification", default falls to PIN+UP. `Err(e)` → UV shown but unselectable, annotation `"could not check: {e}"` (or equivalent, using the error's existing `Display`/message), default falls to PIN+UP.
   - Keep this function free of `println!`/`io::stdin` entirely — mirrors the project's established pure-parser/I/O-wrapper split (`parse_uv_capable` vs `fido2_token_supports_uv`; `parse_client_pin_configured` vs `fido2_token_has_pin`) so the selection logic itself is unit-testable without a real terminal or device.
@@ -111,11 +111,15 @@ so that I can pick without memorizing two separate flags, and discover modes I d
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Amelia (claude-sonnet-5)
 
 ### Debug Log References
 
 ### Completion Notes List
 
+- Task 0/1: Read the full wiring chain (`Fido2Device`/`fido2_token_supports_uv`/`parse_uv_capable`, `resolve_interactive_selection`/`prompt_for_device_index`, `resolve_device_selection`/`print_enroll_pin_warning`/`fido2_verification_args`, `enroll_fido2_key`'s two call sites) plus epics.md and the 7.1/7.4 story docs before writing any code. Added `UnlockingMode` (3-row enum), `UnlockingModeMenuState`, and the pure `default_unlocking_mode` function right after `parse_uv_capable`; removed the `#[allow(dead_code)]` on `fido2_token_supports_uv` now that Task 3 gives it a real call site.
+
 ### File List
+
+- `src/adapters/exec/mod.rs`
 </content>

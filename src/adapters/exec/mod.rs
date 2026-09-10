@@ -973,9 +973,6 @@ fn fido2_token_has_pin(path: &str) -> Result<bool, DomainError> {
 /// PIN-status, needs a distinguishable third outcome — a query failure must
 /// stay visibly a check-error, not silently become "not capable" — so
 /// callers (starting with Story 7.5) decide how to handle `Err` themselves.
-/// No call site exists yet in this story (see AC #4); the attribute below
-/// is expected to be removed once Story 7.5 adds one.
-#[allow(dead_code)]
 fn fido2_token_supports_uv(path: &str) -> Result<bool, DomainError> {
     let output = Command::new("fido2-token")
         .args(["-I", path])
@@ -1020,6 +1017,53 @@ fn parse_uv_capable(fido2_token_info_output: &str) -> bool {
         .find_map(|line| line.strip_prefix("options: "))
         .map(|options| options.split(", ").any(|opt| opt == "uv"))
         .unwrap_or(false)
+}
+
+/// Story 7.5's three unlocking-mode menu rows, in the fixed display order AC
+/// #1 requires (UV, PIN+UP, UP). Doubles as the menu's parsed-selection
+/// outcome — see `resolve_unlocking_mode_menu`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnlockingMode {
+    Uv,
+    PinUp,
+    Up,
+}
+
+/// Which row `resolve_unlocking_mode_menu` should pre-select, whether UV can
+/// be chosen at all, and what (if anything) to annotate its row with — see
+/// `default_unlocking_mode`.
+struct UnlockingModeMenuState {
+    default: UnlockingMode,
+    uv_selectable: bool,
+    uv_annotation: Option<String>,
+}
+
+/// AC #2/#3's pure default-selection logic, given `fido2_token_supports_uv`'s
+/// own three-way `Result<bool, DomainError>` outcome for the device about to
+/// be enrolled. Kept free of `println!`/`io::stdin` (Task 1) — mirrors this
+/// file's established pure-parser/I/O-wrapper split (`parse_uv_capable` vs
+/// `fido2_token_supports_uv`), so this decision is unit-testable without a
+/// real device or terminal.
+fn default_unlocking_mode(uv_capable: &Result<bool, DomainError>) -> UnlockingModeMenuState {
+    match uv_capable {
+        Ok(true) => UnlockingModeMenuState {
+            default: UnlockingMode::Uv,
+            uv_selectable: true,
+            uv_annotation: None,
+        },
+        Ok(false) => UnlockingModeMenuState {
+            default: UnlockingMode::PinUp,
+            uv_selectable: false,
+            uv_annotation: Some(
+                "unavailable — this token has no built-in verification".to_string(),
+            ),
+        },
+        Err(e) => UnlockingModeMenuState {
+            default: UnlockingMode::PinUp,
+            uv_selectable: false,
+            uv_annotation: Some(format!("could not check: {e}")),
+        },
+    }
 }
 
 /// Runs `fido2-token -I <path>` (no `-c` — never prompts) and parses the
