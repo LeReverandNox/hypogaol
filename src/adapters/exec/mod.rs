@@ -1155,14 +1155,12 @@ fn resolve_explicit_selection(
 /// presence/fingerprint confirmation — this is no longer a hedge.
 ///
 /// Story 7.1 extends this to an *explicit* `client_pin == Some(false)`
-/// request (`user_verification` left off): the same `--fido2-with-client-pin=false`
-/// flag reaches `systemd-cryptenroll` either way, which is strong evidence
-/// this enrollment ceremony's own PIN prompt is suppressed too — but this
-/// exact code path has not been separately hardware-verified (see this
-/// story's Completion Notes for why: no non-interactive way to supply the
-/// `sudo` password or the physical touch this session's environment would
-/// need). Wording below is therefore hedged, matching Story 6.6's own Task 3
-/// pattern pending its analogous spike.
+/// request (`user_verification` left off). Confirmed live against real
+/// hardware (2026-09-10, `LeReverandNox`, see this story's Completion
+/// Notes): `hypogaol create file --client-pin=false` against a
+/// PIN-configured TOKEN2 key completed with no PIN prompt at all — only the
+/// two standard presence-confirmation hints — exactly like the
+/// `user_verification` case above. No longer a hedge.
 fn print_enroll_pin_warning(
     new_device: &Fido2Device,
     existing_device: Option<&Fido2Device>,
@@ -1184,10 +1182,9 @@ fn print_enroll_pin_warning(
             );
         } else if client_pin == Some(false) {
             println!(
-                "Heads up: {} has a PIN configured. Since you're enrolling with \
-                 --client-pin=false, unlocking with this key later will use touch/presence \
-                 only — but you may still be asked for the PIN once now, to authorize this \
-                 enrollment.",
+                "Heads up: {} has a PIN configured, but since you're enrolling with \
+                 --client-pin=false, you won't be asked for it — this enrollment and future \
+                 unlocks with this key both use touch/presence only.",
                 new_device.path
             );
         } else {
