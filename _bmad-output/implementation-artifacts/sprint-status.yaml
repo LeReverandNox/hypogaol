@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-22
-last_updated: 2026-09-10 (epic 7 added to sprint tracking)
+last_updated: 2026-09-10 (story 7.1 ready for review)
 project: hypogaol
 project_key: NOKEY
 tracking_system: file-system
@@ -99,13 +99,21 @@ development_status:
   epic-6-retrospective: done
 
   epic-7: in-progress
-  7-1-presence-only-enrollment-up-only-mode: ready-for-dev
+  7-1-presence-only-enrollment-up-only-mode: review
   7-2-touchless-enrollment-flag-precedence-no-up-mode: backlog
   7-3-uv-capability-detection: backlog
   7-4-interactive-unlocking-mode-menu: backlog
   epic-7-retrospective: optional
 
 action_items:
+  - epic: 7
+    action: "Story 7.1's own stated baseline (Dev Notes/Task 9: 'cargo clippy --all-targets → 7 warnings, all pre-existing too_many_arguments') was wrong when independently re-verified: `git stash` + `cargo clippy --all-targets` against the story's own `baseline_commit` (`41be34f`) shows 5, not 7. Same recurring pattern as the epic-5/epic-6 self-reported-count watch items (below) — a story's own doc claimed a number that a from-scratch re-check contradicted. No functional impact (this story's post-implementation count of 6 is consistent with the corrected baseline of 5 plus one expected new warning on `enroll::run`), but the automation action item below (epic 6, 'Automate the test-count/clippy-warning line...') remains unaddressed and this is a fresh data point for it."
+    owner: "Amelia"
+    status: open
+  - epic: 7
+    action: "Story 7.1's Task 4 real-hardware spike (confirm whether an explicit --client-pin=false enrollment ceremony itself still prompts for a PIN against a PIN-configured device, mirroring the already-hardware-confirmed user_verification=true case) was not completed — two independent environment gaps: sudo requires an interactive password this non-interactive dev-agent session can't supply, and this Nix dev shell's cryptsetup also lacks the systemd-fido2 external token plugin (confirmed via a real, harmless CLI invocation that correctly failed preflight on this). Two real TOKEN2 FIDO2 Security Keys are physically present (/dev/hidraw3, /dev/hidraw11) if a future interactive session wants to run it. print_enroll_pin_warning's client_pin==Some(false) branch currently uses hedged wording (Story 6.6 Task 3's pattern) pending this spike."
+    owner: "LeReverandNox"
+    status: open
   - epic: 6
     action: "Automate the test-count/clippy-warning line Completion Notes cite (e.g. a make target that prints 'N total (X lib + Y unit)' and the current too_many_arguments warning count directly from cargo test/cargo clippy output) so a story copy-pastes a real number instead of hand arithmetic — Epic 6 retro (2026-08-11) found 6 stories in a row (6.2 through 6.7) where a self-reported baseline/count was wrong, each caught only by a subsequent story's from-scratch re-verification. The existing Epic 5 watch item (below) has kept this from causing real harm, but it's pure review overhead; this item aims at the root cause instead."
     owner: "Amelia"
