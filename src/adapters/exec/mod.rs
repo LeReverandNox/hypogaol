@@ -3790,6 +3790,45 @@ mod tests {
     }
 
     #[test]
+    fn default_unlocking_mode_uv_capable_selects_uv_with_no_annotation() {
+        let state = default_unlocking_mode(&Ok(true));
+        assert_eq!(state.default, UnlockingMode::Uv);
+        assert!(state.uv_selectable);
+        assert_eq!(state.uv_annotation, None);
+    }
+
+    #[test]
+    fn default_unlocking_mode_not_uv_capable_falls_back_to_pin_up_with_annotation() {
+        let state = default_unlocking_mode(&Ok(false));
+        assert_eq!(state.default, UnlockingMode::PinUp);
+        assert!(!state.uv_selectable);
+        assert_eq!(
+            state.uv_annotation.as_deref(),
+            Some("unavailable — this token has no built-in verification")
+        );
+    }
+
+    #[test]
+    fn default_unlocking_mode_check_error_falls_back_to_pin_up_with_error_in_annotation() {
+        let state = default_unlocking_mode(&Err(DomainError::AdapterFailure(
+            "fido2-token -I failed for /dev/hidraw0: boom".to_string(),
+        )));
+        assert_eq!(state.default, UnlockingMode::PinUp);
+        assert!(!state.uv_selectable);
+        let annotation = state.uv_annotation.expect("expected an annotation");
+        assert!(annotation.starts_with("could not check: "));
+        assert!(annotation.contains("boom"));
+    }
+
+    #[test]
+    fn up_only_security_warning_names_the_weaker_guarantee() {
+        let warning = up_only_security_warning();
+        assert!(warning.starts_with("Warning: "));
+        assert!(warning.contains("no PIN"));
+        assert!(warning.contains("no fingerprint"));
+    }
+
+    #[test]
     fn parse_pin_retries_from_real_captured_output() {
         assert_eq!(parse_pin_retries(REAL_INFO_OUTPUT_WITH_PIN), Some(8));
     }
