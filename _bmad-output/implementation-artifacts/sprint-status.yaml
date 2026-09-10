@@ -101,7 +101,7 @@ development_status:
   epic-7: in-progress
   7-1-presence-only-enrollment-up-only-mode: done
   7-2-mount-point-creation-resilient-to-pre-existing-ownership: done
-  7-3-touchless-enrollment-flag-precedence-no-up-mode: backlog
+  7-3-touchless-enrollment-flag-precedence-no-up-mode: withdrawn
   7-4-uv-capability-detection: backlog
   7-5-interactive-unlocking-mode-menu: backlog
   epic-7-retrospective: optional
@@ -125,6 +125,10 @@ action_items:
     status: open
   - epic: 7
     action: "Story 7.1's Task 4 real-hardware spike (confirm whether an explicit --client-pin=false enrollment ceremony itself still prompts for a PIN against a PIN-configured device, mirroring the already-hardware-confirmed user_verification=true case) was not completed in the dev-agent session — two independent environment gaps: sudo requires an interactive password this non-interactive dev-agent session can't supply, and this Nix dev shell's cryptsetup also lacks the systemd-fido2 external token plugin (confirmed via a real, harmless CLI invocation that correctly failed preflight on this). RESOLVED 2026-09-10 (LeReverandNox): ran `hypogaol create file --size=64M --client-pin=false tomb-pin-spike` live, outside the Nix devshell, against a PIN-configured TOKEN2 key (/dev/hidraw3). No PIN prompt appeared at any point — only the two standard presence-confirmation hints — and the resulting volume unlocked fine afterward with touch alone, matching the already-confirmed user_verification=true case exactly. print_enroll_pin_warning's client_pin==Some(false) wording updated from hedged to a flat statement accordingly."
+    owner: "LeReverandNox"
+    status: done
+  - epic: 7
+    action: "Story 7.3 (Touchless Enrollment & Flag Precedence, NO-UP mode) withdrawn 2026-09-10 by LeReverandNox (PM: John) after Amelia's research into systemd's source confirmed the CTAP2 hmac-secret extension structurally prohibits disabling user-presence at GetAssertion time on real hardware — confirmed live against LeReverandNox's own Yubikeys. No code written (only the story doc, on an unmerged branch). Epic 7 scope reduced from four unlocking modes to three (UV, PIN+UP, UP); epics.md updated (Epic 7 description, FR27/NFR22/NFR23, Story 7.5 menu ACs, architecture candidate notes) via Sprint Change Proposal 2026-09-10 (story-7.3-withdrawal). GitHub Issue #81 and branch `story/7.3-touchless-enrollment-flag-precedence-no-up-mode` cleanup owned directly by LeReverandNox, outside this workflow."
     owner: "LeReverandNox"
     status: done
   - epic: 6

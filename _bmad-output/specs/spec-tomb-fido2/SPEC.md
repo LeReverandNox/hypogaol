@@ -147,7 +147,7 @@ This tool exists to serve one job: store rarely-accessed, highly sensitive mater
 - Remote or delegated unlock beyond what cryptsetup's native FIDO2 token mode offers.
 - Post-quantum-readiness features.
 - Shrinking an existing tomb — resize is grow-only for v1.
-- Exposing the full `systemd-cryptenroll` FIDO2 flag set (`--fido2-credential-algorithm`, `--fido2-salt-file`, `--fido2-parameters-in-header`, `--fido2-with-client-pin`, `--fido2-with-user-presence`) during enrollment — deferred, not declined: if built, these would be fully optional/opt-in (mirroring `systemd-cryptenroll` itself), so a non-technical user in crisis never sees or needs them, and this would not actually conflict with NFR3/NFR5 the way blanket exposure would. Deferred anyway because the need is fully speculative — no concrete user or use case has hit this wall yet. Revisit if a real need surfaces.
+- Exposing the full `systemd-cryptenroll` FIDO2 flag set (`--fido2-credential-algorithm`, `--fido2-salt-file`, `--fido2-parameters-in-header`, `--fido2-with-client-pin`) during enrollment — deferred, not declined: if built, these would be fully optional/opt-in (mirroring `systemd-cryptenroll` itself), so a non-technical user in crisis never sees or needs them, and this would not actually conflict with NFR3/NFR5 the way blanket exposure would. Deferred anyway because the need is fully speculative — no concrete user or use case has hit this wall yet. Revisit if a real need surfaces. (`--fido2-with-client-pin` itself shipped via Epic 7/CAP-26.) `--fido2-with-user-presence` is no longer listed here — Epic 7 attempted it (Story 7.3) and withdrawn it 2026-09-10 as structurally undeliverable per the FIDO2 spec's hmac-secret extension, not merely deferred.
 
 ## Success signal
 

@@ -44,19 +44,19 @@ pub trait Fido2Backend {
     /// supports clientPin satisfies "uv" via a host-typed PIN prompt instead
     /// of its own on-device check, defeating the point of requesting it.
     ///
-    /// `client_pin` is the first of two new tri-state flags Epic 7 adds
-    /// alongside `user_verification` (the second, `user_presence`, is Story
-    /// 7.2's, not this one's). `None` means the flag was not passed at all
-    /// — behavior is unchanged from before this story (today's PIN+UP
-    /// default). `Some(false)` maps to `--fido2-with-client-pin=false`,
-    /// dropping the PIN requirement and leaving only the touch/presence
-    /// check (UP-only mode). `Some(true)` maps to
-    /// `--fido2-with-client-pin=true`, requesting it explicitly on. This is
-    /// deliberately `Option<bool>`, not a plain `bool` like
+    /// `client_pin` is the tri-state flag Epic 7 adds alongside
+    /// `user_verification`. A second flag, `user_presence` (fully disabling
+    /// the touch/presence check), was investigated and withdrawn — the
+    /// FIDO2 spec's hmac-secret extension structurally prohibits it on real
+    /// hardware (see epics.md, Story 7.3 withdrawal). `None` means the flag
+    /// was not passed at all — behavior is unchanged from before this story
+    /// (today's PIN+UP default). `Some(false)` maps to
+    /// `--fido2-with-client-pin=false`, dropping the PIN requirement and
+    /// leaving only the touch/presence check (UP-only mode). `Some(true)`
+    /// maps to `--fido2-with-client-pin=true`, requesting it explicitly on.
+    /// This is deliberately `Option<bool>`, not a plain `bool` like
     /// `user_verification` — "not passed" must stay distinguishable from
-    /// "explicitly requested off", since a later story's precedence table
-    /// (`client_pin` × `user_presence`) needs to tell "user didn't ask"
-    /// apart from "user asked for the weaker mode".
+    /// "explicitly requested off".
     fn enroll_fido2_key(
         &self,
         mapper: &MapperHandle,
