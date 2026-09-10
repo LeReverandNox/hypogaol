@@ -1287,6 +1287,127 @@ fn resolve_explicit_selection(
     Ok((new_path, existing_path))
 }
 
+/// Prints Story 7.5's three-row unlocking-mode menu (AC #1), marking
+/// whichever row `state.default` selects and annotating the UV row when
+/// `state.uv_annotation` is present.
+fn print_unlocking_mode_menu(state: &UnlockingModeMenuState) {
+    println!("Choose an unlocking mode:");
+
+    let marker = |mode: UnlockingMode| {
+        if state.default == mode {
+            " (default)"
+        } else {
+            ""
+        }
+    };
+
+    match &state.uv_annotation {
+        Some(annotation) => println!(
+            "  [1] UV — unlock with this key's built-in verification (fingerprint/on-device \
+             PIN){} — {annotation}",
+            marker(UnlockingMode::Uv)
+        ),
+        None => println!(
+            "  [1] UV — unlock with this key's built-in verification (fingerprint/on-device \
+             PIN){}",
+            marker(UnlockingMode::Uv)
+        ),
+    }
+    println!(
+        "  [2] PIN+UP — unlock with a host-typed PIN plus a touch{}",
+        marker(UnlockingMode::PinUp)
+    );
+    println!(
+        "  [3] UP — unlock with a touch only, no PIN{}",
+        marker(UnlockingMode::Up)
+    );
+}
+
+/// Blocks for a 1-3 unlocking-mode selection, same hand-rolled convention as
+/// `prompt_for_device_index` (AC #6): re-prompts on unparseable/out-of-range
+/// input, hard-fails with `DomainError::AdapterFailure` on closed stdin
+/// (`Ok(0)`) rather than looping forever. Two divergences `prompt_for_device_index`
+/// doesn't need: pressing Enter with no input accepts `state.default` (a
+/// pre-selected default is pointless if the user must retype it every time),
+/// and selecting the UV row while `state.uv_selectable` is `false` re-prompts
+/// with an explanation instead of silently allowing it.
+fn prompt_for_unlocking_mode(state: &UnlockingModeMenuState) -> Result<UnlockingMode, DomainError> {
+    loop {
+        print!("Selection [1-3, Enter for default]: ");
+        let _ = io::stdout().flush();
+
+        let mut input = String::new();
+        match io::stdin().read_line(&mut input) {
+            Ok(0) => {
+                return Err(DomainError::AdapterFailure(
+                    "stdin closed while waiting for an unlocking-mode selection".to_string(),
+                ));
+            }
+            Err(_) => {
+                return Err(DomainError::AdapterFailure(
+                    "failed to read unlocking-mode selection from stdin".to_string(),
+                ));
+            }
+            Ok(_) => {}
+        }
+
+        let trimmed = input.trim();
+        let choice = if trimmed.is_empty() {
+            state.default
+        } else {
+            match trimmed.parse::<usize>() {
+                Ok(1) => UnlockingMode::Uv,
+                Ok(2) => UnlockingMode::PinUp,
+                Ok(3) => UnlockingMode::Up,
+                _ => {
+                    println!(
+                        "Please enter a number between 1 and 3, or press Enter for the default."
+                    );
+                    continue;
+                }
+            }
+        };
+
+        if choice == UnlockingMode::Uv && !state.uv_selectable {
+            println!("UV isn't available on this key right now — choose PIN+UP or UP instead.");
+            continue;
+        }
+
+        return Ok(choice);
+    }
+}
+
+/// Story 7.5's menu entry point (AC #1): probes `new_device_path`'s UV
+/// capability, prints the three-row menu, blocks for a selection, and
+/// returns it as the exact `(user_verification, client_pin)` pair
+/// `fido2_verification_args` already knows how to turn into the right
+/// `systemd-cryptenroll` flags (see its doc comment) — no changes needed
+/// there.
+fn resolve_unlocking_mode_menu(new_device_path: &str) -> Result<(bool, Option<bool>), DomainError> {
+    let uv_capable = fido2_token_supports_uv(new_device_path);
+    let state = default_unlocking_mode(&uv_capable);
+    print_unlocking_mode_menu(&state);
+    let choice = prompt_for_unlocking_mode(&state)?;
+
+    Ok(match choice {
+        UnlockingMode::Uv => (true, None),
+        UnlockingMode::PinUp => (false, None),
+        UnlockingMode::Up => (false, Some(false)),
+    })
+}
+
+/// NFR22's UP-only security warning text, extracted as its own pure function
+/// so its wording is unit-testable (Task 5) without a real terminal. Fires
+/// whenever the final resolved mode is UP-only (`client_pin == Some(false)`),
+/// independently of whether that was chosen via the menu or passed
+/// explicitly as `--client-pin=false` on the CLI — NFR22 itself is not
+/// scoped to the menu path only (see Dev Notes' "NFR22 has never been
+/// implemented").
+fn up_only_security_warning() -> &'static str {
+    "Warning: UP-only mode means anyone with physical access to this key can unlock this volume \
+     with a single touch — no PIN, no fingerprint."
+}
+
 /// Prints Task 3's device-specific enroll-time PIN warning for whichever of
 /// `new_device`/`existing_device` currently has `client_pin == true` —
 /// either, both, or neither may warrant one, since `existing_device`
