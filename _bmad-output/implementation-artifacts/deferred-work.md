@@ -1,5 +1,11 @@
 # Deferred Work
 
+## Deferred from: code review of 7-2-mount-point-creation-resilient-to-pre-existing-ownership (2026-09-10)
+
+- The collision-retry loop's 3-attempt exhaustion arm is rewritten by this story (now driven by an unprivileged re-stat instead of `io::ErrorKind`) but still has zero test coverage before or after — only a single collision is ever exercised, never a full exhaustion. [src/adapters/exec/mod.rs:236-247]
+- A narrow TOCTOU: if the leaf candidate is removed by an unrelated process between a failed privileged `mkdir` and the unprivileged `symlink_metadata` re-stat, a real collision can be misreported as a genuine, non-recoverable failure using the original mkdir's stderr text — impractical to fix without reintroducing the locale-dependent stderr parsing this story deliberately avoided. [src/adapters/exec/mod.rs:236-247]
+- The privileged `chown identity:path` shape is now duplicated three times in this file (base-dir bootstrap, this story's new leaf chown, post-mount chown) with three independently-maintained error strings — worth extracting into a shared helper, but touches pre-existing call sites beyond this story's declared low-risk, no-scope-creep intent. [src/adapters/exec/mod.rs]
+
 ## Deferred from: code review of 7-1-presence-only-enrollment-up-only-mode (2026-09-10)
 
 - `codecov.yml` addition contradicts the story's own "No new files" note and weakens patch-coverage enforcement by excluding `src/adapters/exec/mod.rs` and `src/cli/main.rs` — deferred: needed as a CI workaround, this being the first real development since codecov's introduction; already tracked as an open action item (owner: Winston). [codecov.yml]

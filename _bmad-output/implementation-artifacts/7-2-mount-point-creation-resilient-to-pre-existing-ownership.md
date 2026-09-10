@@ -4,7 +4,7 @@ baseline_commit: c50c9bc45b91be4e6d0c5e28fe190d982c919661
 
 # Story 7.2: Mount-Point Creation Resilient to Pre-Existing `/run/media` Ownership
 
-Status: review
+Status: done
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -66,6 +66,15 @@ so that unlocking works the same whether or not a desktop mount manager (udisks2
   - `cargo fmt --check` and `cargo clippy --all-targets` both clean against new code. **Baseline, verified live at `c50c9bc`: 6 warnings, all pre-existing `too_many_arguments`.** This story adds one parameter (`identity`) to `create_mount_point`, an already-narrow-signature function — unlikely to newly cross the `too_many_arguments` threshold, but confirm the post-change count explicitly rather than assuming.
   - `cargo check --test hardware` typechecks (the new scenario compiles even though it won't run without `--ignored` + root + hardware).
   - State explicitly in Completion Notes whether `make test-hardware` (root + a real environment, ideally one with udisks2/gvfs actually running) was available to run Task 7's new scenario, and what was/wasn't verified live, per this project's standing convention (Stories 4.3, 5.1, 5.2, 6.1-6.6, 7.1).
+
+### Review Findings
+
+- [x] [Review][Patch] `create_mount_point` leaves an orphaned root-owned leaf directory if `chown` fails after a successful privileged `mkdir` (or the process is killed between the two) — no cleanup is attempted, and a later unlock of the same volume then silently misclassifies that leftover as a collision and drifts onto a suffixed mount point instead of surfacing the original problem [src/adapters/exec/mod.rs:210-229] — fixed: on any chown failure, best-effort `privileged("rmdir")` the just-created leaf before returning the error
+- [x] [Review][Patch] `mount_point_candidate` panics (byte-index slice out of range / non-char-boundary) if ever called with `attempt > 1` and a `suffix` shorter than 4 bytes — currently unreachable (the only caller always passes a 16-hex-char suffix from `random_hex_suffix()`), but the contract is unenforced on a helper explicitly extracted for reuse/testability [src/adapters/exec/mod.rs:175-181] — fixed: `suffix.get(..4).unwrap_or(suffix)` instead of `&suffix[..4]`
+- [x] [Review][Patch] The new hardware scenario forces the tester's real `/run/media/<username>` to `root:root 0751` before calling `unlock::run`, then restores it via plain sequential code at the very end of the function — if `unlock::run(...).expect(...)` panics (exactly the regression this test exists to catch), the restore never runs and the base directory is left permanently root-owned, breaking the tester's real desktop automount with no recovery [tests/hardware/main.rs:1026-1114] — fixed: new `MediaBaseOwnershipGuard` RAII type (mirrors `UnlockCleanup`'s pattern) restores ownership/mode on `Drop`, which fires on panic/unwind too
+- [x] [Review][Defer] The collision-retry loop's 3-attempt exhaustion arm (`"could not find an available mount point ... after 3 attempts"`) is rewritten by this story (now driven by an unprivileged re-stat instead of `io::ErrorKind`) but still has zero test coverage before or after — only a single collision is ever exercised, never a full exhaustion — deferred, pre-existing untested gap not newly introduced by this diff's behavior [src/adapters/exec/mod.rs:236-247]
+- [x] [Review][Defer] A narrow TOCTOU: if the leaf candidate is removed by an unrelated process in the gap between a failed privileged `mkdir` and the unprivileged `symlink_metadata` re-stat, a real collision can be misreported as a genuine, non-recoverable failure using the original mkdir's stderr text — deferred, requires an external actor racing the exact same path, impractical to fix without reintroducing the locale-dependent stderr parsing this story deliberately avoided [src/adapters/exec/mod.rs:236-247]
+- [x] [Review][Defer] The privileged `chown identity:path` shape is now duplicated three times in this file (base-dir bootstrap, this story's new leaf chown, post-mount chown) with three independently-maintained error strings — worth extracting into a shared helper, but touches pre-existing call sites beyond this story's declared low-risk, no-scope-creep intent — deferred to a future cleanup pass [src/adapters/exec/mod.rs]
 
 ## Dev Notes
 
