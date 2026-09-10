@@ -1,5 +1,5 @@
 # generated: 2026-07-22
-# last_updated: 2026-09-10 (create-story: Story 7.4 story file created, ready-for-dev)
+# last_updated: 2026-09-10 (dev-story: Story 7.4 started, in-progress)
 # project: hypogaol
 # project_key: NOKEY
 # tracking_system: file-system
@@ -41,7 +41,7 @@
 # - Retrospective appends its action items to action_items; sprint-status surfaces open ones
 
 generated: 2026-07-22
-last_updated: 2026-09-10 (create-story: Story 7.4 story file created, ready-for-dev)
+last_updated: 2026-09-10 (dev-story: Story 7.4 started, in-progress)
 project: hypogaol
 project_key: NOKEY
 tracking_system: file-system
@@ -102,7 +102,7 @@ development_status:
   7-1-presence-only-enrollment-up-only-mode: done
   7-2-mount-point-creation-resilient-to-pre-existing-ownership: done
   7-3-touchless-enrollment-flag-precedence-no-up-mode: withdrawn
-  7-4-uv-capability-detection: ready-for-dev
+  7-4-uv-capability-detection: in-progress
   7-5-interactive-unlocking-mode-menu: backlog
   epic-7-retrospective: optional
 
