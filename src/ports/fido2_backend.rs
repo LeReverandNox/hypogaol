@@ -43,11 +43,26 @@ pub trait Fido2Backend {
     /// hardware's `--fido2-with-client-pin=false`) — otherwise a token that
     /// supports clientPin satisfies "uv" via a host-typed PIN prompt instead
     /// of its own on-device check, defeating the point of requesting it.
+    ///
+    /// `client_pin` is the first of two new tri-state flags Epic 7 adds
+    /// alongside `user_verification` (the second, `user_presence`, is Story
+    /// 7.2's, not this one's). `None` means the flag was not passed at all
+    /// — behavior is unchanged from before this story (today's PIN+UP
+    /// default). `Some(false)` maps to `--fido2-with-client-pin=false`,
+    /// dropping the PIN requirement and leaving only the touch/presence
+    /// check (UP-only mode). `Some(true)` maps to
+    /// `--fido2-with-client-pin=true`, requesting it explicitly on. This is
+    /// deliberately `Option<bool>`, not a plain `bool` like
+    /// `user_verification` — "not passed" must stay distinguishable from
+    /// "explicitly requested off", since a later story's precedence table
+    /// (`client_pin` × `user_presence`) needs to tell "user didn't ask"
+    /// apart from "user asked for the weaker mode".
     fn enroll_fido2_key(
         &self,
         mapper: &MapperHandle,
         metadata: KeyMetadata,
         selection: Fido2DeviceSelection,
         user_verification: bool,
+        client_pin: Option<bool>,
     ) -> Result<(), DomainError>;
 }
