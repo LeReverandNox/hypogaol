@@ -4,7 +4,7 @@ baseline_commit: c50c9bc45b91be4e6d0c5e28fe190d982c919661
 
 # Story 7.2: Mount-Point Creation Resilient to Pre-Existing `/run/media` Ownership
 
-Status: ready-for-dev
+Status: review
 
 <!-- Note: Validation is optional. Run validate-create-story for quality check before dev-story. -->
 
@@ -60,7 +60,7 @@ so that unlocking works the same whether or not a desktop mount manager (udisks2
   - Run `unlock::run` against a fresh file-backed volume (same `create::run` setup as `unlock_mounts_a_file_backed_volume_with_a_readable_writable_filesystem`) and assert it still succeeds: `assert_actually_mounted`, `assert_readable_and_writable`, `assert_owned_by_invoking_user` (proves the leaf ends up user-owned despite the root-owned parent — the exact regression this story fixes), `assert_mountpoint_under_run_media`.
   - Clean up via `UnlockCleanup` as usual. Best-effort restore the base directory's ownership back to the invoking user afterward (it's no longer touched by production code post-fix, so nothing else will fix it) — not strictly required functionally since `751 root:root` is exactly real udisks2 behavior the user already lives with, but avoids leaving the dev environment's `/run/media/<user>` in a state the tester didn't ask for beyond the test's own scope.
 
-- [ ] **Task 8: Full regression pass**
+- [x] **Task 8: Full regression pass**
   - `cargo build` succeeds.
   - `make test` (`cargo test --lib --test unit`) passes with all prior tests green. **Verified baseline live in this session at this story's `baseline_commit` (`c50c9bc`): 37 lib + 289 unit = 326 total, 0 failed.** Do not reuse this number without re-verifying if any time has passed or other work has landed since — per the standing project convention (epic-5/epic-6 retros, and Story 7.1's own corrected-baseline discrepancy) of self-reported counts drifting from reality.
   - `cargo fmt --check` and `cargo clippy --all-targets` both clean against new code. **Baseline, verified live at `c50c9bc`: 6 warnings, all pre-existing `too_many_arguments`.** This story adds one parameter (`identity`) to `create_mount_point`, an already-narrow-signature function — unlikely to newly cross the `too_many_arguments` threshold, but confirm the post-change count explicitly rather than assuming.
@@ -103,12 +103,13 @@ so that unlocking works the same whether or not a desktop mount manager (udisks2
 
 ### Agent Model Used
 
-{{agent_model_name_version}}
+Amelia (claude-sonnet-5)
 
 ### Debug Log References
 
 ### Completion Notes List
 
+- Task 8: Full regression pass, verified live this session — `cargo build` clean; `cargo test --lib --test unit` → 39 lib + 289 unit = 328 passed, 0 failed (baseline was 37+289=326, +2 for this story's `mount_point_candidate` tests); `cargo fmt --check` clean; `cargo clippy --all-targets` → 6 warnings, all pre-existing `too_many_arguments` (matches the story's documented baseline exactly — `identity`'s added parameter didn't push `create_mount_point` over the threshold); `cargo check --test hardware` typechecks. **`make test-hardware` was NOT run**: a physical FIDO2 key is present (`fido2-token -L` reports `/dev/hidraw3`), but `sudo -n true` confirms this non-interactive dev-agent session cannot supply the interactive password every privileged call (`mkdir`/`chown`/`mount`/`cryptsetup`) requires — same environment gap noted in Story 7.1's own Completion Notes. Task 7's new scenario (and the rest of the hardware suite) needs a manual `make test-hardware` run by LeReverandNox to verify live.
 - Task 7: added `unlock_mounts_successfully_when_run_media_base_is_pre_owned_by_root` to tests/hardware/main.rs, mirroring `unlock_falls_back_to_a_suffixed_mount_point_on_a_basename_collision`'s setup/cleanup shape — simulates udisks2/gvfs's `751 root:root` pre-created base (guarded against clobbering a real desktop session's live mounts), asserts unlock still succeeds and the leaf ends up user-owned, and best-effort restores the base directory's ownership afterward. `cargo check --test hardware` typechecks cleanly (not run — needs root + hardware, deferred to Task 8's regression pass).
 - Tasks 0-6: rewrote `create_mount_point` (src/adapters/exec/mod.rs) to take `identity: &InvokingIdentity` and unconditionally `sudo mkdir` + `sudo chown` the leaf mount-point directory, regardless of `base`'s ownership — no more dependence on the unprivileged `std::fs::create_dir`/`base.exists()` path. Collision detection now uses an unprivileged `symlink_metadata` re-stat instead of `io::ErrorKind::AlreadyExists` (Command output has no such equivalent). `mount()`'s own `base.exists()` bootstrap block (AC #4, base directory itself) is untouched — only its `create_mount_point` call site now threads `&identity` through. Extracted the candidate-naming sequence into a pure `mount_point_candidate` helper with 2 new inline unit tests (plain-basename-on-first-attempt, suffixed-name-shape-on-retry). `cargo build` and `cargo test --lib --test unit` green: 39 lib (+2 from this story) + 289 unit = 328 passed, 0 failed — consistent with the story's documented baseline (37+289=326) plus the 2 new tests.
 
