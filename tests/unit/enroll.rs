@@ -40,6 +40,7 @@ fn preflight_failure_short_circuits_before_any_mutating_call() {
         "backup".to_string(),
         Fido2DeviceSelection::Interactive,
         false,
+        None,
         &luks,
         &fido2,
         &fs,
@@ -76,6 +77,7 @@ fn happy_path_calls_enroll_fido2_key_exactly_once_with_the_given_key_label() {
         "backup".to_string(),
         Fido2DeviceSelection::Interactive,
         false,
+        None,
         &luks,
         &fido2,
         &fs,
@@ -105,6 +107,7 @@ fn enroll_fido2_key_failure_propagates_as_adapter_failure_untouched() {
         "backup".to_string(),
         Fido2DeviceSelection::Interactive,
         false,
+        None,
         &luks,
         &fido2,
         &fs,
@@ -131,6 +134,7 @@ fn enroll_with_user_verification_true_passes_it_to_enroll_fido2_key() {
         "backup".to_string(),
         Fido2DeviceSelection::Interactive,
         true,
+        None,
         &luks,
         &fido2,
         &fs,
@@ -153,6 +157,7 @@ fn enroll_without_the_flag_passes_false_unchanged_from_epic_2() {
         "backup".to_string(),
         Fido2DeviceSelection::Interactive,
         false,
+        None,
         &luks,
         &fido2,
         &fs,
@@ -160,6 +165,75 @@ fn enroll_without_the_flag_passes_false_unchanged_from_epic_2() {
 
     assert!(result.is_ok(), "expected Ok(()), got {result:?}");
     assert_eq!(fido2.user_verification_received(), Some(false));
+}
+
+#[test]
+fn enroll_with_client_pin_false_passes_it_to_enroll_fido2_key() {
+    let fido2 = FakeFido2Backend::passing();
+    let luks = FakeLuksBackend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let fixture = RealFixtureFile::create("client-pin-false");
+
+    let result = enroll::run(
+        &fixture.0,
+        "backup".to_string(),
+        Fido2DeviceSelection::Interactive,
+        false,
+        Some(false),
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(fido2.client_pin_received(), Some(Some(false)));
+}
+
+#[test]
+fn enroll_with_client_pin_true_passes_it_to_enroll_fido2_key() {
+    let fido2 = FakeFido2Backend::passing();
+    let luks = FakeLuksBackend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let fixture = RealFixtureFile::create("client-pin-true");
+
+    let result = enroll::run(
+        &fixture.0,
+        "backup".to_string(),
+        Fido2DeviceSelection::Interactive,
+        false,
+        Some(true),
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(fido2.client_pin_received(), Some(Some(true)));
+}
+
+#[test]
+fn enroll_without_the_client_pin_flag_passes_none_unchanged() {
+    let fido2 = FakeFido2Backend::passing();
+    let luks = FakeLuksBackend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let fixture = RealFixtureFile::create("client-pin-not-passed");
+
+    let result = enroll::run(
+        &fixture.0,
+        "backup".to_string(),
+        Fido2DeviceSelection::Interactive,
+        false,
+        None,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(fido2.client_pin_received(), Some(None));
 }
 
 #[test]
@@ -175,6 +249,7 @@ fn locks_the_target_path_as_the_second_statement_after_preflight() {
         "backup".to_string(),
         Fido2DeviceSelection::Interactive,
         false,
+        None,
         &luks,
         &fido2,
         &fs,
@@ -197,6 +272,7 @@ fn lock_contention_aborts_before_enroll_fido2_key_is_called() {
         "backup".to_string(),
         Fido2DeviceSelection::Interactive,
         false,
+        None,
         &luks,
         &fido2,
         &fs,

@@ -625,6 +625,51 @@ fn create_device_user_verification_short_and_long_forms_are_equivalent() {
     assert_eq!(format!("{short:?}"), format!("{long:?}"));
 }
 
+// --- Story 7.1: -p/--client-pin short-vs-long equivalence tests ---
+
+#[test]
+fn enroll_client_pin_short_and_long_forms_are_equivalent() {
+    let short =
+        Cli::try_parse_from(["hypogaol", "enroll", "/tmp/v", "--label", "backup", "-p"]).unwrap();
+    let long = Cli::try_parse_from([
+        "hypogaol",
+        "enroll",
+        "/tmp/v",
+        "--label",
+        "backup",
+        "--client-pin",
+    ])
+    .unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn create_file_client_pin_short_and_long_forms_are_equivalent() {
+    let short = Cli::try_parse_from([
+        "hypogaol", "create", "file", "/tmp/v", "--size", "64M", "-p",
+    ])
+    .unwrap();
+    let long = Cli::try_parse_from([
+        "hypogaol",
+        "create",
+        "file",
+        "/tmp/v",
+        "--size",
+        "64M",
+        "--client-pin",
+    ])
+    .unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
+#[test]
+fn create_device_client_pin_short_and_long_forms_are_equivalent() {
+    let short = Cli::try_parse_from(["hypogaol", "create", "device", "/tmp/v", "-p"]).unwrap();
+    let long =
+        Cli::try_parse_from(["hypogaol", "create", "device", "/tmp/v", "--client-pin"]).unwrap();
+    assert_eq!(format!("{short:?}"), format!("{long:?}"));
+}
+
 // --- Story 6.7: help-text short-alias presence tests (AC #1) ---
 
 #[test]
@@ -641,6 +686,7 @@ fn enroll_help_shows_short_aliases() {
     assert!(help.contains("-f, --fido2-device"));
     assert!(help.contains("-n, --unlock-fido2-device"));
     assert!(help.contains("-u, --user-verification"));
+    assert!(help.contains("-p, --client-pin"));
 }
 
 #[test]
@@ -676,6 +722,7 @@ fn create_file_help_shows_short_aliases() {
     assert!(help.contains("-l, --label"));
     assert!(help.contains("-d, --fido2-device"));
     assert!(help.contains("-u, --user-verification"));
+    assert!(help.contains("-p, --client-pin"));
 }
 
 #[test]
@@ -687,6 +734,7 @@ fn create_device_help_shows_short_aliases() {
     assert!(help.contains("-l, --label"));
     assert!(help.contains("-d, --fido2-device"));
     assert!(help.contains("-u, --user-verification"));
+    assert!(help.contains("-p, --client-pin"));
 }
 
 // --- Story 6.7: -h/-V untouched (AC #4) ---

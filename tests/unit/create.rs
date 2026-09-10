@@ -51,6 +51,7 @@ fn refuses_before_touching_anything_if_destination_already_exists() {
         Filesystem::Ext4,
         false,
         None,
+        None,
         false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
@@ -103,6 +104,7 @@ fn file_backed_resume_proceeds_through_the_full_happy_path_with_no_confirmation_
         Filesystem::Ext4,
         false,
         None,
+        None,
         false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
@@ -153,6 +155,7 @@ fn refuses_a_file_backed_size_below_the_minimum_before_touching_any_port() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         None,
         false,
         Fido2DeviceSelection::Interactive,
@@ -208,6 +211,7 @@ fn refuses_a_file_backed_xfs_volume_below_the_xfs_specific_minimum_before_touchi
         target,
         Filesystem::Xfs,
         false,
+        None,
         None,
         false,
         Fido2DeviceSelection::Interactive,
@@ -266,6 +270,7 @@ fn device_with_xfs_filesystem_and_capacity_below_the_xfs_specific_minimum_refuse
         Filesystem::Xfs,
         false,
         None,
+        None,
         false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
@@ -318,6 +323,7 @@ fn create_with_btrfs_filesystem_below_the_xfs_specific_minimum_still_succeeds() 
         Filesystem::Btrfs,
         false,
         None,
+        None,
         false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
@@ -349,6 +355,7 @@ fn happy_path_runs_every_port_call_once_in_order() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         None,
         false,
         Fido2DeviceSelection::Interactive,
@@ -401,6 +408,7 @@ fn create_with_user_verification_true_threads_it_to_bootstrap_enrollment() {
         Filesystem::Ext4,
         true,
         None,
+        None,
         false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
@@ -431,6 +439,7 @@ fn create_device_with_user_verification_true_threads_it_to_bootstrap_enrollment(
         Filesystem::Ext4,
         true,
         None,
+        None,
         false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
@@ -441,6 +450,67 @@ fn create_device_with_user_verification_true_threads_it_to_bootstrap_enrollment(
 
     assert!(result.is_ok(), "expected Ok(()), got {result:?}");
     assert_eq!(fido2.user_verification_received(), Some(true));
+}
+
+#[test]
+fn create_with_client_pin_false_threads_it_to_bootstrap_enrollment() {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing();
+
+    let fixture = RealFixtureFile::create("client-pin-false");
+    let target = CreateTarget::File {
+        path: fixture.0.clone(),
+        size: MIN_VOLUME_SIZE_BYTES,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        Some(false),
+        None,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(fido2.client_pin_received(), Some(Some(false)));
+}
+
+#[test]
+fn create_device_with_client_pin_false_threads_it_to_bootstrap_enrollment() {
+    let luks = FakeLuksBackend::passing();
+    let fido2 = FakeFido2Backend::passing();
+    let fs = FakeFilesystemBackend::passing().with_device_capacity(MIN_VOLUME_SIZE_BYTES * 2);
+
+    let fixture = RealFixtureFile::create("device-client-pin-false");
+    let target = CreateTarget::Device {
+        path: fixture.0.clone(),
+        size: None,
+        confirmed: true,
+    };
+
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        Some(false),
+        None,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &luks,
+        &fido2,
+        &fs,
+    );
+
+    assert!(result.is_ok(), "expected Ok(()), got {result:?}");
+    assert_eq!(fido2.client_pin_received(), Some(Some(false)));
 }
 
 #[test]
@@ -459,6 +529,7 @@ fn create_with_label_threads_it_into_the_enrolled_key_metadata() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         Some("backup".to_string()),
         false,
         Fido2DeviceSelection::Interactive,
@@ -489,6 +560,7 @@ fn create_without_label_falls_back_to_the_default_label() {
         Filesystem::Ext4,
         false,
         None,
+        None,
         false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
@@ -518,6 +590,7 @@ fn create_device_with_label_threads_it_into_the_enrolled_key_metadata() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         Some("backup".to_string()),
         false,
         Fido2DeviceSelection::Interactive,
@@ -548,6 +621,7 @@ fn create_device_without_label_falls_back_to_the_default_label() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         None,
         false,
         Fido2DeviceSelection::Interactive,
@@ -587,6 +661,7 @@ fn create_with_an_unusual_label_threads_it_through_unmodified() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         Some(label.clone()),
         false,
         Fido2DeviceSelection::Interactive,
@@ -619,6 +694,7 @@ fn enroll_failure_closes_the_mapping_and_removes_the_backing_file() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         None,
         false,
         Fido2DeviceSelection::Interactive,
@@ -671,6 +747,7 @@ fn mkfs_failure_closes_the_mapping_and_removes_the_backing_file() {
         Filesystem::Ext4,
         false,
         None,
+        None,
         false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
@@ -716,6 +793,7 @@ fn bootstrap_format_and_open_failure_removes_the_backing_file_without_closing_a_
         target,
         Filesystem::Ext4,
         false,
+        None,
         None,
         false,
         Fido2DeviceSelection::Interactive,
@@ -768,6 +846,7 @@ fn close_stale_mapping_failure_aborts_before_bootstrap_format_and_open_ever_runs
         Filesystem::Ext4,
         false,
         None,
+        None,
         false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
@@ -814,6 +893,7 @@ fn device_happy_path_with_no_size_given_uses_the_full_capacity() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         None,
         false,
         Fido2DeviceSelection::Interactive,
@@ -864,6 +944,7 @@ fn device_happy_path_with_a_size_smaller_than_capacity_uses_the_requested_size()
         target,
         Filesystem::Ext4,
         false,
+        None,
         None,
         false,
         Fido2DeviceSelection::Interactive,
@@ -916,6 +997,7 @@ fn device_with_no_size_given_and_capacity_below_the_minimum_refuses_before_any_m
         target,
         Filesystem::Ext4,
         false,
+        None,
         None,
         false,
         Fido2DeviceSelection::Interactive,
@@ -970,6 +1052,7 @@ fn device_with_existing_luks2_header_refuses_even_when_confirmed() {
         Filesystem::Ext4,
         false,
         None,
+        None,
         false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
@@ -1023,6 +1106,7 @@ fn device_backed_resume_proceeds_even_when_not_confirmed() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         None,
         false,
         Fido2DeviceSelection::Interactive,
@@ -1081,6 +1165,7 @@ fn device_backed_resume_still_enforces_size_against_capacity() {
         Filesystem::Ext4,
         false,
         None,
+        None,
         false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
@@ -1138,6 +1223,7 @@ fn device_without_confirmation_refuses_even_with_no_header() {
         Filesystem::Ext4,
         false,
         None,
+        None,
         false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
@@ -1183,6 +1269,7 @@ fn device_with_requested_size_greater_than_capacity_refuses_before_any_mutating_
         target,
         Filesystem::Ext4,
         false,
+        None,
         None,
         false,
         Fido2DeviceSelection::Interactive,
@@ -1239,6 +1326,7 @@ fn device_branch_failure_closes_the_mapping_without_removing_any_backing_file() 
         Filesystem::Ext4,
         false,
         None,
+        None,
         false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
@@ -1284,6 +1372,7 @@ fn create_with_scaffold_hooks_true_mounts_writes_templates_and_unmounts_after_mk
         target,
         Filesystem::Ext4,
         false,
+        None,
         None,
         true,
         Fido2DeviceSelection::Interactive,
@@ -1345,6 +1434,7 @@ fn create_with_scaffold_hooks_false_never_mounts_for_scaffolding() {
         Filesystem::Ext4,
         false,
         None,
+        None,
         false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
@@ -1395,6 +1485,7 @@ fn create_device_with_scaffold_hooks_true_mounts_writes_templates_and_unmounts_a
         target,
         Filesystem::Ext4,
         false,
+        None,
         None,
         true,
         Fido2DeviceSelection::Interactive,
@@ -1454,6 +1545,7 @@ fn create_device_with_scaffold_hooks_false_never_mounts_for_scaffolding() {
         Filesystem::Ext4,
         false,
         None,
+        None,
         false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
@@ -1503,6 +1595,7 @@ fn create_scaffold_hook_templates_failure_still_unmounts_before_returning_the_er
         target,
         Filesystem::Ext4,
         false,
+        None,
         None,
         true,
         Fido2DeviceSelection::Interactive,
@@ -1557,6 +1650,7 @@ fn create_scaffold_hooks_umount_failure_after_a_scaffold_failure_wraps_as_rollba
         Filesystem::Ext4,
         false,
         None,
+        None,
         true,
         Fido2DeviceSelection::Interactive,
         &no_progress,
@@ -1596,6 +1690,7 @@ fn create_scaffold_hooks_umount_failure_alone_surfaces_the_bare_umount_error() {
         Filesystem::Ext4,
         false,
         None,
+        None,
         true,
         Fido2DeviceSelection::Interactive,
         &no_progress,
@@ -1632,6 +1727,7 @@ fn locks_the_target_path_as_the_second_statement_after_preflight() {
         Filesystem::Ext4,
         false,
         None,
+        None,
         false,
         Fido2DeviceSelection::Interactive,
         &no_progress,
@@ -1663,6 +1759,7 @@ fn lock_contention_aborts_before_any_mutating_luks_or_fido2_call() {
         target,
         Filesystem::Ext4,
         false,
+        None,
         None,
         false,
         Fido2DeviceSelection::Interactive,
