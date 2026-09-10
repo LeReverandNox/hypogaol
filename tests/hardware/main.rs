@@ -993,6 +993,127 @@ fn unlock_falls_back_to_a_suffixed_mount_point_on_a_basename_collision() {
     cleanup_a.run();
 }
 
+/// Hardware-gated regression scenario for Story 7.2: simulates udisks2/gvfs
+/// pre-creating and owning `/run/media/<username>` as `751 root:root` before
+/// `unlock` ever runs — the exact real-world state that used to make the
+/// per-volume leaf mount point fail with `EACCES` (the fix's whole reason for
+/// existing). Confirms the leaf is still created and handed to the invoking
+/// user (AC #2) despite the root-owned parent, without this story's fix ever
+/// touching the parent's own ownership (AC #4).
+#[test]
+#[ignore]
+fn unlock_mounts_successfully_when_run_media_base_is_pre_owned_by_root() {
+    let username = id_output("-un");
+    let media_base = PathBuf::from(format!("/run/media/{username}"));
+
+    // Guard against clobbering a real desktop session's live mounts: only
+    // simulate the root-owned parent if the base directory is absent or
+    // already empty — never force ownership changes onto a base directory
+    // that holds real, currently-mounted content.
+    let media_base_has_real_content = media_base.exists()
+        && std::fs::read_dir(&media_base)
+            .map(|mut entries| entries.next().is_some())
+            .unwrap_or(false);
+    if media_base_has_real_content {
+        println!(
+            "Skipping unlock_mounts_successfully_when_run_media_base_is_pre_owned_by_root: {} \
+             already has real content (a live desktop session?) — refusing to touch its ownership.",
+            media_base.display()
+        );
+        return;
+    }
+
+    let mkdir = Command::new("sudo")
+        .args(["mkdir", "-p"])
+        .arg(&media_base)
+        .output()
+        .expect("failed to run sudo mkdir -p on the /run/media base");
+    assert!(
+        mkdir.status.success(),
+        "sudo mkdir -p {} failed: {}",
+        media_base.display(),
+        String::from_utf8_lossy(&mkdir.stderr)
+    );
+    let chown = Command::new("sudo")
+        .args(["chown", "root:root"])
+        .arg(&media_base)
+        .output()
+        .expect("failed to run sudo chown root:root on the /run/media base");
+    assert!(
+        chown.status.success(),
+        "sudo chown root:root {} failed: {}",
+        media_base.display(),
+        String::from_utf8_lossy(&chown.stderr)
+    );
+    let chmod = Command::new("sudo")
+        .args(["chmod", "0751"])
+        .arg(&media_base)
+        .output()
+        .expect("failed to run sudo chmod 0751 on the /run/media base");
+    assert!(
+        chmod.status.success(),
+        "sudo chmod 0751 {} failed: {}",
+        media_base.display(),
+        String::from_utf8_lossy(&chmod.stderr)
+    );
+
+    let dir = std::env::temp_dir().join("volume-fido2-hardware-test-root-owned-base");
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("failed to create scratch dir");
+    let path = dir.join("root-owned-base.img");
+
+    let adapter = ExecAdapter::default();
+    let target = CreateTarget::File {
+        path: path.clone(),
+        size: 64 * 1024 * 1024,
+    };
+    let result = create::run(
+        target,
+        Filesystem::Ext4,
+        false,
+        None,
+        None,
+        false,
+        Fido2DeviceSelection::Interactive,
+        &no_progress,
+        &adapter,
+        &adapter,
+        &adapter,
+    );
+    assert!(result.is_ok(), "create::run failed: {result:?}");
+
+    let mountpoint = unlock::run(&path, false, false, &|_| {}, &adapter, &adapter, &adapter)
+        .expect(
+            "unlock::run failed against a pre-existing root-owned /run/media base — this is \
+             the exact regression Story 7.2 fixes",
+        );
+    let name = mapping_name::mapping_name(&path).expect("failed to derive mapping name");
+    let device_node = PathBuf::from(format!("/dev/mapper/{name}"));
+    let cleanup = UnlockCleanup::new(mountpoint.clone(), name);
+
+    assert_actually_mounted(&device_node, &mountpoint);
+    assert_readable_and_writable(&mountpoint);
+    assert_owned_by_invoking_user(&mountpoint);
+    assert_mountpoint_under_run_media(&mountpoint, &path);
+
+    cleanup.run();
+
+    // Best-effort restore: production code no longer touches the base
+    // directory's ownership once it already exists, so nothing else will fix
+    // it back for the tester after this test intentionally root-owned it.
+    let uid = id_output("-u");
+    let gid = id_output("-g");
+    let _ = Command::new("sudo")
+        .arg("chown")
+        .arg(format!("{uid}:{gid}"))
+        .arg(&media_base)
+        .output();
+    let _ = Command::new("sudo")
+        .args(["chmod", "0755"])
+        .arg(&media_base)
+        .output();
+}
+
 /// Blocks on stdin until the tester presses Enter, after printing `prompt` —
 /// used only to pace a manual physical-key swap; never reads or echoes
 /// anything secret (AD-3 governs PIN/touch material, not this plain
