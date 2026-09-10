@@ -965,6 +965,31 @@ fn fido2_token_has_pin(path: &str) -> Result<bool, DomainError> {
     )))
 }
 
+/// Runs `fido2-token -I <path>` (no `-c` — never prompts) and reports
+/// whether the device supports built-in user verification (CTAP2 `uv`
+/// option), per CAP-28. Structurally identical to `fido2_token_has_pin`,
+/// with one deliberate divergence: this function's `Result` is never
+/// collapsed with `.unwrap_or(false)` anywhere. UV capability, unlike
+/// PIN-status, needs a distinguishable third outcome — a query failure must
+/// stay visibly a check-error, not silently become "not capable" — so
+/// callers (starting with Story 7.5) decide how to handle `Err` themselves.
+/// No call site exists yet in this story (see AC #4); the attribute below
+/// is expected to be removed once Story 7.5 adds one.
+#[allow(dead_code)]
+fn fido2_token_supports_uv(path: &str) -> Result<bool, DomainError> {
+    let output = Command::new("fido2-token")
+        .args(["-I", path])
+        .output()
+        .map_err(|e| DomainError::AdapterFailure(format!("failed to run fido2-token -I: {e}")))?;
+    if !output.status.success() {
+        return Err(DomainError::AdapterFailure(format!(
+            "fido2-token -I failed for {path}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )));
+    }
+    Ok(parse_uv_capable(&String::from_utf8_lossy(&output.stdout)))
+}
+
 /// Pure parser, unit-testable without a real device: `true` iff the
 /// `options:` line contains the bare token `clientPin` (CTAP2
 /// authenticatorGetInfo semantics: `clientPin` option `true` = a PIN is
@@ -977,6 +1002,23 @@ fn parse_client_pin_configured(fido2_token_info_output: &str) -> bool {
         .lines()
         .find_map(|line| line.strip_prefix("options: "))
         .map(|options| options.split(", ").any(|opt| opt == "clientPin"))
+        .unwrap_or(false)
+}
+
+/// Pure parser, unit-testable without a real device: `true` iff the
+/// `options:` line contains the bare token `uv` (CTAP2 authenticatorGetInfo
+/// semantics: `uv` option `true` = the authenticator supports built-in user
+/// verification). `fido2-token` renders a `false` boolean option with a `no`
+/// prefix instead of omitting it (e.g. `nouv`), so `nouv` (capability
+/// present but disabled) and no `uv` token at all (capability unsupported)
+/// both correctly parse as `false` — same technique as
+/// `parse_client_pin_configured`, exact token equality, never substring, so
+/// `noalwaysUv`/`pinUvAuthToken` are safe non-matches.
+fn parse_uv_capable(fido2_token_info_output: &str) -> bool {
+    fido2_token_info_output
+        .lines()
+        .find_map(|line| line.strip_prefix("options: "))
+        .map(|options| options.split(", ").any(|opt| opt == "uv"))
         .unwrap_or(false)
 }
 
