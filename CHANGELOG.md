@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.4.0](https://github.com/LeReverandNox/hypogaol/compare/hypogaol-v0.3.0...hypogaol-v0.4.0) (2026-09-11)
+
+
+### Features
+
+* **7.1:** Presence-Only Enrollment (UP-only mode) ([#76](https://github.com/LeReverandNox/hypogaol/issues/76)) ([da8d9ba](https://github.com/LeReverandNox/hypogaol/commit/da8d9baa5db332d0aea6fcc5f6f421a1c5525362))
+* **7.2:** mount-point creation resilient to pre-existing ownership ([#80](https://github.com/LeReverandNox/hypogaol/issues/80)) ([8778315](https://github.com/LeReverandNox/hypogaol/commit/8778315de55b2cac53e32df264a3be01aacb8bd1))
+* **7.4:** UV capability detection ([#83](https://github.com/LeReverandNox/hypogaol/issues/83)) ([cc2f0d5](https://github.com/LeReverandNox/hypogaol/commit/cc2f0d58859498c77457a662ad76dd9529101485))
+* **7.5:** interactive unlocking-mode menu ([#85](https://github.com/LeReverandNox/hypogaol/issues/85)) ([4d143d2](https://github.com/LeReverandNox/hypogaol/commit/4d143d2b045ae3dcc8acdab559f164ae5f3c2241))
+
 ## [0.3.0](https://github.com/LeReverandNox/hypogaol/compare/hypogaol-v0.2.0...hypogaol-v0.3.0) (2026-08-12)
 
 
