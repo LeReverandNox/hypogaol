@@ -973,9 +973,6 @@ fn fido2_token_has_pin(path: &str) -> Result<bool, DomainError> {
 /// PIN-status, needs a distinguishable third outcome — a query failure must
 /// stay visibly a check-error, not silently become "not capable" — so
 /// callers (starting with Story 7.5) decide how to handle `Err` themselves.
-/// No call site exists yet in this story (see AC #4); the attribute below
-/// is expected to be removed once Story 7.5 adds one.
-#[allow(dead_code)]
 fn fido2_token_supports_uv(path: &str) -> Result<bool, DomainError> {
     let output = Command::new("fido2-token")
         .args(["-I", path])
@@ -1020,6 +1017,54 @@ fn parse_uv_capable(fido2_token_info_output: &str) -> bool {
         .find_map(|line| line.strip_prefix("options: "))
         .map(|options| options.split(", ").any(|opt| opt == "uv"))
         .unwrap_or(false)
+}
+
+/// Story 7.5's three unlocking-mode menu rows, in the fixed display order AC
+/// #1 requires (UV, PIN+UP, UP). Doubles as the menu's parsed-selection
+/// outcome — see `resolve_unlocking_mode_menu`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UnlockingMode {
+    Uv,
+    PinUp,
+    Up,
+}
+
+/// Which row `resolve_unlocking_mode_menu` should pre-select, whether UV can
+/// be chosen at all, and what (if anything) to annotate its row with — see
+/// `default_unlocking_mode`.
+struct UnlockingModeMenuState {
+    default: UnlockingMode,
+    uv_selectable: bool,
+    uv_annotation: Option<String>,
+}
+
+/// AC #2/#3's pure default-selection logic, given `fido2_token_supports_uv`'s
+/// own three-way `Result<bool, DomainError>` outcome for the device about to
+/// be enrolled. Kept free of `println!`/`io::stdin` (Task 1) — mirrors this
+/// file's established pure-parser/I/O-wrapper split (`parse_uv_capable` vs
+/// `fido2_token_supports_uv`), so this decision is unit-testable without a
+/// real device or terminal.
+fn default_unlocking_mode(uv_capable: &Result<bool, DomainError>) -> UnlockingModeMenuState {
+    match uv_capable {
+        Ok(true) => UnlockingModeMenuState {
+            default: UnlockingMode::Uv,
+            uv_selectable: true,
+            uv_annotation: None,
+        },
+        Ok(false) => UnlockingModeMenuState {
+            default: UnlockingMode::PinUp,
+            uv_selectable: false,
+            uv_annotation: Some(
+                "unavailable — built-in verification isn't available on this token right now"
+                    .to_string(),
+            ),
+        },
+        Err(e) => UnlockingModeMenuState {
+            default: UnlockingMode::PinUp,
+            uv_selectable: false,
+            uv_annotation: Some(format!("could not check: {e}")),
+        },
+    }
 }
 
 /// Runs `fido2-token -I <path>` (no `-c` — never prompts) and parses the
@@ -1243,6 +1288,127 @@ fn resolve_explicit_selection(
     Ok((new_path, existing_path))
 }
 
+/// Prints Story 7.5's three-row unlocking-mode menu (AC #1), marking
+/// whichever row `state.default` selects and annotating the UV row when
+/// `state.uv_annotation` is present.
+fn print_unlocking_mode_menu(state: &UnlockingModeMenuState) {
+    println!("Choose an unlocking mode:");
+
+    let marker = |mode: UnlockingMode| {
+        if state.default == mode {
+            " (default)"
+        } else {
+            ""
+        }
+    };
+
+    match &state.uv_annotation {
+        Some(annotation) => println!(
+            "  [1] UV — unlock with this key's built-in verification (fingerprint/on-device \
+             PIN){} — {annotation}",
+            marker(UnlockingMode::Uv)
+        ),
+        None => println!(
+            "  [1] UV — unlock with this key's built-in verification (fingerprint/on-device \
+             PIN){}",
+            marker(UnlockingMode::Uv)
+        ),
+    }
+    println!(
+        "  [2] PIN+UP — unlock with a host-typed PIN plus a touch{}",
+        marker(UnlockingMode::PinUp)
+    );
+    println!(
+        "  [3] UP — unlock with a touch only, no PIN{}",
+        marker(UnlockingMode::Up)
+    );
+}
+
+/// Blocks for a 1-3 unlocking-mode selection, same hand-rolled convention as
+/// `prompt_for_device_index` (AC #6): re-prompts on unparseable/out-of-range
+/// input, hard-fails with `DomainError::AdapterFailure` on closed stdin
+/// (`Ok(0)`) rather than looping forever. Two divergences `prompt_for_device_index`
+/// doesn't need: pressing Enter with no input accepts `state.default` (a
+/// pre-selected default is pointless if the user must retype it every time),
+/// and selecting the UV row while `state.uv_selectable` is `false` re-prompts
+/// with an explanation instead of silently allowing it.
+fn prompt_for_unlocking_mode(state: &UnlockingModeMenuState) -> Result<UnlockingMode, DomainError> {
+    loop {
+        print!("Selection [1-3, Enter for default]: ");
+        let _ = io::stdout().flush();
+
+        let mut input = String::new();
+        match io::stdin().read_line(&mut input) {
+            Ok(0) => {
+                return Err(DomainError::AdapterFailure(
+                    "stdin closed while waiting for an unlocking-mode selection".to_string(),
+                ));
+            }
+            Err(_) => {
+                return Err(DomainError::AdapterFailure(
+                    "failed to read unlocking-mode selection from stdin".to_string(),
+                ));
+            }
+            Ok(_) => {}
+        }
+
+        let trimmed = input.trim();
+        let choice = if trimmed.is_empty() {
+            state.default
+        } else {
+            match trimmed.parse::<usize>() {
+                Ok(1) => UnlockingMode::Uv,
+                Ok(2) => UnlockingMode::PinUp,
+                Ok(3) => UnlockingMode::Up,
+                _ => {
+                    println!(
+                        "Please enter a number between 1 and 3, or press Enter for the default."
+                    );
+                    continue;
+                }
+            }
+        };
+
+        if choice == UnlockingMode::Uv && !state.uv_selectable {
+            println!("UV isn't available on this key right now — choose PIN+UP or UP instead.");
+            continue;
+        }
+
+        return Ok(choice);
+    }
+}
+
+/// Story 7.5's menu entry point (AC #1): probes `new_device_path`'s UV
+/// capability, prints the three-row menu, blocks for a selection, and
+/// returns it as the exact `(user_verification, client_pin)` pair
+/// `fido2_verification_args` already knows how to turn into the right
+/// `systemd-cryptenroll` flags (see its doc comment) — no changes needed
+/// there.
+fn resolve_unlocking_mode_menu(new_device_path: &str) -> Result<(bool, Option<bool>), DomainError> {
+    let uv_capable = fido2_token_supports_uv(new_device_path);
+    let state = default_unlocking_mode(&uv_capable);
+    print_unlocking_mode_menu(&state);
+    let choice = prompt_for_unlocking_mode(&state)?;
+
+    Ok(match choice {
+        UnlockingMode::Uv => (true, None),
+        UnlockingMode::PinUp => (false, None),
+        UnlockingMode::Up => (false, Some(false)),
+    })
+}
+
+/// NFR22's UP-only security warning text, extracted as its own pure function
+/// so its wording is unit-testable (Task 5) without a real terminal. Fires
+/// whenever the final resolved mode is UP-only (`client_pin == Some(false)`),
+/// independently of whether that was chosen via the menu or passed
+/// explicitly as `--client-pin=false` on the CLI — NFR22 itself is not
+/// scoped to the menu path only (see Dev Notes' "NFR22 has never been
+/// implemented").
+fn up_only_security_warning() -> &'static str {
+    "Warning: UP-only mode means anyone with physical access to this key can unlock this volume \
+     with a single touch — no PIN, no fingerprint."
+}
+
 /// Prints Task 3's device-specific enroll-time PIN warning for whichever of
 /// `new_device`/`existing_device` currently has `client_pin == true` —
 /// either, both, or neither may warrant one, since `existing_device`
@@ -1327,7 +1493,7 @@ fn resolve_device_selection(
     need_existing: bool,
     user_verification: bool,
     client_pin: Option<bool>,
-) -> Result<(Fido2Device, Option<Fido2Device>), DomainError> {
+) -> Result<(Fido2Device, Option<Fido2Device>, bool, Option<bool>), DomainError> {
     let (new_device, existing_device) = match selection {
         Fido2DeviceSelection::Interactive => resolve_interactive_selection(need_existing)?,
         Fido2DeviceSelection::Explicit { new, existing } => {
@@ -1363,6 +1529,32 @@ fn resolve_device_selection(
         }
     };
 
+    // AC #5: the menu only runs when neither flag was passed explicitly —
+    // if either was, keep the passed-in values unchanged and skip it
+    // entirely. Shadows the parameters with the resolved result so both this
+    // function's own `print_enroll_pin_warning` call below and
+    // `enroll_fido2_key`'s downstream `fido2_verification_args` call sites
+    // see what was actually chosen, not just what was passed on the CLI.
+    let (user_verification, client_pin) = if !user_verification && client_pin.is_none() {
+        resolve_unlocking_mode_menu(&new_device.path)?
+    } else {
+        (user_verification, client_pin)
+    };
+
+    // Independent of `print_enroll_pin_warning` below (that's about
+    // PIN-prompt behavior, this is NFR22's weaker-guarantee warning) — both
+    // can fire for the same enrollment. Covers both the menu-selected UP row
+    // and an explicit `--client-pin=false` CLI flag that skipped the menu
+    // entirely, since both converge on the same resolved `client_pin` value
+    // right here. Gated on `!user_verification`, same precedence as
+    // `print_enroll_pin_warning` below: `fido2_verification_args` forces
+    // `--fido2-with-client-pin=false` whenever `user_verification` is true
+    // (AD-16), so `--user-verification --client-pin=false` together resolve
+    // to UV, not UP-only — the warning must not fire for that combination.
+    if !user_verification && client_pin == Some(false) {
+        println!("{}", up_only_security_warning());
+    }
+
     print_enroll_pin_warning(
         &new_device,
         existing_device.as_ref(),
@@ -1370,7 +1562,7 @@ fn resolve_device_selection(
         client_pin,
     );
 
-    Ok((new_device, existing_device))
+    Ok((new_device, existing_device, user_verification, client_pin))
 }
 
 /// `--fido2-with-user-verification` is always passed explicitly (AD-16 — see
@@ -2216,12 +2408,13 @@ impl Fido2Backend for ExecAdapter {
         // needs filling when a transient passphrase exists (create's
         // bootstrap-enroll call); a standalone enroll also needs an
         // "existing key" role to authenticate against.
-        let (new_device, existing_device) = resolve_device_selection(
-            &selection,
-            !has_transient_passphrase,
-            user_verification,
-            client_pin,
-        )?;
+        let (new_device, existing_device, user_verification, client_pin) =
+            resolve_device_selection(
+                &selection,
+                !has_transient_passphrase,
+                user_verification,
+                client_pin,
+            )?;
 
         let passphrase = self.transient_passphrase.borrow_mut().take();
 
@@ -3599,6 +3792,45 @@ mod tests {
     fn parse_uv_capable_false_for_empty_or_malformed_input() {
         assert!(!parse_uv_capable(""));
         assert!(!parse_uv_capable("not a real fido2-token -I output at all"));
+    }
+
+    #[test]
+    fn default_unlocking_mode_uv_capable_selects_uv_with_no_annotation() {
+        let state = default_unlocking_mode(&Ok(true));
+        assert_eq!(state.default, UnlockingMode::Uv);
+        assert!(state.uv_selectable);
+        assert_eq!(state.uv_annotation, None);
+    }
+
+    #[test]
+    fn default_unlocking_mode_not_uv_capable_falls_back_to_pin_up_with_annotation() {
+        let state = default_unlocking_mode(&Ok(false));
+        assert_eq!(state.default, UnlockingMode::PinUp);
+        assert!(!state.uv_selectable);
+        assert_eq!(
+            state.uv_annotation.as_deref(),
+            Some("unavailable — built-in verification isn't available on this token right now")
+        );
+    }
+
+    #[test]
+    fn default_unlocking_mode_check_error_falls_back_to_pin_up_with_error_in_annotation() {
+        let state = default_unlocking_mode(&Err(DomainError::AdapterFailure(
+            "fido2-token -I failed for /dev/hidraw0: boom".to_string(),
+        )));
+        assert_eq!(state.default, UnlockingMode::PinUp);
+        assert!(!state.uv_selectable);
+        let annotation = state.uv_annotation.expect("expected an annotation");
+        assert!(annotation.starts_with("could not check: "));
+        assert!(annotation.contains("boom"));
+    }
+
+    #[test]
+    fn up_only_security_warning_names_the_weaker_guarantee() {
+        let warning = up_only_security_warning();
+        assert!(warning.starts_with("Warning: "));
+        assert!(warning.contains("no PIN"));
+        assert!(warning.contains("no fingerprint"));
     }
 
     #[test]

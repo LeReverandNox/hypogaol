@@ -1,5 +1,12 @@
 # Deferred Work
 
+## Deferred from: code review of 7-5-interactive-unlocking-mode-menu (2026-09-11)
+
+- Redundant `fido2-token -I` subprocess call for the UV probe on top of prior device-enrichment queries — no caching/reuse across the near-identical calls on the common no-flags path. [src/adapters/exec/mod.rs:1329]
+- `resolve_device_selection`'s widened return is a bare 4-tuple (`Fido2Device, Option<Fido2Device>, bool, Option<bool>`) rather than a labeled struct — the story's own Task 3 wording explicitly floated the struct alternative before choosing the tuple. [src/adapters/exec/mod.rs:1492]
+- `prompt_for_unlocking_mode` duplicates `prompt_for_device_index`'s print/flush/read_line/EOF-handling boilerplate nearly verbatim instead of extracting a shared helper — low-risk reuse opportunity not taken. [src/adapters/exec/mod.rs:1313]
+- Completion Notes disclose the `Explicit`-selection stdin-blocking UX change (scripted `--fido2-device` with no mode flag now blocks) but omit that `create`'s default single-key bootstrap path is now also interactive by default with neither flag passed — same class of behavior change, undisclosed. Spec-compliant (AC#5), documentation completeness gap only. [src/adapters/exec/mod.rs:1531]
+
 ## Deferred from: code review of 7-4-uv-capability-detection (2026-09-10)
 
 - `fido2_token_supports_uv` collapses a malformed-but-successful `fido2-token -I` response (exit 0, stdout with no `options:` line) into `Ok(false)` via `parse_uv_capable`'s `unwrap_or(false)`, silently merging "couldn't determine" into "not capable" — the exact ambiguity AC #3's three-way distinction exists to prevent, just reached through the parse layer instead of the exec layer. Inherited from `parse_client_pin_configured`'s identical technique (harmless in practice since conformant `fido2-token` output always includes an `options:` line on success); a real fix needs an architecture call on whether the pure parser should signal ambiguity at all — flag for Story 7.5. [src/adapters/exec/mod.rs:979-991, 1017-1023]
